@@ -63,10 +63,10 @@ def elliptic_envelope_peak(norm_data, root, canvas):
     plt.plot(np.array(range(len(pico_norm_data))).reshape(-1, 1)[y_res], (pico_norm_data - res)[y_res], "o")
     ax = plt.gca()
     if canvas is not None:
-        canvas.get_tk_widget().pack_forget()
+        canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
 def peak_caller(data, rise_percent, fall_percent, max_lookback, max_lookahead):
     peaks = []
@@ -138,10 +138,10 @@ def smvr_peak(data, root, canvas):
     mean2 = (380 - 310) / 2
     ax = plt.gca()
     if canvas is not None:
-        canvas.get_tk_widget().pack_forget()
+        canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
 def clf_peak(data, root, canvas):
     data_sel = data[:, 15]
@@ -160,10 +160,10 @@ def clf_peak(data, root, canvas):
     mean2 = (380 - 310) / 2
     ax = plt.gca()
     if canvas is not None:
-        canvas.get_tk_widget().pack_forget()
+        canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
 def isolation_forest_peak(data, root, canvas):
     data_sel = data[:, 15]
@@ -182,10 +182,10 @@ def isolation_forest_peak(data, root, canvas):
     mean2 = (380 - 310) / 2
     ax = plt.gca()
     if canvas is not None:
-        canvas.get_tk_widget().pack_forget()
+        canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
 def linear_model_peak(data,root, canvas):
     data_sel = data[:, 15]
@@ -204,10 +204,10 @@ def linear_model_peak(data,root, canvas):
     mean2 = (380 - 310) / 2 
     ax = plt.gca()
     if canvas is not None:
-        canvas.get_tk_widget().pack_forget()
+        canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
 def lasso_peak(data,root, canvas):
     data_sel = data[:, 15]
@@ -233,10 +233,10 @@ def lasso_peak(data,root, canvas):
     mean2 = (380 - 310) / 2
     ax = plt.gca()
     if canvas is not None:
-        canvas.get_tk_widget().pack_forget()
+        canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
 def programflow(data):
     data = loadData(data)
