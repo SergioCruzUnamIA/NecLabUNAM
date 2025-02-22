@@ -46,7 +46,7 @@ def plot_normalized_data(data):
     print(data.shape)
     plt.show()
 
-def elliptic_envelope_peak(norm_data, root):
+def elliptic_envelope_peak(norm_data, root, canvas):
     pico_norm_data = norm_data[:,15]
 
     reg = ElasticNet().fit(np.array(range(len(pico_norm_data))).reshape(-1, 1), pico_norm_data)
@@ -62,6 +62,8 @@ def elliptic_envelope_peak(norm_data, root):
     plt.plot(np.array(range(len(pico_norm_data))).reshape(-1, 1), pico_norm_data - res)
     plt.plot(np.array(range(len(pico_norm_data))).reshape(-1, 1)[y_res], (pico_norm_data - res)[y_res], "o")
     ax = plt.gca()
+    if canvas is not None:
+        canvas.get_tk_widget().pack_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
     canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
@@ -112,7 +114,7 @@ def peak_caller(data, rise_percent, fall_percent, max_lookback, max_lookahead):
     plt.show()
     return peaks
 
-def smvr_peak(data):
+def smvr_peak(data, root, canvas):
     data_sel = data[:, 15]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
@@ -129,14 +131,19 @@ def smvr_peak(data):
     # y_res = list(y_pred).index(-1)
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
 
+    fig, ax = plt.subplots()
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res - 350)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], (data_sel - res)[y_res], "o")
     mean2 = (380 - 310) / 2
     ax = plt.gca()
-    plt.show()
+    if canvas is not None:
+        canvas.get_tk_widget().pack_forget()
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
 
-def clf_peak(data):
+def clf_peak(data, root, canvas):
     data_sel = data[:, 15]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
@@ -146,14 +153,19 @@ def clf_peak(data):
     # y_res = list(y_pred).index(-1)
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
 
+    fig, ax = plt.subplots()
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res - 350)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], (data_sel - res)[y_res], "o")
     mean2 = (380 - 310) / 2
     ax = plt.gca()
-    plt.show()
+    if canvas is not None:
+        canvas.get_tk_widget().pack_forget()
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
 
-def isolation_forest_peak(data):
+def isolation_forest_peak(data, root, canvas):
     data_sel = data[:, 15]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
@@ -163,15 +175,19 @@ def isolation_forest_peak(data):
     # y_res = list(y_pred).index(-1)
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
 
+    fig, ax = plt.subplots()
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res - 350)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], (data_sel - res)[y_res], "o")
     mean2 = (380 - 310) / 2
     ax = plt.gca()
+    if canvas is not None:
+        canvas.get_tk_widget().pack_forget()
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
 
-    plt.show()
-
-def linear_model_peak(data):
+def linear_model_peak(data,root, canvas):
     data_sel = data[:, 15]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
@@ -181,14 +197,19 @@ def linear_model_peak(data):
     # y_res = list(y_pred).index(-1)
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
 
+    fig, ax = plt.subplots()
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res - 350)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], (data_sel - res)[y_res], "o")
     mean2 = (380 - 310) / 2 
     ax = plt.gca()
-    plt.show()
+    if canvas is not None:
+        canvas.get_tk_widget().pack_forget()
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
 
-def lasso_peak(data):
+def lasso_peak(data,root, canvas):
     data_sel = data[:, 15]
     reg = Lasso().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
@@ -205,12 +226,17 @@ def lasso_peak(data):
     # y_res = list(y_pred).index(-1)
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
 
+    fig, ax = plt.subplots()
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res - 350)
     plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], (data_sel - res)[y_res], "o")
     mean2 = (380 - 310) / 2
     ax = plt.gca()
-    plt.show()
+    if canvas is not None:
+        canvas.get_tk_widget().pack_forget()
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
 
 def programflow(data):
     data = loadData(data)
