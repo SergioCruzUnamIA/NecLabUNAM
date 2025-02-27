@@ -10,8 +10,6 @@ from sklearn import linear_model
 from tkinter import *
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-#DATA = "data.npy"
-
 def loadData(data):
     data = np.load(data)
     rs = np.random.RandomState(0)
@@ -243,22 +241,3 @@ def programflow(data):
     normalizedData = normalizeData(data)
     #plot_normalized_data(normalizedData)
     return normalizedData
-
-#elliptic_envelope_peak(programflow(DATA))
-
-#rise = 5
-#fall = 5
-#max_lookback = 10
-#max_lookahead = 10
-#detrended_data = programflow(DATA)
-#peak_caller(detrended_data, rise, fall, max_lookback, max_lookahead)
-
-#smvr_peak(programflow(DATA))
-
-#clf_peak(programflow(DATA))
-
-#isolation_forest_peak(programflow(DATA))
-
-#linear_model_peak(programflow(DATA))
-
-#lasso_peak(programflow(DATA))
