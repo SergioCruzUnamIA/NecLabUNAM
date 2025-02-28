@@ -1,8 +1,8 @@
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"  #limita num de threads
 from pyometiff import OMETIFFReader
 from tkinter import *
-from pico_calculators import *
+from interface3_helpers import *
 import tkinter as tk
 import numpy as np
 from tkinter import PhotoImage, Grid, filedialog
@@ -40,41 +40,9 @@ barra_menus.add_cascade(menu=menu_archivo, label="Archivo")
 menu_imagen = tk.Menu(barra_menus, tearoff=False)
 barra_menus.add_cascade(menu=menu_imagen, label="Imagen")
 
-def openfile():
-    global data
-    filename = filedialog.askopenfilename(parent=window,title="Abrir archivo",filetypes=[("Numpy files", "*.npy")])
-    data = programflow(filename)
-    plot_data(data)
-    menu_picos.entryconfig("Pico 1", command=lambda:elliptic_envelope_peak(data, window, canvas), state=NORMAL)
-    #menu_pico.entryconfig("Pico 2", command=lambda:peak_caller(data, window), state=NORMAL) TODO:ver como implementar
-    menu_picos.entryconfig("Pico 3", command=lambda:smvr_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Pico 4", command=lambda:clf_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Pico 5", command=lambda:isolation_forest_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Pico 6", command=lambda:linear_model_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Pico 7", command=lambda:lasso_peak(data, window, canvas), state=NORMAL)
-
-def plot_data(data):
-    global canvas
-    fig, ax = plt.subplots()
-    plt.plot(np.array(range(len(data[:, 15]))).reshape(-1, 1), data[:, 15])
-    ax = plt.gca()
-    if canvas is not None:
-        canvas.get_tk_widget().grid_forget()
-    canvas = FigureCanvasTkAgg(fig, master=window)
-    canvas.draw()
-    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
-
+# Create "Picos" menu
 menu_picos = Menu(barra_menus)
-menu_picos.add_command(label='Abrir Datos', command=openfile)
-menu_picos.add_separator()
-menu_picos.add_command(label='Pico 1', command=None, state=DISABLED)
-menu_picos.add_command(label='Pico 2', command=None, state=DISABLED)
-menu_picos.add_command(label='Pico 3', command=None, state=DISABLED)
-menu_picos.add_command(label='Pico 4', command=None, state=DISABLED)
-menu_picos.add_command(label='Pico 5', command=None, state=DISABLED)
-menu_picos.add_command(label='Pico 6', command=None, state=DISABLED)
-menu_picos.add_command(label='Pico 7', command=None, state=DISABLED)
-barra_menus.add_cascade(menu=menu_picos, label="Picos")
+barra_menus.add_cascade(menu=menu_picos, label="Visualización")
 
 # Initialize global variables for image data
 img_original = []
@@ -230,24 +198,67 @@ menu_imagen.add_command(
     compound=tk.LEFT
 )
 
+# Add commands to the "Picos" menu
+menu_picos.add_command(
+    label='Abrir Datos', 
+    command=lambda:openfile(window, menu_picos, canvas, button1), 
+    state=NORMAL
+)
+menu_picos.add_separator()
+menu_picos.add_command(
+    label='Elliptic Envelope', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Peak Caller', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Local Outlier Factor', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Pico 4', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Isolation Forest', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Linear Model', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Pico 7', 
+    command=None, 
+    state=DISABLED
+)
+
 # Create and configure the main frame
 frame = tk.Frame(master=window, relief=tk.RAISED, borderwidth=1)
 frame.grid(row=0, column=0, sticky='nsew')
-frame.pack_propagate(0)
+#frame.pack_propagate(0)
 Grid.rowconfigure(window, 0, weight=1)
 Grid.columnconfigure(window, 0, weight=1)
 label = tk.Label(master=frame)
-label.pack(fill=tk.BOTH, expand=True)
+#label.pack(fill=tk.BOTH, expand=True)
 
 # Load and display the initial image
-pil_img = Image.open('input_image_7.png')
-width_pil, height_pil = pil_img.size
-ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
-pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
-image_ = ImageTk.PhotoImage(pil_img)
-label.configure(image=image_)
-label.image = image_
-label.update()
+#pil_img = Image.open('input_image_7.png')
+#width_pil, height_pil = pil_img.size
+#ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
+#pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
+#image_ = ImageTk.PhotoImage(pil_img)
+#label.configure(image=image_)
+#label.image = image_
+#label.update()
 
 # Create and configure the second frame for the slider
 frame2 = tk.Frame(master=window, relief=tk.RAISED, borderwidth=1)
@@ -257,6 +268,7 @@ Grid.rowconfigure(window, 1, weight=1)
 Grid.columnconfigure(window, 0, weight=1)
 scale1 = tk.Scale(master=frame2, from_=0, to=500, orient="horizontal", length=500, command=slider_presionado)
 scale1.pack()
-
+button1 = tk.Button(master=frame2, text="Guardar", command=save, state=DISABLED)
+button1.pack()
 # Start the main event loop
 window.mainloop()
