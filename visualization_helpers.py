@@ -18,7 +18,19 @@ def openfile(window, menu_picos, canvas, button1):
     menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data, window, canvas), state=NORMAL)
     menu_picos.entryconfig("Linear Model", command=lambda:linear_model_peak(data, window, canvas), state=NORMAL)
     menu_picos.entryconfig("Pico 7", command=lambda:lasso_peak(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlation Pearson", command=lambda:actually_plot_corr(data,correlation_pearson(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlation Kendall", command=lambda:actually_plot_corr(data,correlation_kendall(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlation Spearman", command=lambda:actually_plot_corr(data,correlation_spearman(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Dendogram", command=lambda:actually_plot_dendo(data, window, canvas), state=NORMAL)
     button1.config(state=NORMAL)
+
+#def correlation(data, window, menu_picos, canvas):
+#    menu_picos.entryconfig("Correlation Pearson", command=lambda:actually_plot_corr(data,correlation_pearson(data),window,canvas), state=NORMAL)
+#    menu_picos.entryconfig("Correlation Kendall", command=lambda:actually_plot_corr(data,correlation_kendall(data),window,canvas), state=NORMAL)
+#    menu_picos.entryconfig("Correlation Spearman", command=actually_plot_corr(data,correlation_spearman(data),window,canvas), state=NORMAL)
+
+#def dendograms(data, window, menu_picos, canvas):
+#    menu_picos.entryconfig("Dendogram", command=lambda:actually_plot_dendo(), state=NORMAL)
 
 def plot_data(data, window, canvas):
     fig, ax = plt.subplots()

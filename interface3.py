@@ -2,7 +2,7 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"  #limita num de threads
 from pyometiff import OMETIFFReader
 from tkinter import *
-from interface3_helpers import *
+from visualization_helpers import *
 import tkinter as tk
 import numpy as np
 from tkinter import PhotoImage, Grid, filedialog
@@ -18,6 +18,7 @@ window = tk.Tk()
 images = {}
 data = None
 canvas = None
+corr = None
 
 window.title("NecLab")
 window.tk.call('tk', 'windowingsystem') 
@@ -237,6 +238,28 @@ menu_picos.add_command(
 )
 menu_picos.add_command(
     label='Pico 7', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_separator()
+menu_picos.add_command(
+    label='Correlation Pearson', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Correlation Kendall', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Correlation Spearman', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_separator()
+menu_picos.add_command(
+    label='Dendogram', 
     command=None, 
     state=DISABLED
 )
