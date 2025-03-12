@@ -8,12 +8,8 @@ def initialize_visualization(window, menu_picos, canvas):
     data = normalize_data(filename)
     _plot_data(data, window, canvas)
 
-    rise = 5
-    fall = 5
-    max_lookahead = 10
-    max_lookback = 10
-    menu_picos.entryconfig("Elliptic Envelope", command=lambda:elliptic_envelope_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Peak Caller", command=lambda:peak_caller(data, rise, fall, max_lookahead, max_lookback, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Elliptic Envelope", command=lambda:elliptic_envelope_peak(data), state=NORMAL)
+    menu_picos.entryconfig("Peak Caller", command=lambda:actual_peak_caller(data), state=NORMAL)
     menu_picos.entryconfig("Local Outlier Factor", command=lambda:local_outlier_factor_peak(data), state=NORMAL)
     menu_picos.entryconfig("Pico 4", command=lambda:clf_peak(data), state=NORMAL)
     menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data), state=NORMAL)

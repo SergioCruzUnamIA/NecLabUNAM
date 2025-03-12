@@ -12,6 +12,7 @@ from tkinter import filedialog as fd
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from functools import partial
+from tkinter import messagebox
 
 # Initialize the main window
 window = tk.Tk()
@@ -297,6 +298,12 @@ scale1 = tk.Scale(master=frame2, from_=0, to=500, orient="horizontal", length=50
 scale1.pack()
 #button1 = tk.Button(master=frame2, text="Guardar", command=save, state=DISABLED)
 #button1.pack()
+
+def on_closing():
+    if messagebox.askokcancel("Quit", "Do you want to quit?"):
+        window.destroy()
+
+window.protocol("WM_DELETE_WINDOW", on_closing)
 
 # Start the main event loop
 window.mainloop()
