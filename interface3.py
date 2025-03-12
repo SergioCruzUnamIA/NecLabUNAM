@@ -29,6 +29,9 @@ width = window.winfo_screenwidth() * 0.8
 height = window.winfo_screenheight() * 0.8
 window.geometry("%dx%d" % (width, height))
 
+window.lift()
+window.focus_force()
+
 # Create menu bar
 barra_menus = Menu(window)
 window.config(menu=barra_menus)
