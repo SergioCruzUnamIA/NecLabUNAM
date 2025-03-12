@@ -202,7 +202,7 @@ menu_imagen.add_command(
 # Add commands to the "Picos" menu
 menu_picos.add_command(
     label='Abrir Datos', 
-    command=lambda:openfile(window, menu_picos, canvas, button1), 
+    command=lambda:initialize_visualization(window, menu_picos, canvas), 
     state=NORMAL
 )
 menu_picos.add_separator()
@@ -267,21 +267,22 @@ menu_picos.add_command(
 # Create and configure the main frame
 frame = tk.Frame(master=window, relief=tk.RAISED, borderwidth=1)
 frame.grid(row=0, column=0, sticky='nsew')
-#frame.pack_propagate(0)
+frame.pack_propagate(0)
 Grid.rowconfigure(window, 0, weight=1)
 Grid.columnconfigure(window, 0, weight=1)
 label = tk.Label(master=frame)
-#label.pack(fill=tk.BOTH, expand=True)
+label.pack(fill=tk.BOTH, expand=True)
+window.focus()
 
 # Load and display the initial image
-#pil_img = Image.open('input_image_7.png')
-#width_pil, height_pil = pil_img.size
-#ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
-#pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
-#image_ = ImageTk.PhotoImage(pil_img)
-#label.configure(image=image_)
-#label.image = image_
-#label.update()
+pil_img = Image.open('input_image_7.png')
+width_pil, height_pil = pil_img.size
+ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
+pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
+image_ = ImageTk.PhotoImage(pil_img)
+label.configure(image=image_)
+label.image = image_
+label.update()
 
 # Create and configure the second frame for the slider
 frame2 = tk.Frame(master=window, relief=tk.RAISED, borderwidth=1)
@@ -291,7 +292,8 @@ Grid.rowconfigure(window, 1, weight=1)
 Grid.columnconfigure(window, 0, weight=1)
 scale1 = tk.Scale(master=frame2, from_=0, to=500, orient="horizontal", length=500, command=slider_presionado)
 scale1.pack()
-button1 = tk.Button(master=frame2, text="Guardar", command=save, state=DISABLED)
-button1.pack()
+#button1 = tk.Button(master=frame2, text="Guardar", command=save, state=DISABLED)
+#button1.pack()
+
 # Start the main event loop
 window.mainloop()
