@@ -205,7 +205,7 @@ menu_imagen.add_command(
 
 # Add commands to the "Picos" menu
 menu_picos.add_command(
-    label='Abrir Datos', 
+    label='Open File', 
     command=lambda:initialize_visualization(window, menu_picos, canvas), 
     state=NORMAL
 )
@@ -226,7 +226,7 @@ menu_picos.add_command(
     state=DISABLED
 )
 menu_picos.add_command(
-    label='Pico 4', 
+    label='Peak Function 4', 
     command=None, 
     state=DISABLED
 )
@@ -241,7 +241,7 @@ menu_picos.add_command(
     state=DISABLED
 )
 menu_picos.add_command(
-    label='Pico 7', 
+    label='Peak Function 7', 
     command=None, 
     state=DISABLED
 )

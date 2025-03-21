@@ -195,6 +195,12 @@ def create_visualization_window():
     return visualization_window
 
 def update_peak_caller(data_sel, *args):
+    def update_graph():
+        new_rise_percent = spinval_rise.get()
+        new_fall_percent = spinval_fall.get()
+        new_max_lookahead = spinval_lookahead.get()
+        new_max_lookback = spinval_lookback.get()
+
     original_data, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args
     fig, ax = plt.subplots()
     plt.plot(data_sel, label='Data')
@@ -222,9 +228,9 @@ def update_peak_caller(data_sel, *args):
     update_button = tk.Button(
         peak_caller_frame, 
         text="Update Graph", 
-        command=lambda:(peak_caller(original_data, int(spinbox_rise.get()), int(spinbox_fall.get()), int(spinbox_lookback.get()), int(spinbox_lookahead.get())),window.destroy())
+        command=lambda:(peak_caller(original_data, int(spinbox_rise.get()), int(spinbox_fall.get()), int(spinbox_lookback.get()), int(spinbox_lookahead.get())),window.destroy(), update_graph)
     )
-
+    
     peak_caller_frame.grid(row=0, column=3, sticky='nsew')
     label_rise.grid(row=0,column=0)
     spinbox_rise.grid(row=0,column=1)
