@@ -1,8 +1,10 @@
 import os
 os.environ["OMP_NUM_THREADS"] = "1"  #limita num de threads
 from pyometiff import OMETIFFReader
+from image_loader import load_ometiff_image, process_image_slice
 from tkinter import *
 from visualization_helpers import *
+from image_processing import *
 import tkinter as tk
 import numpy as np
 from tkinter import PhotoImage, Grid, filedialog
@@ -51,57 +53,47 @@ img_array = []
 
 def archivo_nuevo_presionado(event=None):
     """
-    Open a new OME-TIFF file and load the image data.
+    Abre un archivo OME-TIFF y carga los datos usando el módulo image_loader.
     """
-    global img_array
-    global img_original
-    filename = fd.askopenfilename()
-    reader = OMETIFFReader(fpath=filename)
-    img_original, metadata, xml_metadata = reader.read()
+    global img_original, img_array
+    # Llama a la función del módulo para cargar la imagen
+    img_original, metadata, xml_metadata = load_ometiff_image()
+    if img_original is None:
+        return  # Si se canceló la selección
+
     img_array = img_original.copy()
     print(img_array.shape)
     scale1.configure(to=img_array.shape[0] - 1)
     num_im = scale1.get()
-    pil_img = Image.fromarray(img_array[num_im,:,:])
-
-    if pil_img.mode != 'RGB':
-        pil_img = pil_img.convert('RGB')
-    width_pil, height_pil = pil_img.size
-    ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
-    pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)))
+    # Usa la función del módulo para procesar la capa seleccionada
+    pil_img = process_image_slice(img_array, num_im, width, height)
     image_ = ImageTk.PhotoImage(pil_img)
     label.configure(image=image_)
     label.image = image_
     label.update()
 
 def auto_contraste_presionado(event=None):
-    """
-    Apply auto contrast to the image.
-    """
-    for i in range(img_array.shape[0]):
-        im_pil = Image.fromarray(img_array[i,:,:])
-        if im_pil.mode != 'RGB':
-            im_pil = im_pil.convert('RGB')
-        im2 = ImageOps.autocontrast(im_pil, cutoff=2, ignore=2).convert('L')
-        img_array[i,:,:] = np.array(im2)
+    global img_array
+    # Llamamos a la función auto_contrast 
+    img_array = auto_contrast(img_array)
     update_image()
 
+
 def Histogram():
-    """
-    Display the histogram of the image.
-    """
     global img_original
-    var_im = np.var(img_original, axis=0)
-    histogram = plt.hist(var_im)
-    imgplot = plt.show()
+    # Llamamos a show_histogram 
+    show_histogram(img_original)
+
 
 def Binarize():
     """
-    Apply binarization to the image.
+    Aplica binarización a la imagen.
     """
     global img_original
-    var_im = np.var(img_original, axis=0)
-    pil_img = Apply_Binarize(var_im, 150)
+    # Llama a la función del nuevo módulo, pasando la pila completa (img_original)
+    # y el umbral (150). Regresa una imagen PIL.
+    pil_img = binarize_variance(img_original, 150)
+
     top2 = tk.Toplevel()
     top2.title("Binarize")
 
@@ -169,10 +161,29 @@ def update_image():
     label.update()
 
 def slider_presionado(val):
+    threshold_slider_changed(threshold_scale.get())
+
+
+def threshold_slider_changed(val):
     """
-    Callback function for the slider to update the image.
+    Actualiza la imagen en el label aplicando el umbral actual del slider de threshold.
     """
-    update_image()
+    global img_array
+    umbral = int(val)          # Valor del umbral obtenido del slider
+    num_im = scale1.get()      # Índice de la capa actual del slider de capas
+    current_slice = img_array[num_im, :, :]  # Extrae la capa actual (2D)
+    
+    # Aplica la función de threshold (definida en image_processing.py)
+    pil_img = threshold_image_pil(current_slice, threshold=umbral)
+    
+    # Actualiza el widget de imagen (label)
+    image_ = ImageTk.PhotoImage(pil_img)
+    label.configure(image=image_)
+    label.image = image_
+    label.update()
+
+
+
 
 # Add commands to the "Archivo" menu
 menu_archivo.add_command(
@@ -183,6 +194,13 @@ menu_archivo.add_command(
 )
 
 # Add commands to the "Imagen" menu
+
+menu_imagen.add_command(
+    label="Umbral",
+    command=lambda: threshold_slider_changed(threshold_scale.get()),
+    compound=tk.LEFT
+)
+
 menu_imagen.add_command(
     label="Auto Contraste",
     command=auto_contraste_presionado,
@@ -281,6 +299,26 @@ except FileNotFoundError:
     # Cargar una imagen por defecto o simplemente crear una imagen vacía
     pil_img = Image.new('RGB', (400, 300), color='gray')
 
+#SLIDER
+
+# Crear y configurar el frame para los sliders
+frame2 = tk.Frame(master=window, relief=tk.RAISED, borderwidth=1)
+frame2.grid(row=1, column=0, sticky='nsew')
+frame2.pack_propagate(0)
+Grid.rowconfigure(window, 1, weight=1)
+Grid.columnconfigure(window, 0, weight=1)
+
+# Slider para seleccionar la capa (slice)
+scale1 = tk.Scale(master=frame2, from_=0, to=500, orient="horizontal", length=500, command=slider_presionado)
+scale1.pack()
+
+# Slider para el umbral (threshold) con rango de 0 a 255 y valor inicial 200
+threshold_scale = tk.Scale(master=frame2, from_=0, to=255, orient="horizontal", length=500, 
+                            label="Threshold", command=threshold_slider_changed)
+threshold_scale.set(200)
+threshold_scale.pack()
+
+########## 
 
 width_pil, height_pil = pil_img.size
 ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
