@@ -5,6 +5,7 @@ from tkinter import *
 from visualization_helpers import *
 import tkinter as tk
 import numpy as np
+from variability_functions import show_variability_analysis, get_variability_methods
 from tkinter import PhotoImage, Grid, filedialog
 from PIL import Image, ImageTk, ImageOps
 import cv2
@@ -129,6 +130,14 @@ def Binarize():
     inputtxt.insert("1.0", "150")
     printButton = tk.Button(top2, text="Apply Binarization", command=partial(UpdateBinarization, label, inputtxt))
 
+def show_variability_menu(method_index):
+    """Mostrar análisis de variabilidad completo"""
+    global img_array
+    if img_array is None or len(img_array) == 0:
+        messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+        return
+    show_variability_analysis(img_array, method_index, window)
+
 def UpdateBinarization(label, inputtxt):
     """
     Update the binarization of the image based on the input threshold.
@@ -202,6 +211,19 @@ menu_imagen.add_command(
     command=Binarize,
     compound=tk.LEFT
 )
+
+# Agregar separador y submenú de variabilidad
+menu_imagen.add_separator()
+menu_variabilidad = tk.Menu(menu_imagen, tearoff=False)
+menu_imagen.add_cascade(menu=menu_variabilidad, label="Análisis de Variabilidad")
+
+# Agregar los 7 métodos
+methods = get_variability_methods()
+for i, method_name in enumerate(methods):
+    menu_variabilidad.add_command(
+        label=method_name,
+        command=lambda idx=i: show_variability_menu(idx)
+    )
 
 # Add commands to the "Picos" menu
 menu_picos.add_command(
