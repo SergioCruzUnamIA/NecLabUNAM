@@ -6,5 +6,14 @@ Signal_processing - Programa para procesar las señales y encontrar picos
 
 Interface3 - Programa que crea una simple interfaz para el uso de los programas anteriores
 
-## Interface
+## Como instalar
+
+1. Descargar el programa desde el link https://drive.google.com/drive/folders/1-Xob3XAM2we3R7o3j948wtc40aIOA0kJ?usp=drive_link
+2. Descargar e instalar python 3.12.8 (si ya lo tienes instalado saltar este paso)
+3. En la carpeta del programa descargada abrir el ejecutable 'interface3'
+4. Se debería ver la ventana principal del programa
+
+## Como usar
+
+
 

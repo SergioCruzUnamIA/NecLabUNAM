@@ -301,7 +301,7 @@ label.pack(fill=tk.BOTH, expand=True)
 window.focus()
 
 # Load and display the initial image
-pil_img = Image.open('input_image_7.png')
+pil_img = Image.open('./input_image_7.png')
 width_pil, height_pil = pil_img.size
 ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
 pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
