@@ -5,6 +5,8 @@ import scipy.cluster.hierarchy as sch
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import dendrogram
+import tkinter as tk
+from tkinter.filedialog import asksaveasfilename
 
 def correlation_pearson(data):
     df = pd.DataFrame(data)
@@ -12,6 +14,7 @@ def correlation_pearson(data):
     #plt.matshow(corr1, cmap='jet')
     #plt.colorbar()
     #plt.show()
+    corr1.to_csv('out.csv', header=False,index=False)
     return corr1
 
 def correlation_kendall(data):
@@ -54,6 +57,40 @@ def _plot_correlation_helper(df,size, root, canvas):
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+    
+    # Add save button for correlation matrix
+    def _save_correlation():
+        from tkinter import filedialog
+        filename = filedialog.asksaveasfilename(
+            defaultextension="Untitled.csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Correlation Matrix"
+        )
+        if filename:
+            corr_func.to_csv(filename, header=False, index=False)
+    
+    def _save_image():
+        filename = asksaveasfilename(
+            initialfile = 'Untitled.png',
+            defaultextension=".png",
+            filetypes=[("All Files","*.*"),("Portable Graphics Format","*.png")]
+        )
+        plt.savefig(filename)
+    
+    button_frame = tk.Frame(root)
+    button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
+    save_csv_button = tk.Button(
+        button_frame,
+        text="Save Correlation Matrix",
+        command=_save_correlation
+    )
+    save_img_button = tk.Button(
+        button_frame,
+        text="Save Image",
+        command=_save_image
+    )
+    save_csv_button.pack(side=tk.LEFT, padx=5)
+    save_img_button.pack(side=tk.LEFT, padx=5)
 
 def plot_correlation(data, corr, root, canvas):
     df = pd.DataFrame(data)
@@ -69,7 +106,6 @@ def plot_correlation(data, corr, root, canvas):
 
 def _plot_dendrogram_helper(model, **kwargs):
     # Create linkage matrix and then plot the dendrogram
-
     # create the counts of samples under each node
     counts = np.zeros(model.children_.shape[0])
     n_samples = len(model.labels_)
@@ -92,16 +128,23 @@ def _plot_dendrogram_helper(model, **kwargs):
 def plot_dendogram(data, root, canvas):
     clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data.transpose())
     clustering.labels_.shape
-    plt.title("Hierarchical Clustering Dendrogram")
     # plot the top three levels of the dendrogram
     _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    plt.xlabel("Number of points in node (or index of point if no parenthesis).")
-    #plt.show()
     for i in range(20):
         plt.plot(np.array(range(len(data[:, i]))).reshape(-1, 1), data[:, i] + i)
     #ax = plt.gca()
     fig = plt.gcf()
-    #plt.show()
+    if canvas is not None:
+        canvas.get_tk_widget().grid_forget()
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+
+def plot_time_series(norm_data, root, canvas):
+    for i in range(20):
+        plt.plot(np.array(range(len(norm_data[:, i]))).reshape(-1, 1), norm_data[:, i] + i)
+    ax = plt.gca()
+    fig = plt.gcf()
     if canvas is not None:
         canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=root)

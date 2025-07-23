@@ -34,9 +34,9 @@ def _normalize_data_helper(data):
         min_data = min(norm_data[:, i])
         max_data = max(norm_data[:, i])
         #norm_data[:, i] = data_[:, i] 
-        norm_data[:, i] = norm_data[:, i] - min_data # opcion para nomalizar los datos
+        #norm_data[:, i] = norm_data[:, i] - min_data # opcion para nomalizar los datos
         #norm_data[:, i] = norm_data[:, i] / min_data # opcion para nomalizar los datos
-        #norm_data[:, i] = (norm_data[:, i] - min_data) / (max_data - min_data) # opcion para nomalizar los datos
+        norm_data[:, i] = (norm_data[:, i] - min_data) / (max_data - min_data) # opcion para nomalizar los datos
     return norm_data
 
 def normalize_data(data):

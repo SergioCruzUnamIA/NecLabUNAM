@@ -2,7 +2,7 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"  #limita num de threads
 from pyometiff import OMETIFFReader
 from tkinter import *
-from visualization_helpers import *
+from visualization_helpers import initialize_visualization
 import tkinter as tk
 import numpy as np
 from variability_functions import show_variability_analysis, get_variability_methods
@@ -48,7 +48,11 @@ barra_menus.add_cascade(menu=menu_imagen, label="Imagen")
 
 # Create "Picos" menu
 menu_picos = Menu(barra_menus)
-barra_menus.add_cascade(menu=menu_picos, label="Visualización")
+barra_menus.add_cascade(menu=menu_picos, label="Visualizacion")
+
+# Create "Correlacion" menu
+menu_correlacion = Menu(barra_menus)
+barra_menus.add_cascade(menu=menu_correlacion, label="Correlacion")
 
 # Initialize global variables for image data
 img_original = []
@@ -269,25 +273,38 @@ menu_picos.add_command(
 )
 menu_picos.add_separator()
 menu_picos.add_command(
-    label='Correlation Pearson', 
+    label='Correlacion Pearson', 
     command=None, 
     state=DISABLED
 )
 menu_picos.add_command(
-    label='Correlation Kendall', 
+    label='Correlacion Kendall', 
     command=None, 
     state=DISABLED
 )
 menu_picos.add_command(
-    label='Correlation Spearman', 
+    label='Correlacion Spearman', 
     command=None, 
     state=DISABLED
 )
 menu_picos.add_separator()
 menu_picos.add_command(
-    label='Dendogram', 
+    label='Dendograma', 
     command=None, 
     state=DISABLED
+)
+menu_picos.add_separator()
+menu_picos.add_command(
+    label='Series de tiempo', 
+    command=None, 
+    state=DISABLED
+)
+
+# Add commands to the Correlacion menu
+menu_correlacion.add_command(
+    label='Cargar matriz de correlacion', 
+    command=lambda: load_correlation_matrix(window, canvas), 
+    state=NORMAL
 )
 
 # Create and configure the main frame
@@ -301,7 +318,7 @@ label.pack(fill=tk.BOTH, expand=True)
 window.focus()
 
 # Load and display the initial image
-pil_img = Image.open('./input_image_7.png')
+pil_img = Image.open('src/input_image_7.png')
 width_pil, height_pil = pil_img.size
 ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
 pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)

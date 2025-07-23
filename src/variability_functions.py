@@ -84,7 +84,7 @@ def apply_binarization(image, th):
 
 def candidate_neighbors(node):
     """
-    Función original  para encontrar vecinos.
+    Función original para encontrar vecinos.
     """
     return [(node[0] + 1, node[1]), (node[0], node[1] + 1), (node[0] + 1, node[1] + 1),
            (node[0] - 1, node[1]), (node[0], node[1] - 1), (node[0] - 1, node[1] - 1),
