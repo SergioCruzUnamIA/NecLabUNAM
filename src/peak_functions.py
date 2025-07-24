@@ -252,7 +252,6 @@ def update_peak_caller_main(data_sel, main_window, canvas, *args):
     fig, ax = plt.subplots()
     plt.plot(data_sel)
     plt.scatter(peaks, data_sel[peaks], color='darkorange')
-    plt.legend()
     
     # Hide the scale widget when showing peaks
     hide_scale_widget(main_window)

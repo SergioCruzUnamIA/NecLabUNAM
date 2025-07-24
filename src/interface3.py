@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from functools import partial
 from tkinter import messagebox
+import sys
 
 # Initialize the main window
 window = tk.Tk()
@@ -340,7 +341,14 @@ scale1.pack()
 
 def on_closing():
     if messagebox.askokcancel("Quit", "Do you want to quit?"):
+        # Close all matplotlib figures to prevent hanging
+        plt.close('all')
+        # Destroy the main window
         window.destroy()
+        # Force quit the application
+        window.quit()
+        # Exit the Python interpreter as a last resort
+        sys.exit(0)
 
 window.protocol("WM_DELETE_WINDOW", on_closing)
 

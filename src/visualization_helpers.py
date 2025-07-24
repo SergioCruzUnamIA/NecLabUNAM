@@ -19,7 +19,7 @@ def initialize_visualization(window, menu_picos, canvas):
     menu_picos.entryconfig("Correlacion Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas), state=NORMAL)
     menu_picos.entryconfig("Correlacion Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas), state=NORMAL)
     menu_picos.entryconfig("Dendograma", command=lambda:plot_dendogram(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Series de tiempo", command=lambda:plot_time_series(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Series de tiempo", command=lambda:plot_time_series(data), state=NORMAL)
 
 def _plot_data(data, window, canvas):
     fig, ax = plt.subplots()

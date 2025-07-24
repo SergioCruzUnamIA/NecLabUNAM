@@ -53,6 +53,8 @@ def _plot_correlation_helper(df,size, root, canvas):
     cbar = fig.colorbar(cax, ticks=[-1, 0, 1], aspect=40, shrink=.8)
     if canvas is not None:
         canvas.get_tk_widget().grid_forget()
+        # Close any previous figure to prevent memory leaks
+        plt.close('all')
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
@@ -74,7 +76,8 @@ def _plot_correlation_helper(df,size, root, canvas):
             defaultextension=".png",
             filetypes=[("All Files","*.*"),("Portable Graphics Format","*.png")]
         )
-        plt.savefig(filename)
+        if filename:
+            fig.savefig(filename)
     
     button_frame = tk.Frame(root)
     button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
@@ -129,12 +132,12 @@ def plot_dendogram(data, root, canvas):
     clustering.labels_.shape
     # plot the top three levels of the dendrogram
     _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    for i in range(20):
-        plt.plot(np.array(range(len(data[:, i]))).reshape(-1, 1), data[:, i] + i)
     #ax = plt.gca()
     fig = plt.gcf()
     if canvas is not None:
         canvas.get_tk_widget().grid_forget()
+        # Close any previous figure to prevent memory leaks
+        plt.close('all')
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
@@ -267,5 +270,9 @@ def plot_time_series(norm_data):
     save_csv_button.pack(side=tk.LEFT, padx=5)
     
     # Close button
-    close_button = tk.Button(button_frame, text="Close", command=plot_window.destroy)
+    def close_window():
+        plt.close(fig)  # Close the matplotlib figure to free memory
+        plot_window.destroy()
+    
+    close_button = tk.Button(button_frame, text="Close", command=close_window)
     close_button.pack(side=tk.RIGHT, padx=5)
