@@ -81,7 +81,7 @@ def archivo_nuevo_presionado(event=None):
     ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
     pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)))
     image_ = ImageTk.PhotoImage(pil_img)
-    label.configure(image=image_)
+    label.configure(image=image_, text="", compound=tk.NONE)
     label.image = image_
     label.update()
 
@@ -183,7 +183,7 @@ def update_image():
     ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
     pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
     image_ = ImageTk.PhotoImage(pil_img)
-    label.configure(image=image_)
+    label.configure(image=image_, text="", compound=tk.NONE)
     label.image = image_
     label.update()
 
@@ -319,13 +319,14 @@ label = tk.Label(master=frame)
 label.pack(fill=tk.BOTH, expand=True)
 window.focus()
 
-# Load and display the initial image
-pil_img = Image.open('src/input_image_7.png')
-width_pil, height_pil = pil_img.size
-ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
-pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
+# Create and display a placeholder image
+placeholder_width = int(width * 0.4)
+placeholder_height = int(height * 0.4)
+# Create a simple gray placeholder image
+pil_img = Image.new('RGB', (placeholder_width, placeholder_height), color=(128, 128, 128))
 image_ = ImageTk.PhotoImage(pil_img)
-label.configure(image=image_)
+label.configure(image=image_, text="Load an OME-TIFF file to start", compound=tk.CENTER, 
+                font=("Arial", 16), fg="white")
 label.image = image_
 label.update()
 
