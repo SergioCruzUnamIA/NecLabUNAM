@@ -15,10 +15,11 @@ def initialize_visualization(window, menu_picos, canvas):
     menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data, window, canvas), state=NORMAL)
     menu_picos.entryconfig("Linear Model", command=lambda:linear_model_peak(data, window, canvas), state=NORMAL)
     menu_picos.entryconfig("Peak Function 7", command=lambda:lasso_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlation Pearson", command=lambda:plot_correlation(data,correlation_pearson(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlation Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlation Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Dendogram", command=lambda:plot_dendogram(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Pearson", command=lambda:plot_correlation(data,correlation_pearson(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Dendograma", command=lambda:plot_dendogram(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Series de tiempo", command=lambda:plot_time_series(data), state=NORMAL)
 
 def _plot_data(data, window, canvas):
     fig, ax = plt.subplots()

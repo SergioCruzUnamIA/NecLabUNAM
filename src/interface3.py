@@ -2,10 +2,11 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"  #limita num de threads
 from pyometiff import OMETIFFReader
 from tkinter import *
-from visualization_helpers import *
+from visualization_helpers import initialize_visualization
 import tkinter as tk
 import numpy as np
 from variability_functions import show_variability_analysis, get_variability_methods
+from corr_dendo_functions import load_correlation_matrix
 from tkinter import PhotoImage, Grid, filedialog
 from PIL import Image, ImageTk, ImageOps
 import cv2
@@ -14,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from functools import partial
 from tkinter import messagebox
+import sys
 
 # Initialize the main window
 window = tk.Tk()
@@ -48,7 +50,11 @@ barra_menus.add_cascade(menu=menu_imagen, label="Imagen")
 
 # Create "Picos" menu
 menu_picos = Menu(barra_menus)
-barra_menus.add_cascade(menu=menu_picos, label="Visualización")
+barra_menus.add_cascade(menu=menu_picos, label="Visualizacion")
+
+# Create "Correlacion" menu
+menu_correlacion = Menu(barra_menus)
+barra_menus.add_cascade(menu=menu_correlacion, label="Correlacion")
 
 # Initialize global variables for image data
 img_original = []
@@ -75,7 +81,7 @@ def archivo_nuevo_presionado(event=None):
     ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
     pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)))
     image_ = ImageTk.PhotoImage(pil_img)
-    label.configure(image=image_)
+    label.configure(image=image_, text="", compound=tk.NONE)
     label.image = image_
     label.update()
 
@@ -177,7 +183,7 @@ def update_image():
     ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
     pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
     image_ = ImageTk.PhotoImage(pil_img)
-    label.configure(image=image_)
+    label.configure(image=image_, text="", compound=tk.NONE)
     label.image = image_
     label.update()
 
@@ -269,25 +275,38 @@ menu_picos.add_command(
 )
 menu_picos.add_separator()
 menu_picos.add_command(
-    label='Correlation Pearson', 
+    label='Correlacion Pearson', 
     command=None, 
     state=DISABLED
 )
 menu_picos.add_command(
-    label='Correlation Kendall', 
+    label='Correlacion Kendall', 
     command=None, 
     state=DISABLED
 )
 menu_picos.add_command(
-    label='Correlation Spearman', 
+    label='Correlacion Spearman', 
     command=None, 
     state=DISABLED
 )
 menu_picos.add_separator()
 menu_picos.add_command(
-    label='Dendogram', 
+    label='Dendograma', 
     command=None, 
     state=DISABLED
+)
+menu_picos.add_separator()
+menu_picos.add_command(
+    label='Series de tiempo', 
+    command=None, 
+    state=DISABLED
+)
+
+# Add commands to the Correlacion menu
+menu_correlacion.add_command(
+    label='Cargar matriz de correlacion', 
+    command=lambda: load_correlation_matrix(window, canvas), 
+    state=NORMAL
 )
 
 # Create and configure the main frame
@@ -300,13 +319,14 @@ label = tk.Label(master=frame)
 label.pack(fill=tk.BOTH, expand=True)
 window.focus()
 
-# Load and display the initial image
-pil_img = Image.open('./input_image_7.png')
-width_pil, height_pil = pil_img.size
-ratio = min(width/(width_pil * 1.5), height/(height_pil * 1.5))
-pil_img = pil_img.resize((int(width_pil * ratio), int(height_pil * ratio)), Image.LANCZOS)
+# Create and display a placeholder image
+placeholder_width = int(width * 0.4)
+placeholder_height = int(height * 0.4)
+# Create a simple gray placeholder image
+pil_img = Image.new('RGB', (placeholder_width, placeholder_height), color=(128, 128, 128))
 image_ = ImageTk.PhotoImage(pil_img)
-label.configure(image=image_)
+label.configure(image=image_, text="Load an OME-TIFF file to start", compound=tk.CENTER, 
+                font=("Arial", 16), fg="white")
 label.image = image_
 label.update()
 
@@ -318,12 +338,17 @@ Grid.rowconfigure(window, 1, weight=1)
 Grid.columnconfigure(window, 0, weight=1)
 scale1 = tk.Scale(master=frame2, from_=0, to=500, orient="horizontal", length=500, command=slider_presionado)
 scale1.pack()
-#button1 = tk.Button(master=frame2, text="Guardar", command=save, state=DISABLED)
-#button1.pack()
 
 def on_closing():
     if messagebox.askokcancel("Quit", "Do you want to quit?"):
+        # Close all matplotlib figures to prevent hanging
+        plt.close('all')
+        # Destroy the main window
         window.destroy()
+        # Force quit the application
+        window.quit()
+        # Exit the Python interpreter as a last resort
+        sys.exit(0)
 
 window.protocol("WM_DELETE_WINDOW", on_closing)
 
