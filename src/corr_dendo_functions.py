@@ -6,7 +6,8 @@ import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import dendrogram
 import tkinter as tk
-from tkinter.filedialog import asksaveasfilename
+from tkinter.filedialog import asksaveasfilename, askopenfilename
+from tkinter import messagebox
 
 def correlation_pearson(data):
     df = pd.DataFrame(data)
@@ -32,15 +33,19 @@ def correlation_spearman(data):
     #plt.show()
     return corr1
 
-def _plot_correlation_helper(df,size, root, canvas):
+def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
     '''Plot a graphical correlation matrix for a dataframe.
 
     Input:
         df: pandas DataFrame
-        size: vertical and horizontal size of the plot'''
+        size: vertical and horizontal size of the plot
+        is_precomputed_corr: if True, df is already a correlation matrix'''
     #size = 10
-    # Compute the correlation matrix for the received dataframe
-    corr_func = df.corr()
+    # Compute the correlation matrix for the received dataframe or use as-is
+    if is_precomputed_corr:
+        corr_func = df  # df is already a correlation matrix
+    else:
+        corr_func = df.corr()  # compute correlation matrix from data
     
     # Plot the correlation matrix
     fig, ax = plt.subplots(figsize=(size, size))
@@ -59,6 +64,10 @@ def _plot_correlation_helper(df,size, root, canvas):
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
     
+    # Ensure the root window is properly configured for grid layout
+    root.grid_rowconfigure(0, weight=1)  # Plot area should expand
+    root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
+    
     # Add save button for correlation matrix
     def _save_correlation():
         from tkinter import filedialog
@@ -68,7 +77,7 @@ def _plot_correlation_helper(df,size, root, canvas):
             title="Save Correlation Matrix"
         )
         if filename:
-            corr_func.to_csv(filename, header=False, index=False)
+            corr_func.to_csv(filename, header=True, index=True)
     
     def _save_image():
         filename = asksaveasfilename(
@@ -79,8 +88,11 @@ def _plot_correlation_helper(df,size, root, canvas):
         if filename:
             fig.savefig(filename)
     
+    # Create button frame and ensure it's visible
     button_frame = tk.Frame(root)
     button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
+    
+    # Create and pack buttons
     save_csv_button = tk.Button(
         button_frame,
         text="Save Correlation Matrix",
@@ -88,11 +100,17 @@ def _plot_correlation_helper(df,size, root, canvas):
     )
     save_img_button = tk.Button(
         button_frame,
-        text="Save Image",
+        text="Save Image", 
         command=_save_image
     )
     save_csv_button.pack(side=tk.LEFT, padx=5)
     save_img_button.pack(side=tk.LEFT, padx=5)
+    
+    # Ensure the button frame is properly configured
+    root.grid_rowconfigure(1, weight=0)  # Don't expand button row
+    root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
+    
+    return canvas
 
 def plot_correlation(data, corr, root, canvas):
     df = pd.DataFrame(data)
@@ -104,7 +122,8 @@ def plot_correlation(data, corr, root, canvas):
     columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
     df = df.reindex(columns, axis=1)
     size = 5
-    _plot_correlation_helper(df, size, root, canvas)
+    canvas = _plot_correlation_helper(df, size, root, canvas)
+    return canvas
 
 def _plot_dendrogram_helper(model, **kwargs):
     # Create linkage matrix and then plot the dendrogram
@@ -141,6 +160,37 @@ def plot_dendogram(data, root, canvas):
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+    
+    # Configure grid layout for dendrogram
+    root.grid_rowconfigure(0, weight=1)  # Plot area should expand
+    root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
+    
+    # Add only save image button for dendrogram
+    def _save_dendrogram_image():
+        filename = asksaveasfilename(
+            initialfile='Dendrogram.png',
+            defaultextension=".png",
+            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+        )
+        if filename:
+            fig.savefig(filename)
+    
+    # Create button frame for dendrogram
+    button_frame = tk.Frame(root)
+    button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
+    
+    # Create only save image button
+    save_img_button = tk.Button(
+        button_frame,
+        text="Save Image",
+        command=_save_dendrogram_image
+    )
+    save_img_button.pack(side=tk.LEFT, padx=5)
+    
+    # Configure button frame
+    root.grid_rowconfigure(1, weight=0)  # Don't expand button row
+    
+    return canvas
 
 def plot_time_series(norm_data):
     # New Tkinter window
@@ -276,3 +326,65 @@ def plot_time_series(norm_data):
     
     close_button = tk.Button(button_frame, text="Close", command=close_window)
     close_button.pack(side=tk.RIGHT, padx=5)
+
+def load_correlation_matrix(root, canvas):
+    """
+    Load a correlation matrix from a CSV file and display it
+    """
+    try:
+        # Open file dialog to select correlation matrix file
+        filename = askopenfilename(
+            title="Load Correlation Matrix",
+            filetypes=[
+                ("CSV files", "*.csv"),
+                ("Excel files", "*.xlsx"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if not filename:
+            return  # User cancelled
+        
+        # Load the correlation matrix based on file extension
+        if filename.lower().endswith('.csv'):
+            corr_matrix = pd.read_csv(filename, index_col=0)
+        elif filename.lower().endswith(('.xlsx', '.xls')):
+            corr_matrix = pd.read_excel(filename, index_col=0)
+        else:
+            # Try CSV as default
+            corr_matrix = pd.read_csv(filename, index_col=0)
+        
+        # Validate that it's a square matrix (correlation matrices should be square)
+        if corr_matrix.shape[0] != corr_matrix.shape[1]:
+            messagebox.showerror(
+                "Invalid Matrix", 
+                "The loaded matrix is not square. Correlation matrices must be square."
+            )
+            return
+        
+        # Check if values are in valid correlation range [-1, 1]
+        if (corr_matrix.min().min() < -1.1) or (corr_matrix.max().max() > 1.1):
+            response = messagebox.askyesno(
+                "Warning", 
+                "The matrix contains values outside the typical correlation range [-1, 1]. Continue anyway?"
+            )
+            if not response:
+                return
+        
+        # Display the correlation matrix
+        size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
+        canvas = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True)
+        
+        messagebox.showinfo(
+            "Matrix Loaded", 
+            f"Successfully loaded correlation matrix of size {corr_matrix.shape[0]}x{corr_matrix.shape[1]}"
+        )
+        
+    except pd.errors.EmptyDataError:
+        messagebox.showerror("Error", "The selected file is empty or invalid.")
+    except pd.errors.ParserError:
+        messagebox.showerror("Error", "Could not parse the file. Please ensure it's a valid CSV or Excel file.")
+    except FileNotFoundError:
+        messagebox.showerror("Error", "The selected file was not found.")
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred while loading the matrix:\n{str(e)}")

@@ -6,6 +6,7 @@ from visualization_helpers import initialize_visualization
 import tkinter as tk
 import numpy as np
 from variability_functions import show_variability_analysis, get_variability_methods
+from corr_dendo_functions import load_correlation_matrix
 from tkinter import PhotoImage, Grid, filedialog
 from PIL import Image, ImageTk, ImageOps
 import cv2
@@ -336,8 +337,6 @@ Grid.rowconfigure(window, 1, weight=1)
 Grid.columnconfigure(window, 0, weight=1)
 scale1 = tk.Scale(master=frame2, from_=0, to=500, orient="horizontal", length=500, command=slider_presionado)
 scale1.pack()
-#button1 = tk.Button(master=frame2, text="Guardar", command=save, state=DISABLED)
-#button1.pack()
 
 def on_closing():
     if messagebox.askokcancel("Quit", "Do you want to quit?"):
