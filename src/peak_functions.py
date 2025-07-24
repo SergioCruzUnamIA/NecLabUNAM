@@ -15,14 +15,8 @@ from tkinter.filedialog import asksaveasfilename
 def _load_data(data):
     numpy_data = np.load(data)
     rs = np.random.RandomState(0)
-    data_ = numpy_data[:,1:] 
-    #print(data_.shape)
+    data_ = numpy_data[:,1:]
     return data_
-
-#def plot_data(data):
-#    plt.plot(np.array(range(len(data[:, 15]))).reshape(-1, 1), data[:, 15])
-#    ax = plt.gca()
-#    plt.show()
 
 def _normalize_data_helper(data):
     norm_data = np.zeros(data.shape) # crea un arreglo con zeros en la forma de los datos
@@ -105,9 +99,6 @@ def peak_caller(data, rise_percent, fall_percent, max_lookback, max_lookahead, m
     draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, data, peaks, rise_percent, fall_percent, max_lookahead, max_lookback)
     return peaks
 
-#def actual_peak_caller(data, main_window=None, canvas=None):
-#    peak_caller(data, rise_percent=5, fall_percent=5, max_lookback=10, max_lookahead=10, main_window=main_window, canvas=canvas)
-
 def actual_peak_caller(data, main_window=None, canvas=None):
     return peak_caller(data, rise_percent=5, fall_percent=5, max_lookback=10, max_lookahead=10, main_window=main_window, canvas=canvas)
 
@@ -116,13 +107,6 @@ def local_outlier_factor_peak(data, main_window=None, canvas=None):
     data_sel = data[:, 15]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
-
-    #plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
-    #plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res - 350)
-    #mean2 = (380 - 310) / 2
-    #ax = plt.gca()
-    #plt.show()
-
     new_data = data_sel - res
     clf = LocalOutlierFactor(n_neighbors=20)
     y_pred = clf.fit_predict(new_data.reshape(-1, 1))
@@ -171,7 +155,6 @@ def lasso_peak(data, main_window=None, canvas=None): # hay dos local outlier fac
     data_sel = data[:, 15]
     reg = Lasso().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
-
     new_data = data_sel - res
     clf = LocalOutlierFactor(n_neighbors=20)
     y_pred = clf.fit_predict(new_data.reshape(-1, 1))
