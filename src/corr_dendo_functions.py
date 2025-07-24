@@ -14,7 +14,6 @@ def correlation_pearson(data):
     #plt.matshow(corr1, cmap='jet')
     #plt.colorbar()
     #plt.show()
-    corr1.to_csv('out.csv', header=False,index=False)
     return corr1
 
 def correlation_kendall(data):
