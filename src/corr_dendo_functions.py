@@ -140,13 +140,133 @@ def plot_dendogram(data, root, canvas):
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
-def plot_time_series(norm_data, root, canvas):
-    for i in range(20):
-        plt.plot(np.array(range(len(norm_data[:, i]))).reshape(-1, 1), norm_data[:, i] + i)
-    ax = plt.gca()
-    fig = plt.gcf()
-    if canvas is not None:
-        canvas.get_tk_widget().grid_forget()
-    canvas = FigureCanvasTkAgg(fig, master=root)
-    canvas.draw()
-    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+def plot_time_series(norm_data):
+    # New Tkinter window
+    plot_window = tk.Toplevel()
+    plot_window.title('Time Series Plot')
+    plot_window.geometry('1000x1000')
+    
+    # Active series
+    active_series = list(range(20))  # Initially all series are active
+    
+    # Main frame
+    main_frame = tk.Frame(plot_window)
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    
+    # Left frame for listbox
+    left_frame = tk.Frame(main_frame, width=200)
+    left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+    left_frame.pack_propagate(False)  # Maintain fixed width
+    
+    # Right frame for plot
+    right_frame = tk.Frame(main_frame)
+    right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+    
+    # Listbox to left frame
+    listbox_label = tk.Label(left_frame, text="Time Series")
+    listbox_label.pack(pady=(0, 5))
+    
+    listbox = tk.Listbox(left_frame, selectmode=tk.EXTENDED)
+    listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+    
+    # Populate listbox with series names
+    for i in range(20): #TODO: check if only 20
+        listbox.insert(tk.END, f"Series {i+1}")
+    
+    # Scrollbar for listbox
+    scrollbar = tk.Scrollbar(left_frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    listbox.config(yscrollcommand=scrollbar.set)
+    scrollbar.config(command=listbox.yview)
+    
+    # Initial plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+    canvas_new = FigureCanvasTkAgg(fig, master=right_frame)
+    canvas_new.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
+    def update_plot():
+        """
+            Update the plot with current active series
+        """
+        ax.clear()
+        for i, series_idx in enumerate(active_series):
+            ax.plot(np.array(range(len(norm_data[:, series_idx]))).reshape(-1, 1), 
+                   norm_data[:, series_idx] + i)
+        ax.set_title('Time Series Plot')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Signal + Offset')
+        canvas_new.draw()
+    
+    def delete_selected_series():
+        """
+            Deletes the selected series from listbox and replots
+        """
+        selection = listbox.curselection()
+        if selection:
+            selected_indices = sorted(selection, reverse=True)
+            for selected_idx in selected_indices:
+                if selected_idx < len(active_series):
+                    active_series.pop(selected_idx)
+                    listbox.delete(selected_idx)
+            update_plot()
+    
+    update_plot()
+    
+    # Delete button for listbox
+    delete_button = tk.Button(
+        left_frame,
+        text="Delete Series",
+        command=delete_selected_series
+    )
+    delete_button.pack(fill=tk.X, pady=(5, 0))
+    
+    # Bottom frame
+    button_frame = tk.Frame(plot_window)
+    button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
+    
+    def _save_time_series_image():
+        """
+            Saves the time series as an image
+        """
+        filename = asksaveasfilename(
+            initialfile='TimeSeries.png',
+            defaultextension=".png",
+            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+        )
+        if filename:
+            fig.savefig(filename)
+    
+    def _save_time_series_csv():
+        """
+            Saves the time series as a .csv file
+        """
+        filename = asksaveasfilename(
+            initialfile='TimeSeries.csv',
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
+        )
+        if filename:
+            # Create DataFrame with only active series
+            active_data = norm_data[:, active_series]
+            df = pd.DataFrame(active_data, columns=[f"Series_{i+1}" for i in active_series])
+            df.to_csv(filename, index=False)
+    
+    # Save image button
+    save_img_button = tk.Button(
+        button_frame,
+        text="Save Image",
+        command=_save_time_series_image
+    )
+    save_img_button.pack(side=tk.LEFT, padx=5)
+    
+    # Save CSV button
+    save_csv_button = tk.Button(
+        button_frame,
+        text="Save CSV",
+        command=_save_time_series_csv
+    )
+    save_csv_button.pack(side=tk.LEFT, padx=5)
+    
+    # Close button
+    close_button = tk.Button(button_frame, text="Close", command=plot_window.destroy)
+    close_button.pack(side=tk.RIGHT, padx=5)
