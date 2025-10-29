@@ -8,25 +8,39 @@ Interface3 - Programa que crea una simple interfaz para el uso de los programas 
 
 ## Instalación
 
-### Con ejecutable
+### Con Anaconda
 
-1. Descargar el programa desde el link https://drive.google.com/drive/folders/1EEcVk3c7QSAXKUrx2ALq3Ed4gy_mqFxH?usp=sharing
-2. Descargar e instalar python 3.12.8 (si ya lo tienes instalado saltar este paso)
-3. En la carpeta del programa descargada abrir el ejecutable 'interface3'
-4. Se debería ver la ventana principal del programa
+1. Descargar el instalador de miniconda desde esta página web: https://www.anaconda.com/download/success.
 
-### Desde repositorio
+2. Instalar miniconda con el instalador
 
-1. Descargar e instalar python 3.12.8 (si ya lo tienes instalado saltar este paso).
-2. Descargar el zip del repositorio desde GitHub (da click en el botón verde que dice "<>Code" en el repositorio) y extraer el zip en donde quieras instalar el programa. 
-3. En la carpeta del repositorio, crear un ambiente virtual, insertar en la terminal los siguientes comandos.
-    > $virtualenv (nombre del ambiente)  
-    > $source (nombre del ambiente)/bin/activate
-3. Con el ambiente creado instalar los requisitos en el ambiente virtual desde el archivo 'requirements.txt', insertar en la terminal los siguientes comandos.
-    > $pip install -r requirements.txt
-4. Para correr el programa, escribir en la terminal el siguiente comando
-    > $python3 interface3.py
-## Como usar
+3. Descargar el repositorio (Dar click en el botón verde que dice Code, posteriormente dar click en download zip)
+
+4. Extraer el zip que contiene el repositorio
+
+5. Abrir una terminal en la ruta donde se extrajo el repositorio
+
+6. En la terminal escribir
+
+    > $ conda env create -f environment.yml
+
+    Esto descargará todas las bibliotecas necesarias para el funcionamiento del programa
+
+7. Una vez se halla completado el paso anterior, escribir en la terminal
+
+    > $ conda activate .neclabconda
+
+    Esto activará el ambiente virtual con las bibliotecas ya descargadas
+
+8. Una vez se halla activado el ambiente virtual, se verá en la terminal (.neclabconda) en donde se escriben los comandos, esto indica que el ambiente virtual ha sido creado exitosamente.
+
+9. Ahora navegamos a la carpeta src, escribir en la terminal
+    > $ cd src
+
+10. Para correr el programa escribir
+    > $ python3 interface3.py
+
+**NOTA:** Puede ser que después de instalar y activar el ambiente virtual (paso 7) el programa marque que no se ha instalado una biblioteca. En este caso se recomienda cerrar la terminal y abrir una nueva en la carpeta del programa y repetir los pasos 7 en adelante.
 
 
 
