@@ -42,5 +42,6 @@ Interface3 - Programa que crea una simple interfaz para el uso de los programas 
 
 **NOTA:** Puede ser que después de instalar y activar el ambiente virtual (paso 7) el programa marque que no se ha instalado una biblioteca. En este caso se recomienda cerrar la terminal y abrir una nueva en la carpeta del programa y repetir los pasos 7 en adelante.
 
+**NOTA:** La primera inicialización del programa puede tardar aproximadamente 2 minutos.
 
 
