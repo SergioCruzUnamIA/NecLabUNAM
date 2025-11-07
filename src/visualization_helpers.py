@@ -2,9 +2,19 @@ from tkinter import *
 from tkinter import filedialog
 from peak_functions import *
 from corr_dendo_functions import *
+import os
 
 def initialize_visualization(window, menu_picos, canvas):
-    filename = filedialog.askopenfilename(parent=window,title="Open File",filetypes=[("Numpy files", "*.npy")])
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    
+    filename = filedialog.askopenfilename(
+        parent=window,
+        title="Open File",
+        initialdir=project_root,
+        filetypes=[("Data files", "*.npy;*.csv"), ("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")]
+    )
+    
     data = normalize_data(filename)
     canvas = _plot_data(data, window, canvas)
 

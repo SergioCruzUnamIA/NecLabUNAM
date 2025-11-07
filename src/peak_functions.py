@@ -11,12 +11,34 @@ from tkinter import *
 from tkinter import ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter.filedialog import asksaveasfilename
+import pandas as pd
+from sklearn.impute import SimpleImputer
+
+def _is_npy_file(filename):
+    return filename.lower().endswith('.npy')
+
+def _is_csv_file(filename):
+    return filename.lower().endswith('.csv')
 
 def _load_data(data):
-    numpy_data = np.load(data)
-    rs = np.random.RandomState(0)
-    data_ = numpy_data[:,1:]
-    return data_
+    if _is_npy_file(data):
+        numpy_data = np.load(data)
+        rs = np.random.RandomState(0)
+        data_ = numpy_data[:,1:]
+        return data_
+    elif _is_csv_file(data):
+        df = pd.read_csv(data)
+        numpy_data = df.values
+        
+        imputer = SimpleImputer(strategy='mean')
+        numpy_data = imputer.fit_transform(numpy_data)
+        
+        rs = np.random.RandomState(0)
+        data_ = numpy_data
+        return data_
+    else:
+        raise ValueError("Archivo no soportado. Por favor, use un archivo .npy o .csv")
+    
 
 def _normalize_data_helper(data):
     norm_data = np.zeros(data.shape) # crea un arreglo con zeros en la forma de los datos
