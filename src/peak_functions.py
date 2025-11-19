@@ -497,5 +497,18 @@ def show_scale_widget(main_window):
                     break
 
 def save():
-    filename = asksaveasfilename(initialfile = 'Untitled.png',defaultextension=".png",filetypes=[("All Files","*.*"),("Portable Graphics Format","*.png")])
-    plt.savefig(filename)
+    filename = asksaveasfilename(
+        initialfile='Untitled.png',
+        defaultextension=".png",
+        filetypes=[
+            ("PNG files", "*.png"),
+            ("JPEG files", "*.jpg"),
+            ("JPEG files", "*.jpeg"), 
+            ("TIFF files", "*.tiff"),
+            ("TIFF files", "*.tif"),
+            ("PDF files", "*.pdf"),
+            ("All Files", "*.*")
+        ]
+    )
+    if filename:  # Only save if user didn't cancel
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
