@@ -10,6 +10,7 @@ from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
 
 def correlation_pearson(data):
+    plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='pearson')
     #plt.matshow(corr1, cmap='jet')
@@ -18,6 +19,7 @@ def correlation_pearson(data):
     return corr1
 
 def correlation_kendall(data):
+    plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='kendall')
     #plt.matshow(corr1, cmap='jet')
@@ -26,6 +28,7 @@ def correlation_kendall(data):
     return corr1
 
 def correlation_spearman(data):
+    plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='spearman')
     #plt.matshow(corr1, cmap='jet')
@@ -40,6 +43,11 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
         df: pandas DataFrame
         size: vertical and horizontal size of the plot
         is_precomputed_corr: if True, df is already a correlation matrix'''
+    if canvas is not None:
+        canvas.get_tk_widget().grid_forget()
+        # Close any previous figure to prevent memory leaks
+        plt.close('all')
+    
     #size = 10
     # Compute the correlation matrix for the received dataframe or use as-is
     if is_precomputed_corr:
@@ -113,6 +121,11 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
     return canvas
 
 def plot_correlation(data, corr, root, canvas):
+    if canvas is not None:
+        canvas.get_tk_widget().grid_forget()
+        # Close any previous figure to prevent memory leaks
+        plt.close('all')
+
     df = pd.DataFrame(data)
     X = corr.values
     d = sch.distance.pdist(X)   # vector of ('55' choose 2) pairwise distances
@@ -147,6 +160,11 @@ def _plot_dendrogram_helper(model, **kwargs):
     dendrogram(linkage_matrix, **kwargs) # type: ignore
 
 def plot_dendogram(data, root, canvas):
+    if canvas is not None:
+        canvas.get_tk_widget().grid_forget()
+        # Close any previous figure to prevent memory leaks
+        plt.close('all')
+
     clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data.transpose())
     clustering.labels_.shape
     # plot the top three levels of the dendrogram
