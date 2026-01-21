@@ -254,41 +254,41 @@ menu_picos.add_command(
     state=DISABLED
 )
 menu_picos.add_separator()
-#menu_picos.add_command(
-#    label='Elliptic Envelope', 
-#    command=None, 
-#    state=DISABLED
-#)
+menu_picos.add_command(
+    label='Elliptic Envelope', 
+    command=None, 
+    state=DISABLED
+)
 menu_picos.add_command(
     label='Peak Caller', 
     command=None, 
     state=DISABLED
 )
-#menu_picos.add_command(
-#    label='Local Outlier Factor', 
-#    command=None, 
-#    state=DISABLED
-#)
-#menu_picos.add_command(
-#    label='Peak Function 4', 
-#    command=None, 
-#    state=DISABLED
-#)
-#menu_picos.add_command(
-#    label='Isolation Forest', 
-#    command=None, 
-#    state=DISABLED
-#)
-#menu_picos.add_command(
-#    label='Linear Model', 
-#    command=None, 
-#    state=DISABLED
-#)
-#menu_picos.add_command(
-#    label='Peak Function 7', 
-#    command=None, 
-#    state=DISABLED
-#)
+menu_picos.add_command(
+    label='Local Outlier Factor', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Peak Function 4', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Isolation Forest', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Linear Model', 
+    command=None, 
+    state=DISABLED
+)
+menu_picos.add_command(
+    label='Peak Function 7', 
+    command=None, 
+    state=DISABLED
+)
 menu_picos.add_separator()
 menu_picos.add_command(
     label='Correlacion Pearson', 

@@ -13,6 +13,31 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter.filedialog import asksaveasfilename
 import pandas as pd
 from sklearn.impute import SimpleImputer
+import os
+
+# Global variables to store file and ROI information
+current_filename = None
+current_roi_name = None
+current_peaks = None
+
+def set_file_info(filename, roi_name):
+    """Set the current file and ROI information for saving"""
+    global current_filename, current_roi_name
+    current_filename = filename
+    current_roi_name = roi_name
+
+def get_default_save_name(extension=".png"):
+    """Generate default save name based on original filename and ROI"""
+    global current_filename, current_roi_name
+    
+    if current_filename and current_roi_name:
+        # Get base filename without extension
+        base_name = os.path.splitext(os.path.basename(current_filename))[0]
+        # Clean ROI name (remove spaces and special characters for filename)
+        roi_safe = current_roi_name.replace(' ', '_')
+        return f"{base_name}_{roi_safe}{extension}"
+    else:
+        return f"Untitled{extension}"
 
 def _is_npy_file(filename):
     return filename.lower().endswith('.npy')
@@ -286,6 +311,18 @@ def add_peak_buttons(main_window, data_sel, *args):
     )
     save_button.pack(side=tk.LEFT, padx=5)
     
+    # Add Save Peaks CSV button if peaks are available
+    if len(args) >= 3:
+        peaks = args[2] if len(args) > 2 else []
+        time_data = np.arange(len(data_sel))  # Use indices as time if no time column
+        
+        save_csv_button = tk.Button(
+            button_frame,
+            text="Save Peaks CSV",
+            command=lambda: save_peaks_csv(peaks, time_data, data_sel)
+        )
+        save_csv_button.pack(side=tk.LEFT, padx=5)
+    
     show_original_button = tk.Button(
         button_frame,
         text="Show Original",
@@ -344,7 +381,10 @@ def draw_canvas(data_sel, res, y_res, plot_mode, main_window=None, canvas=None, 
         canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
         
         if plot_mode in [0, 2]:
-            add_peak_buttons(main_window, data_sel, *args if args else [])
+            # For plot modes 0 and 2, pass y_res as the peaks
+            # Create a minimal args tuple: (None, None, peaks)
+            peak_args = (None, None, y_res)
+            add_peak_buttons(main_window, data_sel, *peak_args)
         
         return canvas
     else:
@@ -437,12 +477,21 @@ def show_peak_config(main_window, data_sel, args):
     )
     cancel_button.pack(side=tk.LEFT, padx=5)
     
+    # Add both save buttons
     save_button = tk.Button(
         button_row_frame,
         text="Save Image",
         command=save
     )
     save_button.pack(side=tk.LEFT, padx=5)
+    
+    time_data = np.arange(len(data_sel))
+    save_csv_button = tk.Button(
+        button_row_frame,
+        text="Save Peaks CSV",
+        command=lambda: save_peaks_csv(peaks, time_data, data_sel)
+    )
+    save_csv_button.pack(side=tk.LEFT, padx=5)
 
 def update_peaks_on_main(main_window, original_data, roi_index, data_sel, rise_percent, fall_percent, max_lookback, max_lookahead):
     canvas = None
@@ -502,8 +551,11 @@ def show_scale_widget(main_window):
                     break
 
 def save():
+    """Save the current plot as an image"""
+    default_name = get_default_save_name(".png")
+    
     filename = asksaveasfilename(
-        initialfile='Untitled.png',
+        initialfile=default_name,
         defaultextension=".png",
         filetypes=[
             ("PNG files", "*.png"),
@@ -517,3 +569,33 @@ def save():
     )
     if filename:  # Only save if user didn't cancel
         plt.savefig(filename, dpi=300, bbox_inches='tight')
+
+def save_peaks_csv(peaks, time_data, signal_data):
+    """Save peaks data to CSV file"""
+    default_name = get_default_save_name("_peaks.csv")
+    
+    filename = asksaveasfilename(
+        initialfile=default_name,
+        defaultextension=".csv",
+        filetypes=[
+            ("CSV files", "*.csv"),
+            ("All Files", "*.*")
+        ],
+        title="Save Peaks Data"
+    )
+    
+    if filename:
+        # Create DataFrame with peak information
+        peak_indices = peaks
+        peak_times = time_data[peak_indices] if time_data is not None else peak_indices
+        peak_values = signal_data[peak_indices]
+        
+        df = pd.DataFrame({
+            'Peak_Index': peak_indices,
+            'Time': peak_times,
+            'Signal_Value': peak_values
+        })
+        
+        df.to_csv(filename, index=False)
+        from tkinter import messagebox
+        messagebox.showinfo("Success", f"Peaks saved to {os.path.basename(filename)}")
