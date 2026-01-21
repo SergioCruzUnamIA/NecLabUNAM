@@ -216,8 +216,11 @@ def plot_time_series(norm_data):
     plot_window.title('Time Series Plot')
     plot_window.geometry('1000x1000')
     
-    # Active series
-    active_series = list(range(20))  # Initially all series are active
+    # Get actual number of series from data
+    num_series = norm_data.shape[1]
+    
+    # Active series - initially all series are active
+    active_series = list(range(num_series))
     
     # Main frame
     main_frame = tk.Frame(plot_window)
@@ -239,8 +242,8 @@ def plot_time_series(norm_data):
     listbox = tk.Listbox(left_frame, selectmode=tk.EXTENDED)
     listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
     
-    # Populate listbox with series names
-    for i in range(20): #TODO: check if only 20
+    # Populate listbox with series names based on actual number of columns
+    for i in range(num_series):
         listbox.insert(tk.END, f"Series {i+1}")
     
     # Scrollbar for listbox

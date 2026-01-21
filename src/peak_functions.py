@@ -60,9 +60,9 @@ def normalize_data(data):
     normalized_data = _normalize_data_helper(data)
     return normalized_data
 
-def elliptic_envelope_peak(norm_data, main_window=None, canvas=None):
+def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None):
     plot_mode = 0
-    pico_norm_data = norm_data[:,15]
+    pico_norm_data = norm_data[:, roi_index]
 
     reg = ElasticNet().fit(np.array(range(len(pico_norm_data))).reshape(-1, 1), pico_norm_data)
     res = reg.predict(np.array(range(len(pico_norm_data))).reshape(-1, 1))
@@ -75,11 +75,11 @@ def elliptic_envelope_peak(norm_data, main_window=None, canvas=None):
 
     draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas)
 
-def peak_caller(data, rise_percent, fall_percent, max_lookback, max_lookahead, main_window=None, canvas=None):
+def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead, main_window=None, canvas=None):
     plot_mode = 1
     peaks = []
     n = len(data)
-    data_sel = data[:, 15]
+    data_sel = data[:, roi_index]
     
     for i in range(n):
         # Ajusta el rango de lookback si se excede el rango de datos
@@ -118,15 +118,15 @@ def peak_caller(data, rise_percent, fall_percent, max_lookback, max_lookahead, m
 
     res = np.zeros_like(data_sel)
     y_res = peaks
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, data, peaks, rise_percent, fall_percent, max_lookahead, max_lookback)
+    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, data, roi_index, peaks, rise_percent, fall_percent, max_lookahead, max_lookback)
     return peaks
 
-def actual_peak_caller(data, main_window=None, canvas=None):
-    return peak_caller(data, rise_percent=5, fall_percent=5, max_lookback=10, max_lookahead=10, main_window=main_window, canvas=canvas)
+def actual_peak_caller(data, roi_index, main_window=None, canvas=None):
+    return peak_caller(data, roi_index, rise_percent=5, fall_percent=5, max_lookback=10, max_lookahead=10, main_window=main_window, canvas=canvas)
 
-def local_outlier_factor_peak(data, main_window=None, canvas=None):
+def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None):
     plot_mode = 2
-    data_sel = data[:, 15]
+    data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
     new_data = data_sel - res
@@ -136,9 +136,9 @@ def local_outlier_factor_peak(data, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
 
-def clf_peak(data, main_window=None, canvas=None): #hay dos elliptic envelope?
+def clf_peak(data, roi_index, main_window=None, canvas=None): #hay dos elliptic envelope?
     plot_mode = 2
-    data_sel = data[:, 15]
+    data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
     new_data = data_sel - res
@@ -148,9 +148,9 @@ def clf_peak(data, main_window=None, canvas=None): #hay dos elliptic envelope?
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
 
-def isolation_forest_peak(data, main_window=None, canvas=None):
+def isolation_forest_peak(data, roi_index, main_window=None, canvas=None):
     plot_mode = 2
-    data_sel = data[:, 15]
+    data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
     new_data = data_sel - res
@@ -160,9 +160,9 @@ def isolation_forest_peak(data, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
 
-def linear_model_peak(data, main_window=None, canvas=None):
+def linear_model_peak(data, roi_index, main_window=None, canvas=None):
     plot_mode = 2
-    data_sel = data[:, 15]
+    data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
     new_data = data_sel - res
@@ -172,9 +172,9 @@ def linear_model_peak(data, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
 
-def lasso_peak(data, main_window=None, canvas=None): # hay dos local outlier factor
+def lasso_peak(data, roi_index, main_window=None, canvas=None): # hay dos local outlier factor
     plot_mode = 2
-    data_sel = data[:, 15]
+    data_sel = data[:, roi_index]
     reg = Lasso().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
     res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
     new_data = data_sel - res
@@ -202,6 +202,8 @@ def create_visualization_window():
     button_save.grid(row=1,column=1)
     return visualization_window
 
+#------------------------------------
+
 def update_peak_caller(data_sel, *args):
     def update_graph():
         new_rise_percent = spinval_rise.get()
@@ -209,7 +211,7 @@ def update_peak_caller(data_sel, *args):
         new_max_lookahead = spinval_lookahead.get()
         new_max_lookback = spinval_lookback.get()
 
-    original_data, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args
+    original_data, roi_index, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args
     fig, ax = plt.subplots()
     plt.plot(data_sel)
     plt.scatter(peaks, data_sel[peaks], color='darkorange')
@@ -236,7 +238,7 @@ def update_peak_caller(data_sel, *args):
     update_button = tk.Button(
         peak_caller_frame, 
         text="Update Graph", 
-        command=lambda:(peak_caller(original_data, int(spinbox_rise.get()), int(spinbox_fall.get()), int(spinbox_lookback.get()), int(spinbox_lookahead.get())),window.destroy(), update_graph)
+        command=lambda:(peak_caller(original_data, roi_index, int(spinbox_rise.get()), int(spinbox_fall.get()), int(spinbox_lookback.get()), int(spinbox_lookahead.get())),window.destroy(), update_graph)
     )
     
     peak_caller_frame.grid(row=0, column=3, sticky='nsew')
@@ -253,7 +255,7 @@ def update_peak_caller(data_sel, *args):
     return fig
 
 def update_peak_caller_main(data_sel, main_window, canvas, *args):
-    original_data, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args
+    original_data, roi_index, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args
     fig, ax = plt.subplots()
     plt.plot(data_sel)
     plt.scatter(peaks, data_sel[peaks], color='darkorange')
@@ -298,79 +300,6 @@ def add_peak_buttons(main_window, data_sel, *args):
             command=lambda: show_peak_config(main_window, data_sel, args)
         )
         configure_button.pack(side=tk.LEFT, padx=5)
-
-def show_peak_config(main_window, data_sel, args):
-    original_data, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args[:6]
-    
-    for widget in main_window.winfo_children():
-        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
-            widget.destroy()
-    
-    config_frame = tk.Frame(main_window)
-    config_frame.peak_button_frame = True
-    config_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
-    
-    tk.Label(config_frame, text="Rise %:").grid(row=0, column=0, padx=5)
-    spinval_rise = tk.IntVar(value=rise_percent)
-    spinbox_rise = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_rise, width=10)
-    spinbox_rise.grid(row=0, column=1, padx=5)
-    
-    tk.Label(config_frame, text="Fall %:").grid(row=0, column=2, padx=5)
-    spinval_fall = tk.IntVar(value=fall_percent)
-    spinbox_fall = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_fall, width=10)
-    spinbox_fall.grid(row=0, column=3, padx=5)
-    
-    tk.Label(config_frame, text="Lookback:").grid(row=1, column=0, padx=5)
-    spinval_lookback = tk.IntVar(value=max_lookback)
-    spinbox_lookback = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_lookback, width=10)
-    spinbox_lookback.grid(row=1, column=1, padx=5)
-    
-    tk.Label(config_frame, text="Lookahead:").grid(row=1, column=2, padx=5)
-    spinval_lookahead = tk.IntVar(value=max_lookahead)
-    spinbox_lookahead = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_lookahead, width=10)
-    spinbox_lookahead.grid(row=1, column=3, padx=5)
-    
-    button_row_frame = tk.Frame(config_frame)
-    button_row_frame.grid(row=2, column=0, columnspan=4, pady=10)
-    
-    update_button = tk.Button(
-        button_row_frame,
-        text="Update Peaks",
-        command=lambda: update_peaks_on_main(
-            main_window, original_data, data_sel,
-            spinval_rise.get(), spinval_fall.get(),
-            spinval_lookback.get(), spinval_lookahead.get()
-        )
-    )
-    update_button.pack(side=tk.LEFT, padx=5)
-    
-    cancel_button = tk.Button(
-        button_row_frame,
-        text="Cancel",
-        command=lambda: restore_normal_buttons(main_window, data_sel, args)
-    )
-    cancel_button.pack(side=tk.LEFT, padx=5)
-    
-    save_button = tk.Button(
-        button_row_frame,
-        text="Save Image",
-        command=save
-    )
-    save_button.pack(side=tk.LEFT, padx=5)
-
-def update_peaks_on_main(main_window, original_data, data_sel, rise_percent, fall_percent, max_lookback, max_lookahead):
-    canvas = None
-    for widget in main_window.winfo_children():
-        if hasattr(widget, 'get_tk_widget'):
-            canvas = widget
-            widget.get_tk_widget().grid_forget()
-            break
-    
-    new_peaks = peak_caller(
-        original_data, rise_percent, fall_percent, 
-        max_lookback, max_lookahead, 
-        main_window=main_window, canvas=canvas
-    )
 
 def restore_normal_buttons(main_window, data_sel, args):
     for widget in main_window.winfo_children():
@@ -455,6 +384,80 @@ def show_original_data(main_window, data_sel, args):
         )
         back_button.pack(side=tk.LEFT, padx=5)
 
+
+def show_peak_config(main_window, data_sel, args):
+    original_data, roi_index, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args[:7]
+    
+    for widget in main_window.winfo_children():
+        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
+            widget.destroy()
+    
+    config_frame = tk.Frame(main_window)
+    config_frame.peak_button_frame = True
+    config_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
+    
+    tk.Label(config_frame, text="Rise %:").grid(row=0, column=0, padx=5)
+    spinval_rise = tk.IntVar(value=rise_percent)
+    spinbox_rise = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_rise, width=10)
+    spinbox_rise.grid(row=0, column=1, padx=5)
+    
+    tk.Label(config_frame, text="Fall %:").grid(row=0, column=2, padx=5)
+    spinval_fall = tk.IntVar(value=fall_percent)
+    spinbox_fall = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_fall, width=10)
+    spinbox_fall.grid(row=0, column=3, padx=5)
+    
+    tk.Label(config_frame, text="Lookback:").grid(row=1, column=0, padx=5)
+    spinval_lookback = tk.IntVar(value=max_lookback)
+    spinbox_lookback = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_lookback, width=10)
+    spinbox_lookback.grid(row=1, column=1, padx=5)
+    
+    tk.Label(config_frame, text="Lookahead:").grid(row=1, column=2, padx=5)
+    spinval_lookahead = tk.IntVar(value=max_lookahead)
+    spinbox_lookahead = ttk.Spinbox(config_frame, from_=1.0, to=100.0, textvariable=spinval_lookahead, width=10)
+    spinbox_lookahead.grid(row=1, column=3, padx=5)
+    
+    button_row_frame = tk.Frame(config_frame)
+    button_row_frame.grid(row=2, column=0, columnspan=4, pady=10)
+    
+    update_button = tk.Button(
+        button_row_frame,
+        text="Update Peaks",
+        command=lambda: update_peaks_on_main(
+            main_window, original_data, roi_index, data_sel,
+            spinval_rise.get(), spinval_fall.get(),
+            spinval_lookback.get(), spinval_lookahead.get()
+        )
+    )
+    update_button.pack(side=tk.LEFT, padx=5)
+    
+    cancel_button = tk.Button(
+        button_row_frame,
+        text="Cancel",
+        command=lambda: restore_normal_buttons(main_window, data_sel, args)
+    )
+    cancel_button.pack(side=tk.LEFT, padx=5)
+    
+    save_button = tk.Button(
+        button_row_frame,
+        text="Save Image",
+        command=save
+    )
+    save_button.pack(side=tk.LEFT, padx=5)
+
+def update_peaks_on_main(main_window, original_data, roi_index, data_sel, rise_percent, fall_percent, max_lookback, max_lookahead):
+    canvas = None
+    for widget in main_window.winfo_children():
+        if hasattr(widget, 'get_tk_widget'):
+            canvas = widget
+            widget.get_tk_widget().grid_forget()
+            break
+    
+    new_peaks = peak_caller(
+        original_data, roi_index, rise_percent, fall_percent, 
+        max_lookback, max_lookahead, 
+        main_window=main_window, canvas=canvas
+    )
+
 def restore_peak_view(main_window, data_sel, args):
     for widget in main_window.winfo_children():
         if isinstance(widget, tk.Frame):
@@ -466,8 +469,8 @@ def restore_peak_view(main_window, data_sel, args):
         if hasattr(widget, 'get_tk_widget'):
             widget.get_tk_widget().grid_forget()
     
-    if len(args) >= 6:
-        original_data, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args[:6]
+    if len(args) >= 7:
+        original_data, roi_index, peaks, rise_percent, fall_percent, max_lookback, max_lookahead = args[:7]
         
         fig, ax = plt.subplots()
         plt.plot(data_sel)
@@ -479,6 +482,8 @@ def restore_peak_view(main_window, data_sel, args):
         canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
         
         add_peak_buttons(main_window, data_sel, *args)
+
+#--------------------------------
 
 def hide_scale_widget(main_window):
     for widget in main_window.winfo_children():
