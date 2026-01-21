@@ -5,11 +5,13 @@ from corr_dendo_functions import *
 import os
 import pandas as pd
 
-# Global variable to store selected ROI index
+# Global variables to store file and ROI information
 selected_roi_index = None
+loaded_filename = None
+selected_roi_name = None
 
 def initialize_visualization(window, menu_picos, canvas):
-    global selected_roi_index
+    global selected_roi_index, loaded_filename, selected_roi_name
     
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
@@ -23,6 +25,9 @@ def initialize_visualization(window, menu_picos, canvas):
     
     if not filename:
         return
+    
+    # Store the loaded filename
+    loaded_filename = filename
     
     # Load raw data to get column names for CSV files
     if filename.lower().endswith('.csv'):
@@ -38,6 +43,9 @@ def initialize_visualization(window, menu_picos, canvas):
         
         if selected_roi_index is None:
             return  # User cancelled selection
+        
+        # Store the selected ROI name
+        selected_roi_name = column_names[selected_roi_index]
     else:
         # For .npy files, we'll need to select by column index
         # First load to check how many columns
@@ -49,20 +57,26 @@ def initialize_visualization(window, menu_picos, canvas):
         
         if selected_roi_index is None:
             return
+        
+        # Store the selected ROI name
+        selected_roi_name = column_names[selected_roi_index]
+    
+    # Pass filename and ROI info to peak functions
+    set_file_info(loaded_filename, selected_roi_name)
     
     data = normalize_data(filename)
     canvas = _plot_data(data, window, canvas)
 
-    #menu_picos.entryconfig("Elliptic Envelope", command=lambda:elliptic_envelope_peak(data, selected_roi_index, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Elliptic Envelope", command=lambda:elliptic_envelope_peak(data, selected_roi_index, window, canvas), state=NORMAL)
     menu_picos.entryconfig("Peak Caller", command=lambda:actual_peak_caller(data, selected_roi_index, window, canvas), state=NORMAL)
-    #menu_picos.entryconfig("Local Outlier Factor", command=lambda:local_outlier_factor_peak(data, selected_roi_index, window, canvas), state=NORMAL)
-    #menu_picos.entryconfig("Peak Function 4", command=lambda:clf_peak(data, selected_roi_index, window, canvas), state=NORMAL)
-    #menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data, selected_roi_index, window, canvas), state=NORMAL)
-    #menu_picos.entryconfig("Linear Model", command=lambda:linear_model_peak(data, selected_roi_index, window, canvas), state=NORMAL)
-    #menu_picos.entryconfig("Peak Function 7", command=lambda:lasso_peak(data, selected_roi_index, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlacion Pearson", command=lambda:plot_correlation(data,correlation_pearson(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlacion Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlacion Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Local Outlier Factor", command=lambda:local_outlier_factor_peak(data, selected_roi_index, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Peak Function 4", command=lambda:clf_peak(data, selected_roi_index, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data, selected_roi_index, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Linear Model", command=lambda:linear_model_peak(data, selected_roi_index, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Peak Function 7", command=lambda:lasso_peak(data, selected_roi_index, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Pearson", command=lambda:plot_correlation(data,correlation_pearson(data),window,canvas,'pearson'), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas,'kendall'), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas,'spearman'), state=NORMAL)
     menu_picos.entryconfig("Dendograma", command=lambda:plot_dendogram(data, window, canvas), state=NORMAL)
     menu_picos.entryconfig("Series de tiempo", command=lambda:plot_time_series(data), state=NORMAL)
 

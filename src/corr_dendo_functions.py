@@ -36,13 +36,14 @@ def correlation_spearman(data):
     #plt.show()
     return corr1
 
-def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
+def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None):
     '''Plot a graphical correlation matrix for a dataframe.
 
     Input:
         df: pandas DataFrame
         size: vertical and horizontal size of the plot
-        is_precomputed_corr: if True, df is already a correlation matrix'''
+        is_precomputed_corr: if True, df is already a correlation matrix
+        corr_method: the correlation method used (e.g., 'pearson', 'kendall', 'spearman')'''
     if canvas is not None:
         canvas.get_tk_widget().grid_forget()
         # Close any previous figure to prevent memory leaks
@@ -76,11 +77,27 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
     root.grid_rowconfigure(0, weight=1)  # Plot area should expand
     root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
     
+    # Get default filename from visualization_helpers if available
+    def get_default_correlation_name(extension):
+        try:
+            from visualization_helpers import loaded_filename
+            if loaded_filename:
+                import os
+                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
+                method_str = f"_{corr_method}" if corr_method else ""
+                return f"{base_name}_correlation{method_str}{extension}"
+        except:
+            pass
+        method_str = f"_{corr_method}" if corr_method else ""
+        return f"correlation{method_str}{extension}"
+    
     # Add save button for correlation matrix
     def _save_correlation():
+        default_name = get_default_correlation_name('.csv')
         from tkinter import filedialog
         filename = filedialog.asksaveasfilename(
-            defaultextension="Untitled.csv",
+            initialfile=default_name,
+            defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
             title="Save Correlation Matrix"
         )
@@ -88,8 +105,9 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
             corr_func.to_csv(filename, header=True, index=True)
     
     def _save_image():
+        default_name = get_default_correlation_name('.png')
         filename = asksaveasfilename(
-            initialfile = 'Untitled.png',
+            initialfile=default_name,
             defaultextension=".png",
             filetypes=[("All Files","*.*"),("Portable Graphics Format","*.png")]
         )
@@ -120,7 +138,7 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
     
     return canvas
 
-def plot_correlation(data, corr, root, canvas):
+def plot_correlation(data, corr, root, canvas, corr_method=None):
     if canvas is not None:
         canvas.get_tk_widget().grid_forget()
         # Close any previous figure to prevent memory leaks
@@ -135,7 +153,7 @@ def plot_correlation(data, corr, root, canvas):
     columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
     df = df.reindex(columns, axis=1)
     size = 5
-    canvas = _plot_correlation_helper(df, size, root, canvas)
+    canvas = _plot_correlation_helper(df, size, root, canvas, corr_method=corr_method)
     return canvas
 
 def _plot_dendrogram_helper(model, **kwargs):
@@ -183,27 +201,88 @@ def plot_dendogram(data, root, canvas):
     root.grid_rowconfigure(0, weight=1)  # Plot area should expand
     root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
     
-    # Add only save image button for dendrogram
+    # Get default filename from visualization_helpers if available
+    def get_default_dendogram_name(extension):
+        try:
+            from visualization_helpers import loaded_filename
+            if loaded_filename:
+                import os
+                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
+                return f"{base_name}_dendrogram{extension}"
+        except:
+            pass
+        return f"dendrogram{extension}"
+    
+    # Add save buttons for dendrogram
     def _save_dendrogram_image():
+        default_name = get_default_dendogram_name('.png')
         filename = asksaveasfilename(
-            initialfile='Dendrogram.png',
+            initialfile=default_name,
             defaultextension=".png",
             filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
         )
         if filename:
             fig.savefig(filename)
     
+    def _save_dendrogram_csv():
+        """Save dendrogram clustering data to CSV"""
+        default_name = get_default_dendogram_name('.csv')
+        filename = asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Dendrogram Data"
+        )
+        
+        if filename:
+            # Create DataFrame with clustering information
+            # Include cluster labels and linkage information
+            df_data = {
+                'Sample_Index': list(range(len(clustering.labels_))),
+                'Cluster_Label': clustering.labels_
+            }
+            
+            df = pd.DataFrame(df_data)
+            
+            # Add linkage matrix information as separate section
+            linkage_data = []
+            for i, (child1, child2) in enumerate(clustering.children_):
+                linkage_data.append({
+                    'Merge_Step': i,
+                    'Child_1': int(child1),
+                    'Child_2': int(child2),
+                    'Distance': clustering.distances_[i]
+                })
+            
+            df_linkage = pd.DataFrame(linkage_data)
+            
+            # Save both dataframes to CSV
+            with open(filename, 'w', newline='') as f:
+                f.write("# Cluster Labels\n")
+                df.to_csv(f, index=False)
+                f.write("\n# Linkage Matrix\n")
+                df_linkage.to_csv(f, index=False)
+            
+            messagebox.showinfo("Success", f"Dendrogram data saved to {filename}")
+    
     # Create button frame for dendrogram
     button_frame = tk.Frame(root)
     button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
     
-    # Create only save image button
+    # Create save buttons
     save_img_button = tk.Button(
         button_frame,
         text="Save Image",
         command=_save_dendrogram_image
     )
     save_img_button.pack(side=tk.LEFT, padx=5)
+    
+    save_csv_button = tk.Button(
+        button_frame,
+        text="Save CSV",
+        command=_save_dendrogram_csv
+    )
+    save_csv_button.pack(side=tk.LEFT, padx=5)
     
     # Configure button frame
     root.grid_rowconfigure(1, weight=0)  # Don't expand button row
@@ -221,6 +300,18 @@ def plot_time_series(norm_data):
     
     # Active series - initially all series are active
     active_series = list(range(num_series))
+    
+    # Get default filename from visualization_helpers if available
+    def get_default_time_series_name(extension):
+        try:
+            from visualization_helpers import loaded_filename
+            if loaded_filename:
+                import os
+                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
+                return f"{base_name}_time_series{extension}"
+        except:
+            pass
+        return f"time_series{extension}"
     
     # Main frame
     main_frame = tk.Frame(plot_window)
@@ -301,8 +392,9 @@ def plot_time_series(norm_data):
         """
             Saves the time series as an image
         """
+        default_name = get_default_time_series_name('.png')
         filename = asksaveasfilename(
-            initialfile='TimeSeries.png',
+            initialfile=default_name,
             defaultextension=".png",
             filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
         )
@@ -313,8 +405,9 @@ def plot_time_series(norm_data):
         """
             Saves the time series as a .csv file
         """
+        default_name = get_default_time_series_name('.csv')
         filename = asksaveasfilename(
-            initialfile='TimeSeries.csv',
+            initialfile=default_name,
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
         )
