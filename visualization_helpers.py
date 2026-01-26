@@ -2,35 +2,52 @@ from tkinter import *
 from tkinter import filedialog
 from peak_functions import *
 from corr_dendo_functions import *
+import os
 
 def initialize_visualization(window, menu_picos, canvas):
-    filename = filedialog.askopenfilename(parent=window,title="Abrir archivo",filetypes=[("Numpy files", "*.npy")])
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    
+    filename = filedialog.askopenfilename(
+        parent=window,
+        title="Open File",
+        initialdir=project_root,
+        filetypes=[("Data files", "*.npy;*.csv"), ("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")]
+    )
+    
     data = normalize_data(filename)
-    _plot_data(data, window, canvas)
+    canvas = _plot_data(data, window, canvas)
 
-    rise = 5
-    fall = 5
-    max_lookahead = 10
-    max_lookback = 10
     menu_picos.entryconfig("Elliptic Envelope", command=lambda:elliptic_envelope_peak(data, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Peak Caller", command=lambda:peak_caller(data, rise, fall, max_lookahead, max_lookback, window, canvas), state=NORMAL)
-    menu_picos.entryconfig("Local Outlier Factor", command=lambda:local_outlier_factor_peak(data), state=NORMAL)
-    menu_picos.entryconfig("Pico 4", command=lambda:clf_peak(data), state=NORMAL)
-    menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data), state=NORMAL)
-    menu_picos.entryconfig("Linear Model", command=lambda:linear_model_peak(data), state=NORMAL)
-    menu_picos.entryconfig("Pico 7", command=lambda:lasso_peak(data), state=NORMAL)
-    menu_picos.entryconfig("Correlation Pearson", command=lambda:plot_correlation(data,correlation_pearson(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlation Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Correlation Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas), state=NORMAL)
-    menu_picos.entryconfig("Dendogram", command=lambda:plot_correlation(data, window, canvas), state=NORMAL)
-    #button1.config(state=NORMAL)
+    menu_picos.entryconfig("Peak Caller", command=lambda:actual_peak_caller(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Local Outlier Factor", command=lambda:local_outlier_factor_peak(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Peak Function 4", command=lambda:clf_peak(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Isolation Forest", command=lambda:isolation_forest_peak(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Linear Model", command=lambda:linear_model_peak(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Peak Function 7", command=lambda:lasso_peak(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Pearson", command=lambda:plot_correlation(data,correlation_pearson(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Kendall", command=lambda:plot_correlation(data,correlation_kendall(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Correlacion Spearman", command=lambda:plot_correlation(data,correlation_spearman(data),window,canvas), state=NORMAL)
+    menu_picos.entryconfig("Dendograma", command=lambda:plot_dendogram(data, window, canvas), state=NORMAL)
+    menu_picos.entryconfig("Series de tiempo", command=lambda:plot_time_series(data), state=NORMAL)
 
 def _plot_data(data, window, canvas):
     fig, ax = plt.subplots()
     plt.plot(np.array(range(len(data[:, 15]))).reshape(-1, 1), data[:, 15])
-    ax = plt.gca()
+    
+    show_scale_widget(window)
+    
     if canvas is not None:
         canvas.get_tk_widget().grid_forget()
     canvas = FigureCanvasTkAgg(fig, master=window)
     canvas.draw()
     canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+    return canvas
+
+def show_scale_widget(main_window):
+    for widget in main_window.winfo_children():
+        if isinstance(widget, tk.Frame):
+            for child in widget.winfo_children():
+                if isinstance(child, tk.Scale):
+                    child.grid()
+                    break

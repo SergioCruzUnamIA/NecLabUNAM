@@ -1,0 +1,16 @@
+name: neclab_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pyometiff
+  - matplotlib
+  - scikit-learn
+  - libvorbis
+  - opencv
+  - pandas
+  - pillow
+  - numpy
+  - scikit-image
+  - scipy
