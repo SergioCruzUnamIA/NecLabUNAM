@@ -77,7 +77,7 @@ Una vez activado, verá `(neclab_env)` al inicio de la línea de comandos.
 Con el ambiente virtual activado, ejecute:
 
 ```
-python interface3_clean.py
+python interface3.py
 ```
 
 La primera ejecución puede tardar entre 1 y 2 minutos mientras se cargan las bibliotecas.
