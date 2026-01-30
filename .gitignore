@@ -1,2 +1,5 @@
 /env
 test.tif
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
