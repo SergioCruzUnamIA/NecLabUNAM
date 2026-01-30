@@ -418,7 +418,6 @@ class VariabilityAnalysisWindow:
         tk.Button(row2, text="Procesar Clusters (Básico)", command=self.process_clusters_basic).pack(side=tk.LEFT, padx=5)
         tk.Button(row2, text="Procesar Clusters (Avanzado)", command=self.process_clusters_advanced).pack(side=tk.LEFT, padx=5)
         tk.Button(row2, text="Mostrar Serie Temporal", command=self.show_time_series).pack(side=tk.LEFT, padx=5)
-        tk.Button(row2, text="Vista 3D", command=self.show_3d_surface).pack(side=tk.LEFT, padx=5)
         
         # Row 3: Save and selection
         row3 = tk.Frame(control_frame)
@@ -1019,64 +1018,6 @@ class VariabilityAnalysisWindow:
         canvas = FigureCanvasTkAgg(fig, master=ts_window)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    
-    def show_3d_surface(self):
-        """Mostrar visualización 3D de la superficie de variabilidad"""
-        from mpl_toolkits.mplot3d import Axes3D
-        
-        # Crear ventana para visualización 3D
-        window_3d = tk.Toplevel(self.window)
-        window_3d.title(f"Superficie 3D - {self.method_name}")
-        window_3d.geometry("800x600")
-        
-        # Submuestrear la imagen para que la visualización sea más rápida
-        step = max(1, min(self.var_im.shape) // 100)  # Máximo 100 puntos por dimensión
-        var_im_sub = self.var_im[::step, ::step]
-        
-        # Crear meshgrid
-        x = np.arange(0, var_im_sub.shape[1])
-        y = np.arange(0, var_im_sub.shape[0])
-        X, Y = np.meshgrid(x, y)
-        Z = var_im_sub
-        
-        # Crear figura 3D
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        # Graficar superficie
-        surf = ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.8)
-        
-        # Configurar ejes
-        ax.set_xlabel('X (píxeles)')
-        ax.set_ylabel('Y (píxeles)')
-        ax.set_zlabel(f'{self.method_name}')
-        ax.set_title(f'Superficie de Variabilidad - {self.method_name}')
-        
-        # Agregar barra de color
-        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label=self.method_name)
-        
-        # Agregar a la ventana
-        canvas = FigureCanvasTkAgg(fig, master=window_3d)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # Frame para controles
-        control_frame = tk.Frame(window_3d)
-        control_frame.pack(fill=tk.X, pady=5)
-        
-        # Botón para guardar
-        def save_3d():
-            filename = asksaveasfilename(
-                initialfile=f'{self.method_name.replace(" ", "_")}_3D.png',
-                defaultextension=".png",
-                filetypes=[("PNG files", "*.png"), ("All Files", "*.*")]
-            )
-            if filename:
-                fig.savefig(filename, dpi=300, bbox_inches='tight')
-                messagebox.showinfo("Éxito", f"Imagen 3D guardada en {filename}")
-        
-        tk.Button(control_frame, text="Guardar Imagen 3D", command=save_3d).pack(side=tk.LEFT, padx=10)
-        tk.Label(control_frame, text="Usa el mouse para rotar la vista").pack(side=tk.LEFT, padx=10)
     
     def save_image(self):
         """Guardar la imagen actual"""
