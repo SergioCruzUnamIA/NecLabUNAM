@@ -4,11 +4,13 @@ import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.widgets import RectangleSelector
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 from skimage.filters import unsharp_mask
 from tkinter.filedialog import asksaveasfilename
+from sklearn.cluster import KMeans
 
 def calculate_variability(img_array, method=1):
     """
@@ -322,6 +324,8 @@ def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
         for cl in res_clusters:
             if min_size <= len(cl) <= max_size:
                 final_cl.append(cl)
+        return final_cl, []
+
 def extract_time_series(img_array, cluster_points):
     """
     Extrae serie temporal de un cluster específico.
@@ -330,6 +334,49 @@ def extract_time_series(img_array, cluster_points):
     sel_data_final = img_array[:, final_array[:,0], final_array[:,1]]
     sel_data_final_mean = np.mean(sel_data_final, axis=1)
     return sel_data_final_mean
+
+def decompose_large_clusters(res_clusters, var_im, min_size=20, max_size=200):
+    """
+    Descompone clusters grandes usando KMeans con features espaciales + variabilidad.
+    Los clusters menores a min_size se descartan, los que están entre min_size y max_size
+    se mantienen, y los mayores a max_size se subdividen con KMeans.
+    Basado en el notebook cluster-Copy4.ipynb.
+    """
+    decomposed = []
+    max_ax = np.max(var_im.shape)
+    max_var = var_im.max()
+    if max_var == 0:
+        max_var = 1  # Evitar división por cero
+    norm_var_im = (var_im / max_var) * max_ax
+    
+    for cl in res_clusters:
+        cl_size = len(cl)
+        if cl_size < min_size:
+            continue  # Descartar clusters muy pequeños
+        elif cl_size <= max_size:
+            decomposed.append(cl)  # Mantener clusters de tamaño adecuado
+        else:
+            # Descomponer clusters grandes con KMeans
+            num_sub = (cl_size // max_size) + 1
+            try:
+                # Crear features 3D: coordenadas escaladas + variabilidad normalizada
+                new_cl = [
+                    (cl[i][0] * 10, cl[i][1] * 10, norm_var_im[cl[i][0], cl[i][1]])
+                    for i in range(cl_size)
+                ]
+                kmeans = KMeans(n_clusters=num_sub, random_state=0, n_init="auto").fit(new_cl)
+                labels = kmeans.labels_
+                for label_val in np.unique(labels):
+                    sub_cluster = np.array(cl)[labels == label_val]
+                    # Convertir de vuelta a lista de tuplas
+                    sub_cluster_list = [tuple(p) for p in sub_cluster.tolist()]
+                    if len(sub_cluster_list) >= min_size:
+                        decomposed.append(sub_cluster_list)
+            except Exception as e:
+                print(f"Error descomponiendo cluster de tamaño {cl_size}: {e}")
+                decomposed.append(cl)  # Mantener original si falla
+    
+    return decomposed
 
 class VariabilityAnalysisWindow:
     """
@@ -350,6 +397,8 @@ class VariabilityAnalysisWindow:
         self.final_clusters = None
         self.selected_clusters = []
         self.scatter_objects = []
+        self.rect_selector = None
+        self.selection_mode = 'add'  # 'add' o 'remove'
         
         # Variables para análisis
         self.time_series_data = []
@@ -415,16 +464,21 @@ class VariabilityAnalysisWindow:
         self.max_size_var = tk.IntVar(value=200)
         ttk.Spinbox(row2, from_=1, to=1000, textvariable=self.max_size_var, width=8).pack(side=tk.LEFT, padx=(0, 10))
         
+        tk.Button(row2, text="Descomponer Clusters Grandes", command=self.decompose_clusters).pack(side=tk.LEFT, padx=5)
         tk.Button(row2, text="Procesar Clusters (Básico)", command=self.process_clusters_basic).pack(side=tk.LEFT, padx=5)
         tk.Button(row2, text="Procesar Clusters (Avanzado)", command=self.process_clusters_advanced).pack(side=tk.LEFT, padx=5)
-        tk.Button(row2, text="Mostrar Serie Temporal", command=self.show_time_series).pack(side=tk.LEFT, padx=5)
-        tk.Button(row2, text="Vista 3D", command=self.show_3d_surface).pack(side=tk.LEFT, padx=5)
         
-        # Row 3: Save and selection
+        # Row 3: Additional controls
         row3 = tk.Frame(control_frame)
         row3.pack(fill=tk.X, pady=2)
         
+        tk.Button(row3, text="Mostrar Serie Temporal", command=self.show_time_series).pack(side=tk.LEFT, padx=5)
+        tk.Button(row3, text="Vista 3D", command=self.show_3d_surface).pack(side=tk.LEFT, padx=5)
         tk.Button(row3, text="Guardar Imagen", command=self.save_image).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Separator(row3, orient='vertical').pack(side=tk.LEFT, fill='y', padx=10)
+        
+        tk.Button(row3, text="Seleccionar Todos", command=self.select_all_clusters).pack(side=tk.LEFT, padx=5)
         tk.Button(row3, text="Limpiar Selección", command=self.clear_selection).pack(side=tk.LEFT, padx=5)
         tk.Button(row3, text="Usar Seleccionados", command=self.use_selected_clusters).pack(side=tk.LEFT, padx=5)
         
@@ -444,12 +498,35 @@ class VariabilityAnalysisWindow:
         
         # Frame para botones del panel
         button_frame = tk.Frame(self.selection_frame)
-        button_frame.pack(fill=tk.X, pady=10)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Botón para remover seleccionado
         remove_btn = tk.Button(button_frame, text="Remover", 
                               command=self.remove_selected_from_list)
         remove_btn.pack(fill=tk.X, pady=2)
+        
+        # Separador
+        ttk.Separator(self.selection_frame, orient='horizontal').pack(fill='x', padx=10, pady=5)
+        
+        # Controles de selección por región
+        region_label = tk.Label(self.selection_frame, text="Selección por Región",
+                               font=("Arial", 10, "bold"))
+        region_label.pack(pady=(5, 2))
+        
+        region_info = tk.Label(self.selection_frame, 
+                              text="Click derecho + arrastrar\nen el gráfico de clusters",
+                              font=("Arial", 8), fg='gray',
+                              justify=tk.CENTER)
+        region_info.pack(pady=(0, 5))
+        
+        mode_frame = tk.Frame(self.selection_frame)
+        mode_frame.pack(fill=tk.X, padx=10)
+        
+        self.selection_mode_var = tk.StringVar(value='add')
+        tk.Radiobutton(mode_frame, text="Añadir", variable=self.selection_mode_var,
+                       value='add', command=self._update_selection_mode).pack(side=tk.LEFT, expand=True)
+        tk.Radiobutton(mode_frame, text="Quitar", variable=self.selection_mode_var,
+                       value='remove', command=self._update_selection_mode).pack(side=tk.LEFT, expand=True)
         
         # Información
         self.selection_info = tk.Label(self.selection_frame, 
@@ -525,6 +602,17 @@ class VariabilityAnalysisWindow:
         # CONECTAR EVENTO DE CLICK - MUY IMPORTANTE
         if self.final_clusters is not None:
             canvas.mpl_connect('pick_event', self.on_cluster_click)
+            
+            # Conectar rectangle selector para selección por región (botón derecho)
+            self.rect_selector = RectangleSelector(
+                ax4, self._on_region_selected,
+                useblit=True,
+                button=[3],  # Solo botón derecho del mouse
+                minspanx=5, minspany=5,
+                spancoords='pixels',
+                interactive=False,
+                props=dict(facecolor='yellow', edgecolor='black', alpha=0.3, linewidth=1.5)
+            )
         
         # Guardar referencia para save
         self.current_fig = fig
@@ -537,12 +625,6 @@ class VariabilityAnalysisWindow:
         self.info_label.config(text=f"Binarización aplicada con threshold {th}")
         self.update_display()
     
-    def find_clusters(self):
-        """Encontrar clusters básicos"""
-        if self.res_labels is None:
-            messagebox.showwarning("Advertencia", "Primero aplica la binarización")
-            return
-        
     def process_clusters_basic(self):
         """Procesar clusters - versión básica (filtrado por tamaño)"""
         if self.res_clusters is None:
@@ -588,6 +670,7 @@ class VariabilityAnalysisWindow:
         except Exception as e:
             # Si falla, usar método básico como respaldo
             messagebox.showwarning("Advertencia", f"Error en procesamiento avanzado: {e}\nUsando método básico como respaldo")
+    
     def find_clusters(self):
         """Encontrar clusters básicos"""
         if self.res_labels is None:
@@ -597,6 +680,82 @@ class VariabilityAnalysisWindow:
         pixels = extract_pixels_from_binary(self.res_labels)
         self.res_clusters = list(neighboring_groups(pixels))
         self.info_label.config(text=f"Encontrados {len(self.res_clusters)} clusters básicos")
+    
+    def decompose_clusters(self):
+        """Descomponer clusters grandes usando KMeans"""
+        if self.res_clusters is None:
+            messagebox.showwarning("Advertencia", "Primero encuentra los clusters básicos")
+            return
+        
+        min_size = self.min_size_var.get()
+        max_size = self.max_size_var.get()
+        
+        # Contar clusters grandes antes de descomponer
+        large_count = sum(1 for cl in self.res_clusters if len(cl) > max_size)
+        
+        # Descomponer
+        self.res_clusters = decompose_large_clusters(
+            self.res_clusters, self.var_im, min_size, max_size
+        )
+        
+        # Limpiar selecciones y clusters finales
+        self.selected_clusters = []
+        self.final_clusters = None
+        
+        self.info_label.config(
+            text=f"Descompuestos {large_count} clusters grandes → {len(self.res_clusters)} clusters totales"
+        )
+        self.update_display()
+        self.update_selection_list()
+    
+    def select_all_clusters(self):
+        """Seleccionar todos los clusters"""
+        if self.final_clusters is None or len(self.final_clusters) == 0:
+            messagebox.showwarning("Advertencia", "Primero procesa los clusters")
+            return
+        
+        self.selected_clusters = list(range(len(self.final_clusters)))
+        self.update_cluster_colors()
+        self.update_selection_list()
+    
+    def _update_selection_mode(self):
+        """Actualizar modo de selección por región"""
+        self.selection_mode = self.selection_mode_var.get()
+    
+    def _on_region_selected(self, eclick, erelease):
+        """Callback para selección por región rectangular"""
+        if self.final_clusters is None:
+            return
+        
+        # Obtener coordenadas del rectángulo en el espacio del gráfico
+        x_min = min(eclick.xdata, erelease.xdata)
+        x_max = max(eclick.xdata, erelease.xdata)
+        y_min = min(eclick.ydata, erelease.ydata)
+        y_max = max(eclick.ydata, erelease.ydata)
+        
+        img_height = np.array(self.var_im).shape[0]
+        
+        # Encontrar clusters cuyo centroide cae dentro del rectángulo
+        changed = False
+        for i, cl in enumerate(self.final_clusters):
+            if len(cl) == 0:
+                continue
+            cl_array = np.array(cl)
+            # Calcular centroide en coordenadas del gráfico (igual que en scatter)
+            centroid_x = np.mean(cl_array[:, 1])
+            centroid_y = img_height - np.mean(cl_array[:, 0])
+            
+            if x_min <= centroid_x <= x_max and y_min <= centroid_y <= y_max:
+                if self.selection_mode == 'add' and i not in self.selected_clusters:
+                    self.selected_clusters.append(i)
+                    changed = True
+                elif self.selection_mode == 'remove' and i in self.selected_clusters:
+                    self.selected_clusters.remove(i)
+                    changed = True
+        
+        if changed:
+            self.update_cluster_colors()
+            self.update_selection_list()
     
     def on_cluster_click(self, event):
         """FUNCIÓN CLAVE - Manejar click en cluster (CON PROTECCIÓN ANTI-AUTO-CLICK)"""

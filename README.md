@@ -155,7 +155,7 @@ En la ventana de correlaciones:
 
 ```
 NecLab/
-├── interface3_clean.py      # Interfaz gráfica principal
+├── interface3.py             # Interfaz gráfica principal
 ├── variability_functions.py # Métodos de variabilidad y clustering
 ├── peak_functions.py        # Detección de picos
 ├── corr_dendo_functions.py  # Correlaciones y dendrogramas

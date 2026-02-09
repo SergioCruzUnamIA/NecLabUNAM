@@ -15,7 +15,7 @@ from functools import partial
 # Módulos locales
 from pyometiff import OMETIFFReader
 from image_loader import load_ometiff_image, process_image_slice
-from image_processing import auto_contrast, show_histogram, binarize_variance, threshold_image_pil
+from image_processing import auto_contrast, threshold_image_pil
 from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
 
@@ -75,15 +75,6 @@ class NecLabApp:
         self.menu_imagen.add_command(
             label="Restaurar Original",
             command=self.restore_original
-        )
-        self.menu_imagen.add_separator()
-        self.menu_imagen.add_command(
-            label="Histograma",
-            command=self.show_histogram
-        )
-        self.menu_imagen.add_command(
-            label="Binarizar por Varianza",
-            command=self.open_binarize_window
         )
         
         # Submenú de Análisis de Variabilidad
@@ -488,60 +479,6 @@ class NecLabApp:
         
         self.img_array = auto_contrast(self.img_array)
         self._update_display()
-    
-    def show_histogram(self):
-        """Muestra el histograma de varianza."""
-        if self.img_original is None:
-            return
-        show_histogram(self.img_original)
-    
-    def open_binarize_window(self):
-        """Abre ventana para binarización por varianza."""
-        if self.img_original is None:
-            return
-        
-        # Crear ventana secundaria
-        binarize_window = tk.Toplevel(self.root)
-        binarize_window.title("Binarización por Varianza")
-        binarize_window.geometry("600x550")
-        
-        # Frame para la imagen
-        img_frame = tk.Frame(binarize_window)
-        img_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        img_label = tk.Label(img_frame, bg='#2b2b2b')
-        img_label.pack(fill=tk.BOTH, expand=True)
-        
-        # Frame para controles
-        ctrl_frame = tk.Frame(binarize_window)
-        ctrl_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        tk.Label(ctrl_frame, text="Umbral:").pack(side=tk.LEFT)
-        
-        threshold_var = tk.IntVar(value=150)
-        threshold_scale = tk.Scale(
-            ctrl_frame,
-            from_=0,
-            to=500,
-            orient="horizontal",
-            variable=threshold_var,
-            length=300
-        )
-        threshold_scale.pack(side=tk.LEFT, padx=10)
-        
-        def update_binarization(val=None):
-            thresh = threshold_var.get()
-            pil_img = binarize_variance(self.img_original, thresh)
-            # Redimensionar para la ventana
-            pil_img = pil_img.resize((500, 400), Image.LANCZOS)
-            image_tk = ImageTk.PhotoImage(pil_img)
-            img_label.configure(image=image_tk)
-            img_label.image = image_tk
-        
-        threshold_scale.config(command=update_binarization)
-        
-        # Mostrar imagen inicial
-        update_binarization()
     
     def open_visualization_data(self):
         """Abre datos para visualización de picos."""
