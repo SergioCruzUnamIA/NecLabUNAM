@@ -311,14 +311,14 @@ def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
                     
             except Exception as e:
                 # Si algo falla en el procesamiento avanzado, usar cluster original
-                print(f"Error procesando cluster: {e}")
+                pass  # Error silencioso
                 final_cl.append(cl)
                 continue
         
         return final_cl, clusters_min_size
         
     except Exception as e:
-        print(f"Error en process_clusters_advanced: {e}")
+        pass  # Error silencioso
         # Fallback al método básico
         final_cl = []
         for cl in res_clusters:
@@ -373,7 +373,7 @@ def decompose_large_clusters(res_clusters, var_im, min_size=20, max_size=200):
                     if len(sub_cluster_list) >= min_size:
                         decomposed.append(sub_cluster_list)
             except Exception as e:
-                print(f"Error descomponiendo cluster de tamaño {cl_size}: {e}")
+                pass  # Error silencioso
                 decomposed.append(cl)  # Mantener original si falla
     
     return decomposed
@@ -399,6 +399,7 @@ class VariabilityAnalysisWindow:
         self.scatter_objects = []
         self.rect_selector = None
         self.selection_mode = 'add'  # 'add' o 'remove'
+        self.cluster_colors = []  # Colores aleatorios por cluster
         
         # Variables para análisis
         self.time_series_data = []
@@ -407,11 +408,29 @@ class VariabilityAnalysisWindow:
         self.create_window()
         self.update_display()
     
+    def _generate_cluster_colors(self, n_clusters):
+        """Genera colores aleatorios para cada cluster, excluyendo rojo (reservado para selección)."""
+        import colorsys
+        colors = []
+        rng = np.random.RandomState(42)
+        for _ in range(n_clusters):
+            # Generar colores con hue lejos del rojo (0.0)
+            # Rojo está en hue ~0.0 y ~1.0, evitamos rango [0.0, 0.05] y [0.92, 1.0]
+            hue = rng.uniform(0.08, 0.88)
+            sat = rng.uniform(0.5, 1.0)
+            val = rng.uniform(0.6, 1.0)
+            rgb = colorsys.hsv_to_rgb(hue, sat, val)
+            colors.append(rgb)
+        return colors
+    
     def create_window(self):
         """Crear la ventana principal"""
         self.window = tk.Toplevel(self.main_window)
         self.window.title(f"Análisis Completo - {self.method_name}")
         self.window.geometry("1400x800")
+        
+        # Manejar cierre de ventana
+        self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
         
         # Frame principal
         main_frame = tk.Frame(self.window)
@@ -480,6 +499,7 @@ class VariabilityAnalysisWindow:
         
         tk.Button(row3, text="Seleccionar Todos", command=self.select_all_clusters).pack(side=tk.LEFT, padx=5)
         tk.Button(row3, text="Limpiar Selección", command=self.clear_selection).pack(side=tk.LEFT, padx=5)
+        tk.Button(row3, text="Guardar .npy", command=self.save_selected_npy).pack(side=tk.LEFT, padx=5)
         tk.Button(row3, text="Usar Seleccionados", command=self.use_selected_clusters).pack(side=tk.LEFT, padx=5)
         
         self.info_label = tk.Label(row3, text="Selecciona threshold y aplica binarización")
@@ -569,17 +589,27 @@ class VariabilityAnalysisWindow:
             # Limpiar scatter objects anteriores
             self.scatter_objects = []
             
+            # Generar colores aleatorios si no los tenemos o cambió la cantidad
+            if len(self.cluster_colors) != len(self.final_clusters):
+                self.cluster_colors = self._generate_cluster_colors(len(self.final_clusters))
+            
             for i, cl in enumerate(self.final_clusters):
                 if len(cl) > 0:
                     cl_array = np.array(cl)
                     
-                    # TODOS empiezan en AZUL, solo se vuelven ROJOS cuando se seleccionan
-                    color = 'red' if i in self.selected_clusters else 'blue'
-                    alpha = 1.0 if i in self.selected_clusters else 0.7
+                    # Rojo si seleccionado, color aleatorio si no
+                    if i in self.selected_clusters:
+                        color = 'red'
+                        alpha = 1.0
+                        zorder = 3
+                    else:
+                        color = self.cluster_colors[i]
+                        alpha = 0.7
+                        zorder = 2
                     
                     scatter = ax4.scatter(cl_array[:, 1], np.array(self.var_im).shape[0] - cl_array[:, 0], 
                                         marker='o', s=2, alpha=alpha, color=color,
-                                        picker=True, pickradius=5)
+                                        picker=True, pickradius=5, zorder=zorder)
                     
                     # Almacenar referencia para clicks
                     self.scatter_objects.append((scatter, i))
@@ -636,6 +666,7 @@ class VariabilityAnalysisWindow:
         
         # LIMPIAR selecciones anteriores al procesar
         self.selected_clusters = []
+        self.cluster_colors = []  # Regenerar colores
         
         # Versión simplificada sin detección de picos
         self.final_clusters = []
@@ -701,6 +732,7 @@ class VariabilityAnalysisWindow:
         # Limpiar selecciones y clusters finales
         self.selected_clusters = []
         self.final_clusters = None
+        self.cluster_colors = []  # Regenerar colores
         
         self.info_label.config(
             text=f"Descompuestos {large_count} clusters grandes → {len(self.res_clusters)} clusters totales"
@@ -769,41 +801,69 @@ class VariabilityAnalysisWindow:
         if hasattr(event.mouseevent, 'button') and event.mouseevent.button != 1:
             return
         
-        print(f"Click detectado en: {event.artist}")  # Debug
         
         # Encontrar qué cluster fue clickeado
         clicked_cluster = None
         for scatter, cluster_idx in self.scatter_objects:
             if event.artist == scatter:
                 clicked_cluster = cluster_idx
-                print(f"Cluster clickeado: {cluster_idx}")  # Debug
                 break
         
         if clicked_cluster is not None:
             if clicked_cluster in self.selected_clusters:
                 # Deseleccionar
                 self.selected_clusters.remove(clicked_cluster)
-                print(f"Deseleccionado cluster {clicked_cluster}")
             else:
                 # Seleccionar
                 self.selected_clusters.append(clicked_cluster)
-                print(f"Seleccionado cluster {clicked_cluster}")
             
             # Actualizar visualización y lista
             self.update_cluster_colors()
             self.update_selection_list()
-        else:
-            print("No se pudo identificar el cluster clickeado")
     
     def update_cluster_colors(self):
-        """Actualizar colores de clusters según selección"""
+        """Actualizar colores de clusters según selección: rojo=seleccionado, color aleatorio=no seleccionado.
+        También muestra el ID del cluster sobre los clusters seleccionados."""
+        # Limpiar anotaciones anteriores
+        if hasattr(self, '_cluster_annotations'):
+            for ann in self._cluster_annotations:
+                try:
+                    ann.remove()
+                except:
+                    pass
+        self._cluster_annotations = []
+        
+        img_height = np.array(self.var_im).shape[0]
+        
         for scatter, cluster_idx in self.scatter_objects:
             if cluster_idx in self.selected_clusters:
                 scatter.set_color('red')
                 scatter.set_alpha(1.0)
+                scatter.set_zorder(3)
+                
+                # Mostrar ID del cluster en el centroide
+                if self.final_clusters is not None and cluster_idx < len(self.final_clusters):
+                    cl = self.final_clusters[cluster_idx]
+                    if len(cl) > 0:
+                        cl_array = np.array(cl)
+                        cx = np.mean(cl_array[:, 1])
+                        cy = img_height - np.mean(cl_array[:, 0])
+                        ax = scatter.axes
+                        ann = ax.annotate(
+                            str(cluster_idx), (cx, cy),
+                            fontsize=7, fontweight='bold', color='white',
+                            ha='center', va='center',
+                            bbox=dict(boxstyle='round,pad=0.2', fc='red', alpha=0.8),
+                            zorder=5
+                        )
+                        self._cluster_annotations.append(ann)
             else:
-                scatter.set_color('blue')
-                scatter.set_alpha(0.8)
+                if cluster_idx < len(self.cluster_colors):
+                    scatter.set_color(self.cluster_colors[cluster_idx])
+                else:
+                    scatter.set_color('blue')
+                scatter.set_alpha(0.7)
+                scatter.set_zorder(2)
         
         # Refrescar canvas
         if hasattr(self, 'current_canvas'):
@@ -839,6 +899,42 @@ class VariabilityAnalysisWindow:
         self.selected_clusters = []
         self.update_cluster_colors()
         self.update_selection_list()
+    
+    def save_selected_npy(self):
+        """Guardar clusters seleccionados como archivo .npy"""
+        if not self.selected_clusters:
+            messagebox.showwarning("Advertencia", "No hay clusters seleccionados")
+            return
+        
+        if self.final_clusters is None:
+            messagebox.showwarning("Advertencia", "Primero procesa los clusters")
+            return
+        
+        filename = asksaveasfilename(
+            initialfile='clusters_seleccionados.npy',
+            defaultextension=".npy",
+            filetypes=[("NumPy files", "*.npy"), ("All Files", "*.*")]
+        )
+        
+        if filename:
+            # Construir diccionario con datos de los clusters seleccionados
+            data = {}
+            for cluster_idx in self.selected_clusters:
+                cluster_points = self.final_clusters[cluster_idx]
+                ts = extract_time_series(self.img_array, cluster_points)
+                data[cluster_idx] = {
+                    'points': np.array(cluster_points),
+                    'time_series': ts,
+                    'size': len(cluster_points)
+                }
+            
+            np.save(filename, data, allow_pickle=True)
+            messagebox.showinfo("Éxito", f"Clusters guardados en {filename}")
+    
+    def _on_window_close(self):
+        """Cerrar la ventana de análisis y liberar recursos"""
+        plt.close('all')
+        self.window.destroy()
     
     def use_selected_clusters(self):
         """Usar clusters seleccionados para análisis"""

@@ -11,6 +11,7 @@ from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messag
 from PIL import Image, ImageTk
 import numpy as np
 from functools import partial
+import matplotlib.pyplot as plt
 
 # Módulos locales
 from pyometiff import OMETIFFReader
@@ -39,6 +40,7 @@ class NecLabApp:
         # Variables de estado
         self.img_original = None  # Imagen original sin modificar
         self.img_array = None     # Imagen de trabajo (puede tener modificaciones)
+        self.img_display = None   # Imagen para visualización (con contraste, etc.)
         self.canvas = None
         
         # Construir la interfaz
@@ -46,7 +48,16 @@ class NecLabApp:
         self._create_layout()
         self._load_default_image()
         
+        # Manejar cierre de ventana para liberar todo el proceso
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        
         self.root.focus()
+    
+    def _on_close(self):
+        """Cerrar la aplicación completamente, liberando todos los recursos."""
+        plt.close('all')
+        self.root.quit()
+        self.root.destroy()
     
     # ==================== MENÚ ====================
     
@@ -461,8 +472,6 @@ class NecLabApp:
         info_text = f"Dimensiones: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nTipo: {self.img_array.dtype}"
         self.info_text.config(text=info_text)
         
-        print(f"Imagen cargada: {shape}")
-        
         self._update_display()
     
     def restore_original(self):
@@ -473,11 +482,12 @@ class NecLabApp:
         self._reset_adjustments()
     
     def apply_auto_contrast(self):
-        """Aplica auto contraste a la imagen."""
+        """Aplica auto contraste solo para visualización (no modifica datos originales)."""
         if self.img_array is None:
             return
         
-        self.img_array = auto_contrast(self.img_array)
+        # auto_contrast ya trabaja sobre una copia
+        self.img_display = auto_contrast(self.img_array)
         self._update_display()
     
     def open_visualization_data(self):

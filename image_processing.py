@@ -6,8 +6,9 @@ from PIL import Image, ImageOps
 
 def auto_contrast(img_array, cutoff=2, ignore=2):
     """
-    Aplica autocontraste a cada capa de la pila de imágenes (img_array).
-    Modifica el array en el lugar y lo retorna.
+    Aplica autocontraste a cada capa de la pila de imágenes.
+    Trabaja sobre una COPIA para no modificar los datos originales,
+    ya que el contraste es solo para visualización, no procesamiento.
 
     Args:
         img_array (numpy.ndarray): Pila de imágenes con forma (num_slices, height, width).
@@ -15,17 +16,16 @@ def auto_contrast(img_array, cutoff=2, ignore=2):
         ignore (int): Número de píxeles a ignorar en los extremos del histograma.
     
     Returns:
-        numpy.ndarray: El mismo img_array con el autocontraste aplicado.
+        numpy.ndarray: Copia del array con el autocontraste aplicado.
     """
-    for i in range(img_array.shape[0]):
-        im_pil = Image.fromarray(img_array[i, :, :])
+    result = img_array.copy()
+    for i in range(result.shape[0]):
+        im_pil = Image.fromarray(result[i, :, :])
         if im_pil.mode != 'RGB':
             im_pil = im_pil.convert('RGB')
-        # Aplica autocontraste
         im2 = ImageOps.autocontrast(im_pil, cutoff=cutoff, ignore=ignore).convert('L')
-        # Actualiza la capa en el array
-        img_array[i, :, :] = np.array(im2)
-    return img_array
+        result[i, :, :] = np.array(im2)
+    return result
 
 
 def show_histogram(img_array):
