@@ -9,7 +9,30 @@ import tkinter as tk
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
 
+def get_main_plot_frame(main_window):
+    """
+    Find the main plot frame from the main window hierarchy.
+    In the simplified layout, main_plot_frame is directly in the window at column=1.
+    """
+    if main_window is None:
+        return None
+    
+    # Look for the frame at column 1 (the right side plot area)
+    for widget in main_window.winfo_children():
+        if isinstance(widget, tk.Frame):
+            # Get grid info to check if it's at column 1
+            try:
+                grid_info = widget.grid_info()
+                if grid_info.get('column') == 1:
+                    return widget
+            except:
+                continue
+    
+    # Fallback to main_window if not found
+    return main_window
+
 def correlation_pearson(data):
+    plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='pearson')
     #plt.matshow(corr1, cmap='jet')
@@ -18,6 +41,7 @@ def correlation_pearson(data):
     return corr1
 
 def correlation_kendall(data):
+    plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='kendall')
     #plt.matshow(corr1, cmap='jet')
@@ -26,6 +50,7 @@ def correlation_kendall(data):
     return corr1
 
 def correlation_spearman(data):
+    plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='spearman')
     #plt.matshow(corr1, cmap='jet')
@@ -33,99 +58,14 @@ def correlation_spearman(data):
     #plt.show()
     return corr1
 
-def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False):
-    '''Plot a graphical correlation matrix for a dataframe.
-
-    Input:
-        df: pandas DataFrame
-        size: vertical and horizontal size of the plot
-        is_precomputed_corr: if True, df is already a correlation matrix'''
-    #size = 10
-    # Compute the correlation matrix for the received dataframe or use as-is
-    if is_precomputed_corr:
-        corr_func = df  # df is already a correlation matrix
-    else:
-        corr_func = df.corr()  # compute correlation matrix from data
-    
-    # Plot the correlation matrix
-    fig, ax = plt.subplots(figsize=(size, size))
-    # cax = ax.matshow(corr, cmap='RdYlGn')
-    cax = ax.matshow(corr_func, cmap='jet')
-    # plt.xticks(range(len(corr.columns)), corr.columns, rotation=90);
-    # plt.yticks(range(len(corr.columns)), corr.columns);
-    
-    # Add the colorbar legend
-    cbar = fig.colorbar(cax, ticks=[-1, 0, 1], aspect=40, shrink=.8)
-    if canvas is not None:
-        canvas.get_tk_widget().grid_forget()
-        # Close any previous figure to prevent memory leaks
-        plt.close('all')
-    canvas = FigureCanvasTkAgg(fig, master=root)
-    canvas.draw()
-    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
-    
-    # Ensure the root window is properly configured for grid layout
-    root.grid_rowconfigure(0, weight=1)  # Plot area should expand
-    root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
-    
-    # Add save button for correlation matrix
-    def _save_correlation():
-        from tkinter import filedialog
-        filename = filedialog.asksaveasfilename(
-            defaultextension="Untitled.csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
-            title="Save Correlation Matrix"
-        )
-        if filename:
-            corr_func.to_csv(filename, header=True, index=True)
-    
-    def _save_image():
-        filename = asksaveasfilename(
-            initialfile = 'Untitled.png',
-            defaultextension=".png",
-            filetypes=[("All Files","*.*"),("Portable Graphics Format","*.png")]
-        )
-        if filename:
-            fig.savefig(filename)
-    
-    # Create button frame and ensure it's visible
-    button_frame = tk.Frame(root)
-    button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
-    
-    # Create and pack buttons
-    save_csv_button = tk.Button(
-        button_frame,
-        text="Save Correlation Matrix",
-        command=_save_correlation
-    )
-    save_img_button = tk.Button(
-        button_frame,
-        text="Save Image", 
-        command=_save_image
-    )
-    save_csv_button.pack(side=tk.LEFT, padx=5)
-    save_img_button.pack(side=tk.LEFT, padx=5)
-    
-    # Ensure the button frame is properly configured
-    root.grid_rowconfigure(1, weight=0)  # Don't expand button row
-    root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
-    
-    return canvas
-
-def plot_correlation(data, corr, root, canvas):
-    df = pd.DataFrame(data)
-    X = corr.values
-    d = sch.distance.pdist(X)   # vector of ('55' choose 2) pairwise distances
-    L = sch.linkage(d, method='complete')
-    # ind = sch.fcluster(L, 0.2*d.max(), 'distance')
-    ind = sch.fcluster(L, 50, criterion='maxclust')
-    columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
-    df = df.reindex(columns, axis=1)
-    size = 5
-    canvas = _plot_correlation_helper(df, size, root, canvas)
-    return canvas
-
 def _plot_dendrogram_helper(model, **kwargs):
+    """
+    Helper function to create and plot a dendrogram from an AgglomerativeClustering model.
+    
+    Args:
+        model: Fitted AgglomerativeClustering model
+        **kwargs: Additional arguments passed to scipy.cluster.hierarchy.dendrogram
+    """
     # Create linkage matrix and then plot the dendrogram
     # create the counts of samples under each node
     counts = np.zeros(model.children_.shape[0])
@@ -144,42 +84,288 @@ def _plot_dendrogram_helper(model, **kwargs):
     ).astype(float)
 
     # Plot the corresponding dendrogram
-    dendrogram(linkage_matrix, **kwargs) # type: ignore
+    dendrogram(linkage_matrix, **kwargs)
 
-def plot_dendogram(data, root, canvas):
-    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data.transpose())
-    clustering.labels_.shape
-    # plot the top three levels of the dendrogram
+def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None):
+    '''Plot a graphical correlation matrix for a dataframe.
+
+    Input:
+        df: pandas DataFrame
+        size: vertical and horizontal size of the plot
+        is_precomputed_corr: if True, df is already a correlation matrix
+        corr_method: the correlation method used (e.g., 'pearson', 'kendall', 'spearman')'''
+    # Clean up by clearing the plot frame instead of relying on stale canvas
+    plot_frame = get_main_plot_frame(root)
+    for widget in list(plot_frame.winfo_children()):
+        widget.destroy()
+    plt.close('all')
+    
+    # Compute the correlation matrix for the received dataframe or use as-is
+    if is_precomputed_corr:
+        corr_func = df  # df is already a correlation matrix
+    else:
+        corr_func = df.corr()  # compute correlation matrix from data
+    
+    # For dendrogram, use correlation matrix values for clustering
+    data_for_dendro = corr_func.values
+    
+    # Create figure with two subplots: dendrogram on top, correlation below (50/50 split)
+    fig = plt.figure(figsize=(size, size * 2))
+    
+    # Dendrogram subplot (top, 50%)
+    ax_dendro = plt.subplot2grid((2, 1), (0, 0), rowspan=1)
+    
+    # Compute dendrogram from correlation matrix
+    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data_for_dendro)
     _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    #ax = plt.gca()
-    fig = plt.gcf()
-    if canvas is not None:
-        canvas.get_tk_widget().grid_forget()
-        # Close any previous figure to prevent memory leaks
-        plt.close('all')
-    canvas = FigureCanvasTkAgg(fig, master=root)
-    canvas.draw()
-    canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+    ax_dendro.set_title('Dendrogram')
     
-    # Configure grid layout for dendrogram
-    root.grid_rowconfigure(0, weight=1)  # Plot area should expand
-    root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
+    # Correlation matrix subplot (bottom, 50%)
+    ax_corr = plt.subplot2grid((2, 1), (1, 0), rowspan=1)
+    cax = ax_corr.matshow(corr_func, cmap='jet', aspect='equal')
     
-    # Add only save image button for dendrogram
-    def _save_dendrogram_image():
+    # Set title based on correlation method
+    title = f'{corr_method.capitalize()} Correlation Matrix' if corr_method else 'Correlation Matrix'
+    ax_corr.set_title(title)
+    
+    # Add the colorbar legend
+    cbar = fig.colorbar(cax, ax=ax_corr, ticks=[-1, 0, 1], aspect=40, shrink=.8)
+    
+    # Add spacing between subplots and adjust margins to center content
+    plt.subplots_adjust(hspace=0.3, top=0.95, bottom=0.05, left=0.1, right=0.9)
+    
+    # Get default filename from visualization_helpers if available
+    def get_default_correlation_name(extension):
+        try:
+            from visualization_helpers import loaded_filename
+            if loaded_filename:
+                import os
+                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
+                method_str = f"_{corr_method}" if corr_method else ""
+                return f"{base_name}_correlation{method_str}{extension}"
+        except:
+            pass
+        method_str = f"_{corr_method}" if corr_method else ""
+        return f"correlation{method_str}{extension}"
+    
+    # Add save button for correlation matrix CSV
+    def _save_correlation_csv():
+        default_name = get_default_correlation_name('.csv')
+        from tkinter import filedialog
+        filename = filedialog.asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Correlation Matrix"
+        )
+        if filename:
+            corr_func.to_csv(filename, header=True, index=True)
+    
+    def _save_correlation_image():
+        default_name = get_default_correlation_name('.png')
         filename = asksaveasfilename(
-            initialfile='Dendrogram.png',
+            initialfile=default_name,
+            defaultextension=".png",
+            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+        )
+        if filename:
+            # Save only correlation matrix
+            fig_corr = plt.figure(figsize=(size, size))
+            ax_temp = fig_corr.add_subplot(111)
+            cax_temp = ax_temp.matshow(corr_func, cmap='jet', aspect='equal')
+            title_str = f'{corr_method.capitalize()} Correlation Matrix' if corr_method else 'Correlation Matrix'
+            ax_temp.set_title(title_str)
+            fig_corr.colorbar(cax_temp, ticks=[-1, 0, 1], aspect=40, shrink=.8)
+            fig_corr.savefig(filename)
+            plt.close(fig_corr)
+    
+    def _save_dendrogram_image():
+        """Save dendrogram part of the plot"""
+        default_name = get_default_correlation_name('_dendrogram.png')
+        filename = asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".png",
+            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+        )
+        if filename:
+            # Save only dendrogram
+            fig_dendro = plt.figure(figsize=(size, size))
+            ax_dendro_temp = fig_dendro.add_subplot(111)
+            plt.sca(ax_dendro_temp)
+            clustering_temp = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data_for_dendro)
+            _plot_dendrogram_helper(clustering_temp, truncate_mode="none", count_sort='none', show_contracted='true')
+            ax_dendro_temp.set_title('Dendrogram')
+            fig_dendro.savefig(filename)
+            plt.close(fig_dendro)
+    
+    def _save_all():
+        filename = asksaveasfilename(
+            initialfile='CombinedPlot.png',
             defaultextension=".png",
             filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
         )
         if filename:
             fig.savefig(filename)
     
-    # Create button frame for dendrogram
-    button_frame = tk.Frame(root)
-    button_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
+    # Display figure in the plot frame
+    canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
-    # Create only save image button
+    # Create button frame inside the plot frame using pack (consistent with canvas)
+    button_frame = tk.Frame(plot_frame)
+    button_frame.peak_button_frame = True  # Mark for cleanup
+    button_frame.pack(fill=tk.X, padx=5, pady=5)
+    
+    # Create and pack buttons
+    save_dendro_button = tk.Button(
+        button_frame,
+        text="Save Dendrogram",
+        command=_save_dendrogram_image
+    )
+    save_csv_button = tk.Button(
+        button_frame,
+        text="Save Correlation Matrix",
+        command=_save_correlation_csv
+    )
+    save_corr_img_button = tk.Button(
+        button_frame,
+        text="Save Correlation Matrix Image",
+        command=_save_correlation_image
+    )
+    save_all_button = tk.Button(
+        button_frame,
+        text="Save All",
+        command=_save_all
+    )
+    
+    save_dendro_button.pack(side=tk.LEFT, padx=5)
+    save_csv_button.pack(side=tk.LEFT, padx=5)
+    save_corr_img_button.pack(side=tk.LEFT, padx=5)
+    save_all_button.pack(side=tk.LEFT, padx=5)
+    
+    return canvas
+
+def plot_correlation(data, corr, root, canvas, corr_method=None):
+    # Clean up by clearing the plot frame (don't rely on stale canvas reference)
+    plot_frame = get_main_plot_frame(root)
+    for widget in list(plot_frame.winfo_children()):
+        widget.destroy()
+    plt.close('all')
+
+    # Also remove any existing button frames from root
+    for widget in list(root.winfo_children()):
+        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
+            widget.destroy()
+
+    df = pd.DataFrame(data)
+    X = corr.values
+    d = sch.distance.pdist(X)   # vector of ('55' choose 2) pairwise distances
+    L = sch.linkage(d, method='complete')
+    ind = sch.fcluster(L, 50, criterion='maxclust')
+    columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
+    df = df.reindex(columns, axis=1)
+    size = 5
+    canvas = _plot_correlation_helper(df, size, root, canvas, corr_method=corr_method)
+    return canvas
+
+def plot_dendogram(data, root, canvas):
+    # Remove any existing buttons
+    for widget in list(root.winfo_children()):
+        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
+            widget.destroy()
+    
+    # Get the main plot frame
+    plot_frame = get_main_plot_frame(root)
+    
+    # Clear ALL widgets from the plot frame
+    for widget in list(plot_frame.winfo_children()):
+        widget.destroy()
+    
+    # Close all matplotlib figures
+    plt.close('all')
+
+    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data.transpose())
+    clustering.labels_.shape
+    # plot the top three levels of the dendrogram
+    _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
+    fig = plt.gcf()
+    
+    # Create canvas in the plot frame using pack
+    canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
+    # Get default filename from visualization_helpers if available
+    def get_default_dendogram_name(extension):
+        try:
+            from visualization_helpers import loaded_filename
+            if loaded_filename:
+                import os
+                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
+                return f"{base_name}_dendrogram{extension}"
+        except:
+            pass
+        return f"dendrogram{extension}"
+    
+    # Add save buttons for dendrogram
+    def _save_dendrogram_image():
+        default_name = get_default_dendogram_name('.png')
+        filename = asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".png",
+            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+        )
+        if filename:
+            fig.savefig(filename)
+    
+    def _save_dendrogram_csv():
+        """Save dendrogram clustering data to CSV"""
+        default_name = get_default_dendogram_name('.csv')
+        filename = asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Dendrogram Data"
+        )
+        
+        if filename:
+            # Create DataFrame with clustering information
+            # Include cluster labels and linkage information
+            df_data = {
+                'Sample_Index': list(range(len(clustering.labels_))),
+                'Cluster_Label': clustering.labels_
+            }
+            
+            df = pd.DataFrame(df_data)
+            
+            # Add linkage matrix information as separate section
+            linkage_data = []
+            for i, (child1, child2) in enumerate(clustering.children_):
+                linkage_data.append({
+                    'Merge_Step': i,
+                    'Child_1': int(child1),
+                    'Child_2': int(child2),
+                    'Distance': clustering.distances_[i]
+                })
+            
+            df_linkage = pd.DataFrame(linkage_data)
+            
+            # Save both dataframes to CSV
+            with open(filename, 'w', newline='') as f:
+                f.write("# Cluster Labels\n")
+                df.to_csv(f, index=False)
+                f.write("\n# Linkage Matrix\n")
+                df_linkage.to_csv(f, index=False)
+            
+            messagebox.showinfo("Success", f"Dendrogram data saved to {filename}")
+    
+    # Create button frame for dendrogram inside the plot frame using pack
+    button_frame = tk.Frame(plot_frame)
+    button_frame.peak_button_frame = True  # Mark for cleanup
+    button_frame.pack(fill=tk.X, padx=5, pady=5)
+    
+    # Create save buttons
     save_img_button = tk.Button(
         button_frame,
         text="Save Image",
@@ -187,32 +373,79 @@ def plot_dendogram(data, root, canvas):
     )
     save_img_button.pack(side=tk.LEFT, padx=5)
     
+    save_csv_button = tk.Button(
+        button_frame,
+        text="Save CSV",
+        command=_save_dendrogram_csv
+    )
+    save_csv_button.pack(side=tk.LEFT, padx=5)
+    
     # Configure button frame
     root.grid_rowconfigure(1, weight=0)  # Don't expand button row
     
     return canvas
 
-def plot_time_series(norm_data):
+def plot_time_series(norm_data, column_names=None):
     # New Tkinter window
     plot_window = tk.Toplevel()
     plot_window.title('Time Series Plot')
-    plot_window.geometry('1000x1000')
     
-    # Active series
-    active_series = list(range(20))  # Initially all series are active
+    # Size: 80% of screen, centered
+    screen_width = plot_window.winfo_screenwidth()
+    screen_height = plot_window.winfo_screenheight()
+    win_width = int(screen_width * 0.8)
+    win_height = int(screen_height * 0.8)
+    x = (screen_width - win_width) // 2
+    y = (screen_height - win_height) // 2
+    plot_window.geometry(f"{win_width}x{win_height}+{x}+{y}")
     
-    # Main frame
+    # Get actual number of series from data
+    num_series = norm_data.shape[1]
+    
+    # Active series - initially all series are active
+    active_series = list(range(num_series))
+    
+    # Get default filename from visualization_helpers if available
+    def get_default_time_series_name(extension):
+        try:
+            from visualization_helpers import loaded_filename
+            if loaded_filename:
+                import os
+                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
+                return f"{base_name}_time_series{extension}"
+        except:
+            pass
+        return f"time_series{extension}"
+    
+    # Bottom frame for buttons (pack first so it doesn't overlap with plot)
+    button_frame = tk.Frame(plot_window)
+    button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
+    
+    # Main frame (pack after bottom frame)
     main_frame = tk.Frame(plot_window)
-    main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
     
     # Left frame for listbox
     left_frame = tk.Frame(main_frame, width=200)
     left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
     left_frame.pack_propagate(False)  # Maintain fixed width
     
-    # Right frame for plot
+    # Right frame for plots (will contain upper and lower frames)
     right_frame = tk.Frame(main_frame)
     right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+    
+    # Configure grid for right frame to have two equal rows
+    right_frame.grid_rowconfigure(0, weight=1)
+    right_frame.grid_rowconfigure(1, weight=1)
+    right_frame.grid_columnconfigure(0, weight=1)
+    
+    # Upper frame for main graph (50% of right frame)
+    upper_frame = tk.Frame(right_frame)
+    upper_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 5))
+    
+    # Lower frame for additional content (50% of right frame)
+    lower_frame = tk.Frame(right_frame)
+    lower_frame.grid(row=1, column=0, sticky='nsew', pady=(5, 0))
     
     # Listbox to left frame
     listbox_label = tk.Label(left_frame, text="Time Series")
@@ -221,8 +454,8 @@ def plot_time_series(norm_data):
     listbox = tk.Listbox(left_frame, selectmode=tk.EXTENDED)
     listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
     
-    # Populate listbox with series names
-    for i in range(20): #TODO: check if only 20
+    # Populate listbox with series names based on actual number of columns
+    for i in range(num_series):
         listbox.insert(tk.END, f"Series {i+1}")
     
     # Scrollbar for listbox
@@ -231,23 +464,105 @@ def plot_time_series(norm_data):
     listbox.config(yscrollcommand=scrollbar.set)
     scrollbar.config(command=listbox.yview)
     
-    # Initial plot
-    fig, ax = plt.subplots(figsize=(8, 6))
-    canvas_new = FigureCanvasTkAgg(fig, master=right_frame)
-    canvas_new.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    # Plot variables - created when Generate Series is clicked
+    fig = None
+    ax = None
+    canvas_new = None
+    
+    # Lower frame plot variables - for individual series preview
+    fig_lower = None
+    ax_lower = None
+    canvas_lower = None
     
     def update_plot():
         """
             Update the plot with current active series
         """
-        ax.clear()
-        for i, series_idx in enumerate(active_series):
-            ax.plot(np.array(range(len(norm_data[:, series_idx]))).reshape(-1, 1), 
-                   norm_data[:, series_idx] + i)
-        ax.set_title('Time Series Plot')
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Signal + Offset')
-        canvas_new.draw()
+        if ax is not None:
+            ax.clear()
+            for i, series_idx in enumerate(active_series):
+                ax.plot(np.array(range(len(norm_data[:, series_idx]))).reshape(-1, 1), 
+                       norm_data[:, series_idx] + i)
+            ax.set_title('Time Series Plot')
+            ax.set_xlabel('Time')
+            ax.set_ylabel('Signal + Offset')
+            canvas_new.draw()
+    
+    def generate_series():
+        """
+            Generate the plot with selected series, or all series if none selected
+        """
+        nonlocal fig, ax, canvas_new, active_series
+        
+        # Get selected items from listbox
+        selection = listbox.curselection()
+        
+        if selection:
+            # If series are selected, use only those
+            active_series = [active_series[idx] for idx in selection]
+            # Update listbox to show only selected series
+            listbox.delete(0, tk.END)
+            for idx in active_series:
+                listbox.insert(tk.END, column_names[idx])
+        else:
+            # If no selection, use all series
+            active_series = list(range(num_series))
+        
+        # Close previous figure if it exists
+        if fig is not None:
+            plt.close(fig)
+        
+        # Clear upper frame and create plot
+        for widget in upper_frame.winfo_children():
+            widget.destroy()
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
+        canvas_new = FigureCanvasTkAgg(fig, master=upper_frame)
+        canvas_new.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        update_plot()
+    
+    def display_single_series(event=None):
+        """
+            Display the selected single series in the lower frame
+        """
+        nonlocal fig_lower, ax_lower, canvas_lower
+        
+        # Get the currently selected item (only show one at a time)
+        selection = listbox.curselection()
+        if not selection:
+            return
+        
+        # Get the first selected item
+        selected_idx = selection[0]
+        if selected_idx >= len(active_series):
+            return
+        
+        # Get the actual series index from active_series
+        series_idx = active_series[selected_idx]
+        
+        # Close previous figure if it exists
+        if fig_lower is not None:
+            plt.close(fig_lower)
+        
+        # Clear lower frame and create plot
+        for widget in lower_frame.winfo_children():
+            widget.destroy()
+        
+        fig_lower, ax_lower = plt.subplots(figsize=(8, 4))
+        canvas_lower = FigureCanvasTkAgg(fig_lower, master=lower_frame)
+        canvas_lower.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Plot the single selected series
+        ax_lower.plot(np.array(range(len(norm_data[:, series_idx]))).reshape(-1, 1), 
+                     norm_data[:, series_idx])
+        ax_lower.set_title(column_names[series_idx])
+        ax_lower.set_xlabel('Time')
+        ax_lower.set_ylabel('Signal')
+        canvas_lower.draw()
+    
+    # Bind listbox selection to display single series in lower frame
+    listbox.bind('<<ListboxSelect>>', display_single_series)
     
     def delete_selected_series():
         """
@@ -262,7 +577,27 @@ def plot_time_series(norm_data):
                     listbox.delete(selected_idx)
             update_plot()
     
-    update_plot()
+    def reset_series():
+        """
+            Reset the listbox to show all series again
+        """
+        nonlocal active_series
+        
+        # Reset active series to all series
+        active_series = list(range(num_series))
+        
+        # Clear and repopulate listbox with all series
+        listbox.delete(0, tk.END)
+        for i in range(num_series):
+            listbox.insert(tk.END, column_names[i])
+    
+    # Generate Series button
+    generate_button = tk.Button(
+        left_frame,
+        text="Generate Series",
+        command=generate_series
+    )
+    generate_button.pack(fill=tk.X, pady=(5, 0))
     
     # Delete button for listbox
     delete_button = tk.Button(
@@ -272,16 +607,22 @@ def plot_time_series(norm_data):
     )
     delete_button.pack(fill=tk.X, pady=(5, 0))
     
-    # Bottom frame
-    button_frame = tk.Frame(plot_window)
-    button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
+    # Reset button for listbox
+    reset_button = tk.Button(
+        left_frame,
+        text="Reset Series",
+        command=reset_series
+    )
+    reset_button.pack(fill=tk.X, pady=(5, 0))
     
+    # Save functions for bottom frame buttons
     def _save_time_series_image():
         """
             Saves the time series as an image
         """
+        default_name = get_default_time_series_name('.png')
         filename = asksaveasfilename(
-            initialfile='TimeSeries.png',
+            initialfile=default_name,
             defaultextension=".png",
             filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
         )
@@ -292,22 +633,24 @@ def plot_time_series(norm_data):
         """
             Saves the time series as a .csv file
         """
+        default_name = get_default_time_series_name('.csv')
         filename = asksaveasfilename(
-            initialfile='TimeSeries.csv',
+            initialfile=default_name,
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
         )
         if filename:
             # Create DataFrame with only active series
             active_data = norm_data[:, active_series]
-            df = pd.DataFrame(active_data, columns=[f"Series_{i+1}" for i in active_series])
+            df = pd.DataFrame(active_data, columns=[column_names[i] for i in active_series])
             df.to_csv(filename, index=False)
     
     # Save image button
     save_img_button = tk.Button(
         button_frame,
         text="Save Image",
-        command=_save_time_series_image
+        command=_save_time_series_image,
+        width=12
     )
     save_img_button.pack(side=tk.LEFT, padx=5)
     
@@ -315,16 +658,18 @@ def plot_time_series(norm_data):
     save_csv_button = tk.Button(
         button_frame,
         text="Save CSV",
-        command=_save_time_series_csv
+        command=_save_time_series_csv,
+        width=12
     )
     save_csv_button.pack(side=tk.LEFT, padx=5)
     
     # Close button
     def close_window():
-        plt.close(fig)  # Close the matplotlib figure to free memory
+        if fig is not None:
+            plt.close(fig)  # Close the matplotlib figure to free memory
         plot_window.destroy()
     
-    close_button = tk.Button(button_frame, text="Close", command=close_window)
+    close_button = tk.Button(button_frame, text="Close", command=close_window, width=12)
     close_button.pack(side=tk.RIGHT, padx=5)
 
 def load_correlation_matrix(root, canvas):
@@ -373,7 +718,7 @@ def load_correlation_matrix(root, canvas):
         
         # Display the correlation matrix
         size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
-        canvas = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True)
+        canvas = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True, corr_method='Loaded Correlation')
         
         messagebox.showinfo(
             "Matrix Loaded", 
