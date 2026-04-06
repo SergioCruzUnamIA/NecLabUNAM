@@ -1,6 +1,6 @@
 """
-NecLab - Herramienta de análisis de imágenes de microscopía
-Interfaz gráfica principal
+NecLab - Herramienta de análisis de imágenes de microscopía y visualización de datos
+Interfaz gráfica principal (versión unificada)
 """
 
 import os
@@ -8,25 +8,35 @@ os.environ["OMP_NUM_THREADS"] = "1"  # Limita número de threads
 
 import tkinter as tk
 from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import numpy as np
 from functools import partial
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import sys
 
 # Módulos locales
 from pyometiff import OMETIFFReader
-from image_loader import load_ometiff_image, process_image_slice
-from image_processing import auto_contrast, threshold_image_pil
 from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
+from corr_dendo_functions import load_correlation_matrix
+
+# Intentar importar módulos de procesamiento de imagen si existen
+try:
+    from image_loader import load_ometiff_image, process_image_slice
+    from image_processing import auto_contrast, threshold_image_pil
+    HAS_IMAGE_MODULES = True
+except ImportError:
+    HAS_IMAGE_MODULES = False
+
 
 
 class NecLabApp:
-    """Clase principal de la aplicación NecLab."""
+    """Clase principal de la aplicación NecLab - Versión unificada."""
     
     def __init__(self, root):
         self.root = root
-        self.root.title("NecLab")
+        self.root.title("NecLab - Análisis de Imágenes y Datos")
         self.root.tk.call('tk', 'windowingsystem')
         self.root.option_add('*tearOff', FALSE)
         
@@ -37,32 +47,39 @@ class NecLabApp:
         self.height = int(self.screen_height * 0.9)
         self.root.geometry(f"{self.width}x{self.height}")
         
-        # Variables de estado
+        # Variables de estado - Imágenes
         self.img_original = None  # Imagen original sin modificar
         self.img_array = None     # Imagen de trabajo (puede tener modificaciones)
         self.img_display = None   # Imagen para visualización (con contraste, etc.)
+        
+        # Variables de estado - Datos de visualización
+        self.loaded_data = None
+        self.current_column = 0
         self.canvas = None
+        self.corr = None
         
         # Construir la interfaz
         self._create_menu()
         self._create_layout()
-        self._load_default_image()
         
         # Manejar cierre de ventana para liberar todo el proceso
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         
-        self.root.focus()
+        self.root.lift()
+        self.root.focus_force()
     
     def _on_close(self):
         """Cerrar la aplicación completamente, liberando todos los recursos."""
-        plt.close('all')
-        self.root.quit()
-        self.root.destroy()
+        if messagebox.askokcancel("Salir", "¿Desea salir de NecLab?"):
+            plt.close('all')
+            self.root.quit()
+            self.root.destroy()
+            sys.exit(0)
     
     # ==================== MENÚ ====================
     
     def _create_menu(self):
-        """Crea la barra de menús."""
+        """Crea la barra de menús unificada."""
         self.menu_bar = Menu(self.root)
         self.root.config(menu=self.menu_bar)
         
@@ -72,17 +89,30 @@ class NecLabApp:
         self.menu_archivo.add_command(
             label="Abrir OME-TIFF",
             accelerator="Ctrl+O",
-            command=self.open_file
+            command=self.open_ometiff_file
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
             label="Salir",
-            command=self.root.quit
+            command=self._on_close
         )
         
         # Menú Imagen
         self.menu_imagen = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_imagen, label="Imagen")
+        self.menu_imagen.add_command(
+            label="Auto Contraste",
+            command=self.apply_auto_contrast
+        )
+        self.menu_imagen.add_command(
+            label="Histogram",
+            command=self.show_histogram
+        )
+        self.menu_imagen.add_command(
+            label="Binarize",
+            command=self.show_binarize
+        )
+        self.menu_imagen.add_separator()
         self.menu_imagen.add_command(
             label="Restaurar Original",
             command=self.restore_original
@@ -103,75 +133,126 @@ class NecLabApp:
         
         # Menú Visualización
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualización")
+        self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
         self.menu_visual.add_command(
-            label="Abrir Datos (.npy)",
-            command=self.open_visualization_data
+            label='Abrir Datos (.npy)',
+            command=self.open_visualization_data,
+            state=NORMAL
         )
         self.menu_visual.add_separator()
         
-        # Opciones de detección de picos (inicialmente deshabilitadas)
-        self.peak_methods = [
-            "Elliptic Envelope",
-            "Peak Caller", 
-            "Local Outlier Factor",
-            "Isolation Forest",
-            "Linear Model"
+        # Opciones de suavizado
+        self.menu_visual.add_command(
+            label='Finite difference diffusion smoothing',
+            command=None,
+            state=DISABLED
+        )
+        self.menu_visual.add_command(
+            label='Exponential moving average smoothing',
+            command=None,
+            state=DISABLED
+        )
+        self.menu_visual.add_command(
+            label='Convex envelope smoothing',
+            command=None,
+            state=DISABLED
+        )
+        self.menu_visual.add_separator()
+        
+        # Opciones de detección de picos
+        peak_methods = [
+            'Elliptic Envelope',
+            'Peak Caller',
+            'Local Outlier Factor',
+            'Peak Function 4',
+            'Isolation Forest',
+            'Linear Model',
+            'Peak Function 7'
         ]
-        for method in self.peak_methods:
+        for method in peak_methods:
             self.menu_visual.add_command(label=method, command=None, state=DISABLED)
         
         self.menu_visual.add_separator()
         
-        # Opciones de correlación (inicialmente deshabilitadas)
-        self.corr_methods = [
-            "Correlación Pearson",
-            "Correlación Kendall", 
-            "Correlación Spearman"
+        # Opciones de correlación
+        corr_methods = [
+            'Correlacion Pearson',
+            'Correlacion Kendall',
+            'Correlacion Spearman'
         ]
-        for method in self.corr_methods:
+        for method in corr_methods:
             self.menu_visual.add_command(label=method, command=None, state=DISABLED)
         
         self.menu_visual.add_separator()
-        self.menu_visual.add_command(label="Dendrograma", command=None, state=DISABLED)
+        self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
+        self.menu_visual.add_separator()
+        self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
+        
+        # Menú Correlación
+        self.menu_correlacion = Menu(self.menu_bar, tearoff=False)
+        self.menu_bar.add_cascade(menu=self.menu_correlacion, label="Correlacion")
+        self.menu_correlacion.add_command(
+            label='Cargar matriz de correlacion',
+            command=self.load_correlation_matrix_wrapper,
+            state=NORMAL
+        )
         
         # Atajo de teclado
-        self.root.bind('<Control-o>', lambda e: self.open_file())
+        self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
     
     # ==================== LAYOUT PRINCIPAL ====================
     
     def _create_layout(self):
-        """Crea el layout principal con imagen a la izquierda y controles a la derecha."""
+        """Crea el layout principal con tabs para diferentes modos."""
         # Configurar grid principal
-        self.root.columnconfigure(0, weight=3)  # Columna de imagen (más grande)
-        self.root.columnconfigure(1, weight=1)  # Columna de controles
+        self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # Frame izquierdo para la imagen
-        self._create_image_frame()
+        # Crear notebook (tabs) para cambiar entre modos
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
         
-        # Frame derecho para los controles
-        self._create_controls_panel()
+        # Tab 1: Procesamiento de Imágenes
+        self.image_tab = tk.Frame(self.notebook, bg='#f0f0f0')
+        self.notebook.add(self.image_tab, text="Procesamiento de Imágenes")
+        self._create_image_processing_layout()
+        
+        # Tab 2: Visualización de Datos
+        self.data_tab = tk.Frame(self.notebook, bg='#f0f0f0')
+        self.notebook.add(self.data_tab, text="Visualización de Datos")
+        self._create_data_visualization_layout()
     
-    def _create_image_frame(self):
-        """Crea el frame para mostrar la imagen."""
-        self.image_frame = tk.Frame(self.root, bg='#1e1e1e', relief=tk.SUNKEN, borderwidth=2)
+    def _create_image_processing_layout(self):
+        """Crea el layout para procesamiento de imágenes."""
+        # Configurar grid
+        self.image_tab.columnconfigure(0, weight=3)
+        self.image_tab.columnconfigure(1, weight=1)
+        self.image_tab.rowconfigure(0, weight=1)
+        
+        # Frame izquierdo para la imagen
+        self.image_frame = tk.Frame(self.image_tab, bg='#1e1e1e', relief=tk.SUNKEN, borderwidth=2)
         self.image_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
         
         # Label para mostrar la imagen
         self.image_label = tk.Label(self.image_frame, bg='#1e1e1e')
         self.image_label.pack(fill=tk.BOTH, expand=True)
+        
+        # Panel de controles
+        self._create_image_controls_panel()
+        
+        # Cargar imagen por defecto o placeholder
+        self._load_default_image()
     
-    def _create_controls_panel(self):
-        """Crea el panel lateral derecho con todos los controles."""
+    def _create_image_controls_panel(self):
+        """Crea el panel lateral derecho con controles de imagen."""
         # Frame principal del panel
-        self.controls_panel = tk.Frame(self.root, bg='#f0f0f0', relief=tk.RAISED, borderwidth=2)
+        self.controls_panel = tk.Frame(self.image_tab, bg='#f0f0f0', relief=tk.RAISED, borderwidth=2)
         self.controls_panel.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
         
         # Título del panel
         title_label = tk.Label(
-            self.controls_panel, 
-            text="Controles", 
+            self.controls_panel,
+            text="Controles de Imagen",
             font=('Arial', 14, 'bold'),
             bg='#f0f0f0'
         )
@@ -195,8 +276,8 @@ class NecLabApp:
     def _create_section_navigation(self):
         """Sección de navegación de frames."""
         section = tk.LabelFrame(
-            self.controls_panel, 
-            text="Navegación", 
+            self.controls_panel,
+            text="Navegación",
             font=('Arial', 10, 'bold'),
             bg='#f0f0f0',
             padx=10,
@@ -223,8 +304,8 @@ class NecLabApp:
         
         # Label para mostrar frame actual / total
         self.frame_info_label = tk.Label(
-            section, 
-            text="Frame: 0 / 0", 
+            section,
+            text="Frame: 0 / 0",
             bg='#f0f0f0',
             font=('Arial', 9)
         )
@@ -233,8 +314,8 @@ class NecLabApp:
     def _create_section_image_adjustments(self):
         """Sección de ajustes de imagen."""
         section = tk.LabelFrame(
-            self.controls_panel, 
-            text="Ajustes de Imagen", 
+            self.controls_panel,
+            text="Ajustes de Imagen",
             font=('Arial', 10, 'bold'),
             bg='#f0f0f0',
             padx=10,
@@ -287,8 +368,8 @@ class NecLabApp:
     def _create_section_processing(self):
         """Sección de procesamiento."""
         section = tk.LabelFrame(
-            self.controls_panel, 
-            text="Procesamiento", 
+            self.controls_panel,
+            text="Procesamiento",
             font=('Arial', 10, 'bold'),
             bg='#f0f0f0',
             padx=10,
@@ -307,7 +388,7 @@ class NecLabApp:
             threshold_frame,
             text="Aplicar",
             variable=self.threshold_enabled,
-            command=self._update_display,
+            command=self._update_image_display,
             bg='#f0f0f0'
         )
         self.threshold_check.pack(side='right')
@@ -327,8 +408,8 @@ class NecLabApp:
     def _create_section_info(self):
         """Sección de información de la imagen."""
         section = tk.LabelFrame(
-            self.controls_panel, 
-            text="Información", 
+            self.controls_panel,
+            text="Información",
             font=('Arial', 10, 'bold'),
             bg='#f0f0f0',
             padx=10,
@@ -346,16 +427,135 @@ class NecLabApp:
         )
         self.info_text.pack(fill='x')
     
-    # ==================== FUNCIONES DE IMAGEN ====================
+    def _create_data_visualization_layout(self):
+        """Crea el layout para visualización de datos."""
+        # Configurar grid
+        Grid.rowconfigure(self.data_tab, 0, weight=1)
+        Grid.columnconfigure(self.data_tab, 0, weight=0)
+        Grid.columnconfigure(self.data_tab, 1, weight=1)
+        
+        # Left sidebar for column selection
+        sidebar_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1, width=250)
+        sidebar_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        sidebar_frame.grid_propagate(False)
+        
+        # Column list title
+        list_title = tk.Label(sidebar_frame, text="Data Columns", font=("Arial", 12, "bold"))
+        list_title.pack(pady=(10, 5))
+        
+        # Column listbox with scrollbar
+        listbox_frame = tk.Frame(sidebar_frame)
+        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        scrollbar = tk.Scrollbar(listbox_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.column_listbox = tk.Listbox(
+            listbox_frame,
+            yscrollcommand=scrollbar.set,
+            selectmode=tk.SINGLE,
+            font=("Arial", 10)
+        )
+        self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
+        
+        scrollbar.config(command=self.column_listbox.yview)
+        
+        # Info label
+        info_label = tk.Label(
+            sidebar_frame,
+            text="Load a file to\nsee columns",
+            justify=tk.CENTER,
+            wraplength=220,
+            font=("Arial", 10)
+        )
+        info_label.pack(pady=10)
+        
+        # Right side - main plot area
+        self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
+        self.main_plot_frame.grid(row=0, column=1, sticky='nsew')
+        
+        # Create placeholder label
+        placeholder_label = tk.Label(
+            self.main_plot_frame,
+            text="Load a data file to start",
+            font=("Arial", 20),
+            bg="#f0f0f0",
+            fg="#666666"
+        )
+        placeholder_label.pack(fill=tk.BOTH, expand=True)
+
+    
+    # ==================== DATA VISUALIZATION METHODS ====================
+    
+    def update_column_display(self, event=None):
+        """Update the plot when a different column is selected from the listbox."""
+        if self.loaded_data is None:
+            return
+        
+        selection = self.column_listbox.curselection()
+        if not selection:
+            return
+        
+        self.current_column = selection[0]
+        
+        # Remove any peak button frames when switching columns
+        for widget in list(self.root.winfo_children()):
+            if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
+                widget.destroy()
+        
+        # Clear ALL widgets from the plot frame
+        for widget in list(self.main_plot_frame.winfo_children()):
+            widget.destroy()
+        
+        # Close all matplotlib figures to free memory
+        plt.close('all')
+        
+        # Create new plot
+        fig, ax = plt.subplots()
+        plt.plot(
+            np.array(range(len(self.loaded_data[:, self.current_column]))).reshape(-1, 1),
+            self.loaded_data[:, self.current_column]
+        )
+        plt.title(f'Column {self.current_column + 1}')
+        plt.xlabel('Time')
+        plt.ylabel('Value')
+        
+        # Display in main frame
+        self.canvas = FigureCanvasTkAgg(fig, master=self.main_plot_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
+    def open_visualization_data(self):
+        """Abre datos para visualización de picos."""
+        # Pass data_tab so _plot_data can find main_plot_frame (at column=1)
+        # instead of self.root whose children include the menu bar and notebook.
+        canvas = initialize_visualization(
+            self.data_tab,
+            self.menu_visual,
+            self.canvas,
+            self.column_listbox,
+            self.update_column_display
+        )
+        if canvas is not None:
+            self.canvas = canvas
+            # Switch to the data visualization tab
+            self.notebook.select(self.data_tab)
+        # Update loaded_data reference after initialization
+        # (stored on root by _plot_data_with_menu via master traversal)
+        if hasattr(self.root, 'loaded_data'):
+            self.loaded_data = self.root.loaded_data
+    
+    def load_correlation_matrix_wrapper(self):
+        """Wrapper para cargar matriz de correlación."""
+        load_correlation_matrix(self.data_tab, self.canvas)
+    
+    # ==================== IMAGE PROCESSING METHODS ====================
     
     def _load_default_image(self):
         """Carga una imagen por defecto o muestra placeholder."""
-        try:
-            pil_img = Image.open('input_image_7.png')
-        except FileNotFoundError:
-            # Crear imagen placeholder
-            pil_img = Image.new('RGB', (400, 300), color='#1e1e1e')
-        
+        # Crear imagen placeholder
+        pil_img = Image.new('RGB', (400, 300), color='#1e1e1e')
         self._display_pil_image(pil_img)
     
     def _display_pil_image(self, pil_img):
@@ -393,15 +593,16 @@ class NecLabApp:
         img = img + brightness
         
         # Aplicar contraste
-        factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
-        img = factor * (img - 128) + 128
+        if contrast != 0:
+            factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
+            img = factor * (img - 128) + 128
         
         # Clamp valores
         img = np.clip(img, 0, 255).astype(np.uint8)
         
         return img
     
-    def _update_display(self):
+    def _update_image_display(self):
         """Actualiza la imagen mostrada según el estado actual."""
         if self.img_array is None:
             return
@@ -415,7 +616,10 @@ class NecLabApp:
         # Aplicar threshold si está habilitado
         if self.threshold_enabled.get():
             threshold_val = self.threshold_slider.get()
-            pil_img = threshold_image_pil(current_slice, threshold=threshold_val)
+            if HAS_IMAGE_MODULES:
+                pil_img = threshold_image_pil(current_slice, threshold=threshold_val)
+            else:
+                pil_img = self._apply_binarize(current_slice, threshold_val)
         else:
             pil_img = Image.fromarray(current_slice)
             if pil_img.mode != 'RGB':
@@ -431,28 +635,44 @@ class NecLabApp:
         """Resetea los ajustes de brillo y contraste."""
         self.brightness_slider.set(0)
         self.contrast_slider.set(0)
-        self._update_display()
+        self._update_image_display()
     
     # ==================== CALLBACKS ====================
     
     def _on_slice_changed(self, val):
         """Callback cuando cambia el slider de capa."""
-        self._update_display()
+        self._update_image_display()
     
     def _on_threshold_changed(self, val):
         """Callback cuando cambia el slider de threshold."""
         if self.threshold_enabled.get():
-            self._update_display()
+            self._update_image_display()
     
     def _on_adjustment_changed(self, val):
         """Callback cuando cambian los ajustes de brillo/contraste."""
-        self._update_display()
+        self._update_image_display()
     
-    # ==================== COMANDOS DE MENÚ ====================
+    # ==================== COMANDOS DE MENÚ - ARCHIVO ====================
     
-    def open_file(self):
+    def open_ometiff_file(self):
         """Abre un archivo OME-TIFF."""
-        img, metadata, xml_metadata = load_ometiff_image()
+        if HAS_IMAGE_MODULES:
+            img, metadata, xml_metadata = load_ometiff_image()
+        else:
+            filename = filedialog.askopenfilename(
+                title="Abrir OME-TIFF",
+                filetypes=[("OME-TIFF files", "*.ome.tiff *.ome.tif"), ("All files", "*.*")]
+            )
+            if not filename:
+                return
+            
+            try:
+                reader = OMETIFFReader(fpath=filename)
+                img, metadata, xml_metadata = reader.read()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo cargar la imagen:\n{str(e)}")
+                return
+        
         if img is None:
             return
         
@@ -472,27 +692,117 @@ class NecLabApp:
         info_text = f"Dimensiones: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nTipo: {self.img_array.dtype}"
         self.info_text.config(text=info_text)
         
-        self._update_display()
+        # Cambiar a la pestaña de imagen
+        self.notebook.select(self.image_tab)
+        
+        self._update_image_display()
+    
+    # ==================== COMANDOS DE MENÚ - IMAGEN ====================
     
     def restore_original(self):
         """Restaura la imagen original."""
         if self.img_original is None:
+            messagebox.showwarning("Advertencia", "No hay imagen original cargada")
             return
         self.img_array = self.img_original.copy()
         self._reset_adjustments()
     
     def apply_auto_contrast(self):
-        """Aplica auto contraste solo para visualización (no modifica datos originales)."""
+        """Aplica auto contraste a la imagen."""
         if self.img_array is None:
+            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
             return
         
-        # auto_contrast ya trabaja sobre una copia
-        self.img_display = auto_contrast(self.img_array)
-        self._update_display()
+        if HAS_IMAGE_MODULES:
+            # Usar módulo de procesamiento si está disponible
+            self.img_array = auto_contrast(self.img_array)
+        else:
+            # Fallback: aplicar auto contraste frame por frame
+            for i in range(self.img_array.shape[0]):
+                im_pil = Image.fromarray(self.img_array[i, :, :])
+                if im_pil.mode != 'RGB':
+                    im_pil = im_pil.convert('RGB')
+                im2 = ImageOps.autocontrast(im_pil, cutoff=2, ignore=2).convert('L')
+                self.img_array[i, :, :] = np.array(im2)
+        
+        self._update_image_display()
     
-    def open_visualization_data(self):
-        """Abre datos para visualización de picos."""
-        initialize_visualization(self.root, self.menu_visual, self.canvas)
+    def show_histogram(self):
+        """Muestra el histograma de la imagen."""
+        if self.img_original is None:
+            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+            return
+        
+        var_im = np.var(self.img_original, axis=0)
+        plt.figure(figsize=(8, 6))
+        plt.hist(var_im.flatten(), bins=50)
+        plt.title('Histograma de Varianza')
+        plt.xlabel('Varianza')
+        plt.ylabel('Frecuencia')
+        plt.show()
+    
+    def show_binarize(self):
+        """Muestra ventana de binarización."""
+        if self.img_original is None:
+            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+            return
+        
+        var_im = np.var(self.img_original, axis=0)
+        pil_img = self._apply_binarize(var_im, 150)
+        
+        # Crear ventana emergente
+        top = tk.Toplevel(self.root)
+        top.title("Binarización")
+        top.geometry("600x700")
+        
+        # Frame para la imagen
+        img_frame = tk.Frame(top, relief=tk.RAISED, borderwidth=1)
+        img_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        image_ = ImageTk.PhotoImage(pil_img)
+        label = tk.Label(img_frame, image=image_)
+        label.image = image_
+        label.pack(fill=tk.BOTH, expand=True)
+        
+        # Frame para controles
+        control_frame = tk.Frame(top)
+        control_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Label(control_frame, text="Threshold:").pack(side=tk.LEFT, padx=5)
+        
+        inputtxt = tk.Text(control_frame, height=1, width=10)
+        inputtxt.insert("1.0", "150")
+        inputtxt.pack(side=tk.LEFT, padx=5)
+        
+        def update_binarization():
+            try:
+                threshold = int(inputtxt.get(1.0, "end-1c"))
+                new_img = self._apply_binarize(var_im, threshold)
+                new_image = ImageTk.PhotoImage(new_img)
+                label.configure(image=new_image)
+                label.image = new_image
+            except ValueError:
+                messagebox.showerror("Error", "Por favor ingresa un número válido")
+        
+        tk.Button(
+            control_frame,
+            text="Aplicar Binarización",
+            command=update_binarization
+        ).pack(side=tk.LEFT, padx=5)
+    
+    def _apply_binarize(self, var_im, threshold):
+        """Aplica binarización a la imagen basado en el threshold."""
+        if len(var_im.shape) == 2:
+            # Es una imagen 2D (varianza)
+            binary = (var_im > threshold).astype(np.uint8) * 255
+        else:
+            # Es una imagen normal
+            binary = (var_im > threshold).astype(np.uint8) * 255
+        
+        pil_img = Image.fromarray(binary)
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+        return pil_img
     
     def show_variability_menu(self, method_index):
         """Mostrar análisis de variabilidad completo."""
@@ -500,6 +810,7 @@ class NecLabApp:
             messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
             return
         show_variability_analysis(self.img_array, method_index, self.root)
+
 
 
 def main():
@@ -511,3 +822,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
