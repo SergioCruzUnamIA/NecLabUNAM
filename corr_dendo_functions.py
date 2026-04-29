@@ -166,7 +166,14 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
         filename = asksaveasfilename(
             initialfile=default_name,
             defaultextension=".png",
-            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+            filetypes=[
+                ("PNG Image", "*.png"),
+                ("PDF Document", "*.pdf"),
+                ("TIFF Image", "*.tiff"),
+                ("SVG Vector", "*.svg"),
+                ("EPS Vector", "*.eps"),
+                ("All Files", "*.*")
+            ]
         )
         if filename:
             # Save only correlation matrix
@@ -185,7 +192,14 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
         filename = asksaveasfilename(
             initialfile=default_name,
             defaultextension=".png",
-            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+            filetypes=[
+                ("PNG Image", "*.png"),
+                ("PDF Document", "*.pdf"),
+                ("TIFF Image", "*.tiff"),
+                ("SVG Vector", "*.svg"),
+                ("EPS Vector", "*.eps"),
+                ("All Files", "*.*")
+            ]
         )
         if filename:
             # Save only dendrogram
@@ -199,23 +213,31 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             plt.close(fig_dendro)
     
     def _save_all():
+        default_name = get_default_correlation_name('_combined.png')
         filename = asksaveasfilename(
-            initialfile='CombinedPlot.png',
+            initialfile=default_name,
             defaultextension=".png",
-            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+            filetypes=[
+                ("PNG Image", "*.png"),
+                ("PDF Document", "*.pdf"),
+                ("TIFF Image", "*.tiff"),
+                ("SVG Vector", "*.svg"),
+                ("EPS Vector", "*.eps"),
+                ("All Files", "*.*")
+            ]
         )
         if filename:
             fig.savefig(filename)
     
-    # Display figure in the plot frame
+    # Create button frame first so it claims its space before the canvas expands
+    button_frame = tk.Frame(plot_frame)
+    button_frame.peak_button_frame = True  # Mark for cleanup
+    button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+
+    # Display figure in the plot frame (packed after buttons so expand fills remaining space)
     canvas = FigureCanvasTkAgg(fig, master=plot_frame)
     canvas.draw()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    
-    # Create button frame inside the plot frame using pack (consistent with canvas)
-    button_frame = tk.Frame(plot_frame)
-    button_frame.peak_button_frame = True  # Mark for cleanup
-    button_frame.pack(fill=tk.X, padx=5, pady=5)
     
     # Create and pack buttons
     save_dendro_button = tk.Button(
@@ -314,7 +336,14 @@ def plot_dendogram(data, root, canvas):
         filename = asksaveasfilename(
             initialfile=default_name,
             defaultextension=".png",
-            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+            filetypes=[
+                ("PNG Image", "*.png"),
+                ("PDF Document", "*.pdf"),
+                ("TIFF Image", "*.tiff"),
+                ("SVG Vector", "*.svg"),
+                ("EPS Vector", "*.eps"),
+                ("All Files", "*.*")
+            ]
         )
         if filename:
             fig.savefig(filename)
@@ -624,7 +653,14 @@ def plot_time_series(norm_data, column_names=None):
         filename = asksaveasfilename(
             initialfile=default_name,
             defaultextension=".png",
-            filetypes=[("Portable Graphics Format", "*.png"), ("All Files", "*.*")]
+            filetypes=[
+                ("PNG Image", "*.png"),
+                ("PDF Document", "*.pdf"),
+                ("TIFF Image", "*.tiff"),
+                ("SVG Vector", "*.svg"),
+                ("EPS Vector", "*.eps"),
+                ("All Files", "*.*")
+            ]
         )
         if filename:
             fig.savefig(filename)
