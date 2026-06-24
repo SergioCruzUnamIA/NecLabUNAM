@@ -911,18 +911,20 @@ class VariabilityAnalysisWindow:
         )
         
         if filename:
-            # Construir diccionario con datos de los clusters seleccionados
-            data = {}
-            for cluster_idx in self.selected_clusters:
-                cluster_points = self.final_clusters[cluster_idx]
-                ts = extract_time_series(self.img_array, cluster_points)
-                data[cluster_idx] = {
-                    'points': np.array(cluster_points),
-                    'time_series': ts,
-                    'size': len(cluster_points)
-                }
-            
-            np.save(filename, data, allow_pickle=True)
+            # Build 2D array (n_frames, 1 + n_clusters):
+            #   column 0 = frame indices (skipped by _load_data with [:,1:])
+            #   columns 1+ = mean time series for each selected cluster
+            time_series_list = []
+            for cluster_idx in sorted(self.selected_clusters):
+                ts = extract_time_series(self.img_array, self.final_clusters[cluster_idx])
+                time_series_list.append(ts)
+
+            n_frames = len(time_series_list[0])
+            frame_col = np.arange(n_frames, dtype=float).reshape(-1, 1)
+            ts_matrix = np.column_stack(time_series_list)
+            data = np.hstack([frame_col, ts_matrix])
+
+            np.save(filename, data)
             messagebox.showinfo("Éxito", f"Clusters guardados en {filename}")
     
     def _on_window_close(self):
