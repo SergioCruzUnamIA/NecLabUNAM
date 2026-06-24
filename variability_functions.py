@@ -428,81 +428,89 @@ class VariabilityAnalysisWindow:
         self.window = tk.Toplevel(self.main_window)
         self.window.title(f"Análisis Completo - {self.method_name}")
         self.window.geometry("1400x800")
-        
+
         # Manejar cierre de ventana
         self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
-        
+
+        # Barra de menú
+        self.window.config(menu=self._create_menu_bar())
+
         # Frame principal
         main_frame = tk.Frame(self.window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Frame de controles
+
+        # Barra de parámetros (threshold, tamaños) e info
         self.create_controls(main_frame)
-        
+
         # Frame horizontal para visualización y selección
         content_frame = tk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         # Frame para visualización (lado izquierdo)
         self.viz_frame = tk.Frame(content_frame)
         self.viz_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
+
         # Frame para selección (lado derecho)
         self.selection_frame = tk.Frame(content_frame, width=200, relief=tk.RAISED, borderwidth=1)
         self.selection_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         self.selection_frame.pack_propagate(False)
-        
+
         self.create_selection_panel()
     
+    def _create_menu_bar(self):
+        """Crear la barra de menús de la ventana de análisis."""
+        menu_bar = tk.Menu(self.window, tearoff=False)
+
+        # Menú Clustering
+        menu_clustering = tk.Menu(menu_bar, tearoff=False)
+        menu_bar.add_cascade(label="Clustering", menu=menu_clustering)
+        menu_clustering.add_command(label="Procesar Cluster (Básico)", command=self.process_clusters_basic)
+        menu_clustering.add_command(label="Procesar Cluster (Avanzado)", command=self.process_clusters_advanced)
+        menu_clustering.add_separator()
+        menu_clustering.add_command(label="Descomponer Clusters Grandes", command=self.decompose_clusters)
+
+        # Menú Selección
+        menu_seleccion = tk.Menu(menu_bar, tearoff=False)
+        menu_bar.add_cascade(label="Selección", menu=menu_seleccion)
+        menu_seleccion.add_command(label="Seleccionar Todos", command=self.select_all_clusters)
+        menu_seleccion.add_command(label="Limpiar Selección", command=self.clear_selection)
+
+        # Menú Visualización
+        menu_visual = tk.Menu(menu_bar, tearoff=False)
+        menu_bar.add_cascade(label="Visualización", menu=menu_visual)
+        menu_visual.add_command(label="Vista 3D", command=self.show_3d_surface)
+
+        # Menú Exportar
+        menu_exportar = tk.Menu(menu_bar, tearoff=False)
+        menu_bar.add_cascade(label="Exportar", menu=menu_exportar)
+        menu_exportar.add_command(label="Guardar Imagen", command=self.save_image)
+        menu_exportar.add_command(label="Guardar .npy", command=self.save_selected_npy)
+        menu_exportar.add_separator()
+        menu_exportar.add_command(label="Usar Seleccionados (Correlaciones)", command=self.use_selected_clusters)
+
+        return menu_bar
+
     def create_controls(self, parent):
-        """Crear controles de la interfaz"""
+        """Crear barra de parámetros (spinboxes) e info."""
         control_frame = tk.Frame(parent)
         control_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Row 1: Threshold
-        row1 = tk.Frame(control_frame)
-        row1.pack(fill=tk.X, pady=2)
-        
-        tk.Label(row1, text="Threshold:").pack(side=tk.LEFT, padx=(0, 5))
+
+        # Threshold
+        tk.Label(control_frame, text="Threshold:").pack(side=tk.LEFT, padx=(0, 5))
         self.threshold_var = tk.IntVar(value=self.default_th)
-        threshold_spinbox = ttk.Spinbox(row1, from_=1, to=1000, textvariable=self.threshold_var, width=10)
-        threshold_spinbox.pack(side=tk.LEFT, padx=(0, 10))
-        
-        tk.Button(row1, text="Aplicar Binarización", command=self.apply_binarization).pack(side=tk.LEFT, padx=5)
-        tk.Button(row1, text="Encontrar Clusters", command=self.find_clusters).pack(side=tk.LEFT, padx=5)
-        
-        # Row 2: Cluster controls
-        row2 = tk.Frame(control_frame)
-        row2.pack(fill=tk.X, pady=2)
-        
-        tk.Label(row2, text="Min Size:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Spinbox(control_frame, from_=1, to=1000, textvariable=self.threshold_var, width=10).pack(side=tk.LEFT, padx=(0, 15))
+
+        # Tamaño mínimo
+        tk.Label(control_frame, text="Min Size:").pack(side=tk.LEFT, padx=(0, 5))
         self.min_size_var = tk.IntVar(value=20)
-        ttk.Spinbox(row2, from_=1, to=500, textvariable=self.min_size_var, width=8).pack(side=tk.LEFT, padx=(0, 10))
-        
-        tk.Label(row2, text="Max Size:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Spinbox(control_frame, from_=1, to=500, textvariable=self.min_size_var, width=8).pack(side=tk.LEFT, padx=(0, 15))
+
+        # Tamaño máximo
+        tk.Label(control_frame, text="Max Size:").pack(side=tk.LEFT, padx=(0, 5))
         self.max_size_var = tk.IntVar(value=200)
-        ttk.Spinbox(row2, from_=1, to=1000, textvariable=self.max_size_var, width=8).pack(side=tk.LEFT, padx=(0, 10))
-        
-        tk.Button(row2, text="Descomponer Clusters Grandes", command=self.decompose_clusters).pack(side=tk.LEFT, padx=5)
-        tk.Button(row2, text="Procesar Clusters (Básico)", command=self.process_clusters_basic).pack(side=tk.LEFT, padx=5)
-        tk.Button(row2, text="Procesar Clusters (Avanzado)", command=self.process_clusters_advanced).pack(side=tk.LEFT, padx=5)
-        
-        # Row 3: Additional controls
-        row3 = tk.Frame(control_frame)
-        row3.pack(fill=tk.X, pady=2)
-        
-        tk.Button(row3, text="Mostrar Serie Temporal", command=self.show_time_series).pack(side=tk.LEFT, padx=5)
-        tk.Button(row3, text="Vista 3D", command=self.show_3d_surface).pack(side=tk.LEFT, padx=5)
-        tk.Button(row3, text="Guardar Imagen", command=self.save_image).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Separator(row3, orient='vertical').pack(side=tk.LEFT, fill='y', padx=10)
-        
-        tk.Button(row3, text="Seleccionar Todos", command=self.select_all_clusters).pack(side=tk.LEFT, padx=5)
-        tk.Button(row3, text="Limpiar Selección", command=self.clear_selection).pack(side=tk.LEFT, padx=5)
-        tk.Button(row3, text="Guardar .npy", command=self.save_selected_npy).pack(side=tk.LEFT, padx=5)
-        tk.Button(row3, text="Usar Seleccionados", command=self.use_selected_clusters).pack(side=tk.LEFT, padx=5)
-        
-        self.info_label = tk.Label(row3, text="Selecciona threshold y aplica binarización")
+        ttk.Spinbox(control_frame, from_=1, to=1000, textvariable=self.max_size_var, width=8).pack(side=tk.LEFT, padx=(0, 15))
+
+        self.info_label = tk.Label(control_frame, text="Usa el menú para procesar clusters")
         self.info_label.pack(side=tk.LEFT, padx=10)
     
     def create_selection_panel(self):
@@ -648,74 +656,60 @@ class VariabilityAnalysisWindow:
         self.current_fig = fig
         self.current_canvas = canvas
     
-    def apply_binarization(self):
-        """Aplicar binarización con el threshold actual"""
+    def _apply_binarization(self):
+        """Binarizar la imagen procesada con el threshold actual."""
         th = self.threshold_var.get()
         self.res_labels = apply_binarization(self.processed_image, th)
-        self.info_label.config(text=f"Binarización aplicada con threshold {th}")
-        self.update_display()
-    
-    def process_clusters_basic(self):
-        """Procesar clusters - versión básica (filtrado por tamaño)"""
-        if self.res_clusters is None:
-            messagebox.showwarning("Advertencia", "Primero encuentra los clusters básicos")
-            return
-        
-        min_size = self.min_size_var.get()
-        max_size = self.max_size_var.get()
-        
-        # LIMPIAR selecciones anteriores al procesar
-        self.selected_clusters = []
-        self.cluster_colors = []  # Regenerar colores
-        
-        # Versión simplificada sin detección de picos
-        self.final_clusters = []
-        for cl in self.res_clusters:
-            if min_size <= len(cl) <= max_size:
-                self.final_clusters.append(cl)
-        
-        self.info_label.config(text=f"Procesados (Básico): {len(self.final_clusters)} clusters finales")
-        self.update_display()
-        
-        # Actualizar lista de selección (debería estar vacía)
-        self.update_selection_list()
-    
-    def process_clusters_advanced(self):
-        """Procesar clusters - versión avanzada con detección de picos 3D"""
-        if self.res_clusters is None:
-            messagebox.showwarning("Advertencia", "Primero encuentra los clusters básicos")
-            return
-        
-        min_size = self.min_size_var.get()
-        max_size = self.max_size_var.get()
-        
-        try:
-            # Usar algoritmo avanzado original de Jose
-            self.final_clusters, clusters_min_size = process_clusters_advanced(
-                self.var_im, self.res_clusters, min_size, max_size
-            )
-            
-            self.info_label.config(text=f"Procesados (Avanzado): {len(self.final_clusters)} clusters finales con detección de picos 3D")
-            self.update_display()
-            
-        except Exception as e:
-            # Si falla, usar método básico como respaldo
-            messagebox.showwarning("Advertencia", f"Error en procesamiento avanzado: {e}\nUsando método básico como respaldo")
-    
-    def find_clusters(self):
-        """Encontrar clusters básicos"""
-        if self.res_labels is None:
-            messagebox.showwarning("Advertencia", "Primero aplica la binarización")
-            return
-        
+
+    def _find_clusters(self):
+        """Encontrar componentes conectados en la imagen binarizada."""
         pixels = extract_pixels_from_binary(self.res_labels)
         self.res_clusters = list(neighboring_groups(pixels))
-        self.info_label.config(text=f"Encontrados {len(self.res_clusters)} clusters básicos")
+
+    def process_clusters_basic(self):
+        """Binarizar, encontrar componentes conectados y filtrar por tamaño."""
+        min_size = self.min_size_var.get()
+        max_size = self.max_size_var.get()
+        th = self.threshold_var.get()
+
+        self._apply_binarization()
+        self._find_clusters()
+
+        self.selected_clusters = []
+        self.cluster_colors = []
+
+        self.final_clusters = [cl for cl in self.res_clusters if min_size <= len(cl) <= max_size]
+
+        self.info_label.config(
+            text=f"Básico: {len(self.final_clusters)} clusters (th={th}, tamaño {min_size}–{max_size})"
+        )
+        self.update_display()
+        self.update_selection_list()
+
+    def process_clusters_advanced(self):
+        """Binarizar, encontrar componentes conectados y procesar con detección de picos 3D."""
+        min_size = self.min_size_var.get()
+        max_size = self.max_size_var.get()
+        th = self.threshold_var.get()
+
+        self._apply_binarization()
+        self._find_clusters()
+
+        try:
+            self.final_clusters, _ = process_clusters_advanced(
+                self.var_im, self.res_clusters, min_size, max_size
+            )
+            self.info_label.config(
+                text=f"Avanzado: {len(self.final_clusters)} clusters (th={th}, picos 3D)"
+            )
+            self.update_display()
+        except Exception as e:
+            messagebox.showwarning("Advertencia", f"Error en procesamiento avanzado: {e}\nUsando método básico como respaldo")
     
     def decompose_clusters(self):
         """Descomponer clusters grandes usando KMeans"""
         if self.res_clusters is None:
-            messagebox.showwarning("Advertencia", "Primero encuentra los clusters básicos")
+            messagebox.showwarning("Advertencia", "Primero procesa los clusters con 'Procesar Cluster (Básico)' o '(Avanzado)'")
             return
         
         min_size = self.min_size_var.get()
@@ -1244,36 +1238,6 @@ class VariabilityAnalysisWindow:
                 f.write(f"Desviación estándar: {np.std(correlations):.3f}\n")
             
             messagebox.showinfo("Éxito", f"Reporte generado en {filename}")
-    
-    def show_time_series(self):
-        """Mostrar serie temporal del primer cluster"""
-        if self.final_clusters is None or len(self.final_clusters) == 0:
-            messagebox.showwarning("Advertencia", "Primero procesa los clusters")
-            return
-        
-        # Usar el primer cluster como ejemplo
-        cluster_points = self.final_clusters[0]
-        if len(cluster_points) == 0:
-            messagebox.showwarning("Advertencia", "El cluster seleccionado está vacío")
-            return
-        
-        time_series = extract_time_series(self.img_array, cluster_points)
-        
-        # Crear ventana para serie temporal
-        ts_window = tk.Toplevel(self.window)
-        ts_window.title(f"Serie Temporal - Cluster 0")
-        ts_window.geometry("600x400")
-        
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(np.array(range(len(time_series))), time_series)
-        ax.set_title(f'Serie Temporal - Cluster 0 ({len(cluster_points)} píxeles)')
-        ax.set_xlabel('Frame')
-        ax.set_ylabel('Intensidad Promedio')
-        plt.tight_layout()
-        
-        canvas = FigureCanvasTkAgg(fig, master=ts_window)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
     def show_3d_surface(self):
         """Mostrar visualización 3D de la superficie de variabilidad"""
