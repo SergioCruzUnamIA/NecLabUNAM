@@ -69,7 +69,7 @@ def _is_csv_file(filename):
 
 def _load_data(data):
     if _is_npy_file(data):
-        numpy_data = np.load(data)
+        numpy_data = np.load(data, allow_pickle=True)
         rs = np.random.RandomState(0)
         data_ = numpy_data[:,1:]
         return data_

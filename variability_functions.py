@@ -921,7 +921,7 @@ class VariabilityAnalysisWindow:
 
             n_frames = len(time_series_list[0])
             frame_col = np.arange(n_frames, dtype=float).reshape(-1, 1)
-            ts_matrix = np.column_stack(time_series_list)
+            ts_matrix = np.column_stack(time_series_list).astype(float)
             data = np.hstack([frame_col, ts_matrix])
 
             np.save(filename, data)
