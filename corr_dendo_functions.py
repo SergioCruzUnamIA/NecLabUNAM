@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import dendrogram
 import tkinter as tk
+from tkinter import ttk
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
 
@@ -425,261 +426,207 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         y = (screen_height - win_height) // 2
         container.geometry(f"{win_width}x{win_height}+{x}+{y}")
         is_tab = False
-    
-    # Get actual number of series from data
+
     num_series = norm_data.shape[1]
-    
-    # Active series - initially all series are active
-    active_series = list(range(num_series))
-    
-    # Get default filename from visualization_helpers if available
-    def get_default_time_series_name(extension):
+    if column_names is None:
+        column_names = [f"Column {i+1}" for i in range(num_series)]
+
+    # Mutable state
+    selection_indices = []
+    ts_figs = {'signal': None, 'multi': None}
+
+    def get_default_name(extension):
         try:
             from visualization_helpers import loaded_filename
             if loaded_filename:
                 import os
                 base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
                 return f"{base_name}_time_series{extension}"
-        except:
+        except Exception:
             pass
         return f"time_series{extension}"
-    
-    # Bottom frame for buttons (pack first so it doesn't overlap with plot)
+
+    # ── Bottom button bar (pack first to reserve space) ──
     button_frame = tk.Frame(container)
-    button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
-    
-    # Main frame (pack after bottom frame)
-    main_frame = tk.Frame(container)
-    main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
-    
-    # Left frame for listbox
-    left_frame = tk.Frame(main_frame, width=200)
-    left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-    left_frame.pack_propagate(False)  # Maintain fixed width
-    
-    # Right frame for plots (will contain upper and lower frames)
-    right_frame = tk.Frame(main_frame)
-    right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-    
-    # Configure grid for right frame to have two equal rows
-    right_frame.grid_rowconfigure(0, weight=1)
-    right_frame.grid_rowconfigure(1, weight=1)
-    right_frame.grid_columnconfigure(0, weight=1)
-    
-    # Upper frame for main graph (50% of right frame)
-    upper_frame = tk.Frame(right_frame)
-    upper_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 5))
-    
-    # Lower frame for additional content (50% of right frame)
-    lower_frame = tk.Frame(right_frame)
-    lower_frame.grid(row=1, column=0, sticky='nsew', pady=(5, 0))
-    
-    # Listbox to left frame
-    listbox_label = tk.Label(left_frame, text="Time Series")
-    listbox_label.pack(pady=(0, 5))
-    
-    listbox = tk.Listbox(left_frame, selectmode=tk.EXTENDED)
-    listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-    
-    # Populate listbox with series names based on actual number of columns
+    button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5, padx=5)
+
+    # ── Content area ──
+    content_frame = tk.Frame(container)
+    content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5, 0))
+
+    # Sidebar (left, fixed width)
+    sidebar = tk.Frame(content_frame, relief=tk.RAISED, borderwidth=1, width=220)
+    sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+    sidebar.pack_propagate(False)
+
+    # Plot area (right, split top/bottom)
+    plot_area = tk.Frame(content_frame, relief=tk.RAISED, borderwidth=1)
+    plot_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    plot_area.rowconfigure(0, weight=1)
+    plot_area.rowconfigure(1, weight=1)
+    plot_area.columnconfigure(0, weight=1)
+
+    top_plot = tk.Frame(plot_area)
+    top_plot.grid(row=0, column=0, sticky='nsew')
+
+    bottom_plot = tk.Frame(plot_area, relief=tk.GROOVE, borderwidth=1)
+    bottom_plot.grid(row=1, column=0, sticky='nsew')
+
+    # ── Sidebar: Data Columns ──
+    tk.Label(sidebar, text="Data Columns", font=("Arial", 11, "bold")).pack(pady=(10, 5))
+
+    col_lb_frame = tk.Frame(sidebar)
+    col_lb_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+    col_scrollbar = tk.Scrollbar(col_lb_frame)
+    col_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    col_listbox = tk.Listbox(col_lb_frame, yscrollcommand=col_scrollbar.set,
+                              selectmode=tk.EXTENDED, font=("Arial", 10))
+    col_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    col_scrollbar.config(command=col_listbox.yview)
+
     for i in range(num_series):
-        listbox.insert(tk.END, f"Series {i+1}")
-    
-    # Scrollbar for listbox
-    scrollbar = tk.Scrollbar(left_frame)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    listbox.config(yscrollcommand=scrollbar.set)
-    scrollbar.config(command=listbox.yview)
-    
-    # Plot variables - created when Generate Series is clicked
-    fig = None
-    ax = None
-    canvas_new = None
-    
-    # Lower frame plot variables - for individual series preview
-    fig_lower = None
-    ax_lower = None
-    canvas_lower = None
-    
-    def update_plot():
-        if ax is not None:
-            ax.clear()
-            for i, series_idx in enumerate(active_series):
-                ax.plot(np.array(range(len(norm_data[:, series_idx]))).reshape(-1, 1), 
-                       norm_data[:, series_idx] + i)
-            ax.set_title('Time Series Plot')
-            ax.set_xlabel('Time')
-            ax.set_ylabel('Signal + Offset')
-            canvas_new.draw()
-    
-    def generate_series():
-        nonlocal fig, ax, canvas_new, active_series
-        
-        # Get selected items from listbox
-        selection = listbox.curselection()
-        
-        if selection:
-            # If series are selected, use only those
-            active_series = [active_series[idx] for idx in selection]
-            # Update listbox to show only selected series
-            listbox.delete(0, tk.END)
-            for idx in active_series:
-                listbox.insert(tk.END, column_names[idx])
-        else:
-            # If no selection, use all series
-            active_series = list(range(num_series))
-        
-        # Close previous figure if it exists
-        if fig is not None:
-            plt.close(fig)
-        
-        # Clear upper frame and create plot
-        for widget in upper_frame.winfo_children():
-            widget.destroy()
-        
-        fig, ax = plt.subplots(figsize=(8, 4))
-        canvas_new = FigureCanvasTkAgg(fig, master=upper_frame)
-        canvas_new.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        update_plot()
-    
-    def display_single_series(event=None):
-        nonlocal fig_lower, ax_lower, canvas_lower
-        
-        # Get the currently selected item (only show one at a time)
-        selection = listbox.curselection()
-        if not selection:
+        col_listbox.insert(tk.END, column_names[i] if i < len(column_names) else f"Column {i+1}")
+
+    # ── Sidebar: Selection ──
+    ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+    tk.Label(sidebar, text="Selection", font=("Arial", 11, "bold")).pack(pady=(0, 5))
+
+    sel_lb_frame = tk.Frame(sidebar)
+    sel_lb_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+    sel_scrollbar = tk.Scrollbar(sel_lb_frame)
+    sel_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    sel_listbox = tk.Listbox(sel_lb_frame, yscrollcommand=sel_scrollbar.set,
+                              selectmode=tk.SINGLE, font=("Arial", 10))
+    sel_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    sel_scrollbar.config(command=sel_listbox.yview)
+
+    btn_add = tk.Button(sidebar, text="Add to Selection", command=lambda: add_to_selection())
+    btn_add.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+    btn_remove = tk.Button(sidebar, text="Remove from Selection", command=lambda: remove_from_selection())
+    btn_remove.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+    # ── Plot helpers ──
+    def show_signal(event=None):
+        sel = col_listbox.curselection()
+        if not sel:
             return
-        
-        # Get the first selected item
-        selected_idx = selection[0]
-        if selected_idx >= len(active_series):
+        try:
+            idx = col_listbox.index(tk.ACTIVE)
+        except Exception:
+            idx = sel[0]
+        if ts_figs['signal'] is not None:
+            plt.close(ts_figs['signal'])
+            ts_figs['signal'] = None
+        for w in list(top_plot.winfo_children()):
+            w.destroy()
+        col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
+        fig, ax = plt.subplots()
+        ax.plot(np.array(range(len(norm_data[:, idx]))).reshape(-1, 1), norm_data[:, idx])
+        ax.set_title(col_name)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        fig.tight_layout()
+        ts_figs['signal'] = fig
+        c = FigureCanvasTkAgg(fig, master=top_plot)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def update_multi_series():
+        if ts_figs['multi'] is not None:
+            plt.close(ts_figs['multi'])
+            ts_figs['multi'] = None
+        for w in list(bottom_plot.winfo_children()):
+            w.destroy()
+        if not selection_indices:
+            tk.Label(bottom_plot,
+                     text="Add columns to Selection to see time series",
+                     font=("Arial", 12), fg="#666666").pack(fill=tk.BOTH, expand=True)
             return
-        
-        # Get the actual series index from active_series
-        series_idx = active_series[selected_idx]
-        
-        # Close previous figure if it exists
-        if fig_lower is not None:
-            plt.close(fig_lower)
-        
-        # Clear lower frame and create plot
-        for widget in lower_frame.winfo_children():
-            widget.destroy()
-        
-        fig_lower, ax_lower = plt.subplots(figsize=(8, 4))
-        canvas_lower = FigureCanvasTkAgg(fig_lower, master=lower_frame)
-        canvas_lower.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # Plot the single selected series
-        ax_lower.plot(np.array(range(len(norm_data[:, series_idx]))).reshape(-1, 1), 
-                     norm_data[:, series_idx])
-        ax_lower.set_title(column_names[series_idx])
-        ax_lower.set_xlabel('Time')
-        ax_lower.set_ylabel('Signal')
-        canvas_lower.draw()
-    
-    # Bind listbox selection to display single series in lower frame
-    listbox.bind('<<ListboxSelect>>', display_single_series)
-    
-    def delete_selected_series():
-        selection = listbox.curselection()
-        if selection:
-            selected_indices = sorted(selection, reverse=True)
-            for selected_idx in selected_indices:
-                if selected_idx < len(active_series):
-                    active_series.pop(selected_idx)
-                    listbox.delete(selected_idx)
-            update_plot()
-    
-    def reset_series():
-        nonlocal active_series
-        
-        # Reset active series to all series
-        active_series = list(range(num_series))
-        
-        # Clear and repopulate listbox with all series
-        listbox.delete(0, tk.END)
-        for i in range(num_series):
-            listbox.insert(tk.END, column_names[i])
-    
-    # Generate Series button
-    generate_button = tk.Button(
-        left_frame,
-        text="Generate Series",
-        command=generate_series
-    )
-    generate_button.pack(fill=tk.X, pady=(5, 0))
-    
-    # Delete button for listbox
-    delete_button = tk.Button(
-        left_frame,
-        text="Delete Series",
-        command=delete_selected_series
-    )
-    delete_button.pack(fill=tk.X, pady=(5, 0))
-    
-    # Reset button for listbox
-    reset_button = tk.Button(
-        left_frame,
-        text="Reset Series",
-        command=reset_series
-    )
-    reset_button.pack(fill=tk.X, pady=(5, 0))
-    
-    # Save functions for bottom frame buttons
-    def _save_time_series_image():
-        default_name = get_default_time_series_name('.png')
+        fig, ax = plt.subplots()
+        for i, idx in enumerate(selection_indices):
+            col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
+            ax.plot(np.array(range(len(norm_data[:, idx]))).reshape(-1, 1),
+                    norm_data[:, idx] + i, label=col_name)
+        ax.set_title('Time Series')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Signal + Offset')
+        ax.legend(fontsize=8, loc='upper right')
+        fig.tight_layout()
+        ts_figs['multi'] = fig
+        c = FigureCanvasTkAgg(fig, master=bottom_plot)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def add_to_selection():
+        sel = col_listbox.curselection()
+        if not sel:
+            return
+        changed = False
+        for idx in sel:
+            if idx not in selection_indices:
+                selection_indices.append(idx)
+                col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
+                sel_listbox.insert(tk.END, col_name)
+                changed = True
+        if changed:
+            update_multi_series()
+
+    def remove_from_selection():
+        sel = sel_listbox.curselection()
+        if not sel:
+            return
+        list_idx = sel[0]
+        sel_listbox.delete(list_idx)
+        selection_indices.pop(list_idx)
+        update_multi_series()
+
+    col_listbox.bind('<<ListboxSelect>>', show_signal)
+
+    # ── Initial placeholders ──
+    tk.Label(top_plot, text="Click a column to view its signal",
+             font=("Arial", 12), fg="#666666").pack(fill=tk.BOTH, expand=True)
+    tk.Label(bottom_plot, text="Add columns to Selection to see time series",
+             font=("Arial", 12), fg="#666666").pack(fill=tk.BOTH, expand=True)
+
+    # ── Bottom buttons ──
+    def save_image():
+        if ts_figs['multi'] is None:
+            messagebox.showwarning("No plot", "Add columns to selection first.")
+            return
         filename = asksaveasfilename(
-            initialfile=default_name,
+            initialfile=get_default_name('.png'),
             defaultextension=".png",
-            filetypes=[
-                ("PNG Image", "*.png"),
-                ("PDF Document", "*.pdf"),
-                ("TIFF Image", "*.tiff"),
-                ("SVG Vector", "*.svg"),
-                ("EPS Vector", "*.eps"),
-                ("All Files", "*.*")
-            ]
+            filetypes=[("PNG Image", "*.png"), ("PDF Document", "*.pdf"),
+                       ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"), ("All Files", "*.*")]
         )
         if filename:
-            fig.savefig(filename)
-    
-    def _save_time_series_csv():
-        default_name = get_default_time_series_name('.csv')
+            ts_figs['multi'].savefig(filename)
+
+    def save_csv():
+        if not selection_indices:
+            messagebox.showwarning("No selection", "Add columns to selection first.")
+            return
         filename = asksaveasfilename(
-            initialfile=default_name,
+            initialfile=get_default_name('.csv'),
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
         )
         if filename:
-            # Create DataFrame with only active series
-            active_data = norm_data[:, active_series]
-            df = pd.DataFrame(active_data, columns=[column_names[i] for i in active_series])
-            df.to_csv(filename, index=False)
-    
-    # Save image button
-    save_img_button = tk.Button(
-        button_frame,
-        text="Save Image",
-        command=_save_time_series_image,
-        width=12
-    )
-    save_img_button.pack(side=tk.LEFT, padx=5)
-    
-    # Save CSV button
-    save_csv_button = tk.Button(
-        button_frame,
-        text="Save CSV",
-        command=_save_time_series_csv,
-        width=12
-    )
-    save_csv_button.pack(side=tk.LEFT, padx=5)
-    
-    # Close button
+            cols = [column_names[i] if i < len(column_names) else f"Column {i+1}"
+                    for i in selection_indices]
+            pd.DataFrame(norm_data[:, selection_indices], columns=cols).to_csv(filename, index=False)
+
     def close_window():
-        if fig is not None:
-            plt.close(fig)
+        for key in ('signal', 'multi'):
+            if ts_figs[key] is not None:
+                plt.close(ts_figs[key])
         if is_tab:
             try:
                 notebook.forget(container)
@@ -688,9 +635,10 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         else:
             container.destroy()
 
+    tk.Button(button_frame, text="Save Image", command=save_image, width=12).pack(side=tk.LEFT, padx=5)
+    tk.Button(button_frame, text="Save CSV", command=save_csv, width=12).pack(side=tk.LEFT, padx=5)
     close_label = "Close Tab" if is_tab else "Close"
-    close_button = tk.Button(button_frame, text=close_label, command=close_window, width=12)
-    close_button.pack(side=tk.RIGHT, padx=5)
+    tk.Button(button_frame, text=close_label, command=close_window, width=12).pack(side=tk.RIGHT, padx=5)
 
 def load_correlation_matrix(root, canvas):
     """

@@ -14,6 +14,10 @@ from functools import partial
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import sys
+import threading
+import subprocess
+import json
+import urllib.request
 
 # Módulos locales
 from pyometiff import OMETIFFReader
@@ -62,6 +66,12 @@ class NecLabApp:
         self.selection_column_indices = []
         self.plot_top_frame = None
         self.plot_bottom_frame = None
+        self.corr_method_var = tk.StringVar(value='pearson')
+        self.peak_method_var = tk.StringVar(value='None')
+        self.btn_save_data = None
+        self.btn_save_corr = None
+        self.peak_method_combo = None
+        self.peak_method_params = {}  # saved params per method name
         
         # Construir la interfaz
         self._create_menu()
@@ -95,6 +105,17 @@ class NecLabApp:
             label="Abrir OME-TIFF",
             accelerator="Ctrl+O",
             command=self.open_ometiff_file
+        )
+        self.menu_archivo.add_separator()
+        self.menu_archivo.add_command(
+            label='Abrir Datos (.npy / .csv)',
+            command=self.open_visualization_data,
+            state=NORMAL
+        )
+        self.menu_archivo.add_command(
+            label='Cargar Matriz de Correlacion',
+            command=self.load_correlation_matrix_wrapper,
+            state=NORMAL
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
@@ -143,69 +164,18 @@ class NecLabApp:
         # Menú Visualización
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
-        self.menu_visual.add_command(
-            label='Abrir Datos (.npy)',
-            command=self.open_visualization_data,
-            state=NORMAL
-        )
-        self.menu_visual.add_separator()
-        
-        # Opciones de suavizado
-        self.menu_visual.add_command(
-            label='Finite difference diffusion smoothing',
-            command=None,
-            state=DISABLED
-        )
-        self.menu_visual.add_command(
-            label='Exponential moving average smoothing',
-            command=None,
-            state=DISABLED
-        )
-        self.menu_visual.add_command(
-            label='Convex envelope smoothing',
-            command=None,
-            state=DISABLED
-        )
-        self.menu_visual.add_separator()
-        
-        # Opciones de detección de picos
-        peak_methods = [
-            'Elliptic Envelope',
-            'Peak Caller',
-            'Local Outlier Factor',
-            'Peak Function 4',
-            'Isolation Forest',
-            'Linear Model',
-            'Peak Function 7'
-        ]
-        for method in peak_methods:
-            self.menu_visual.add_command(label=method, command=None, state=DISABLED)
-        
-        self.menu_visual.add_separator()
-        
-        # Opciones de correlación
-        corr_methods = [
-            'Correlacion Pearson',
-            'Correlacion Kendall',
-            'Correlacion Spearman'
-        ]
-        for method in corr_methods:
-            self.menu_visual.add_command(label=method, command=None, state=DISABLED)
-        
-        self.menu_visual.add_separator()
+
         self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
         self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
-        
-        # Menú Correlación
-        self.menu_correlacion = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_correlacion, label="Correlacion")
-        self.menu_correlacion.add_command(
-            label='Cargar matriz de correlacion',
-            command=self.load_correlation_matrix_wrapper,
-            state=NORMAL
-        )
-        
+
+        # Menú Ayuda
+        self.menu_ayuda = Menu(self.menu_bar, tearoff=False)
+        self.menu_bar.add_cascade(menu=self.menu_ayuda, label="Help")
+        self.menu_ayuda.add_command(label='Check for Updates', command=self._check_for_updates)
+        self.menu_ayuda.add_separator()
+        self.menu_ayuda.add_command(label='About NecLab', command=self._show_about)
+
         # Atajo de teclado
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
     
@@ -462,13 +432,39 @@ class NecLabApp:
         self.column_listbox = tk.Listbox(
             listbox_frame,
             yscrollcommand=scrollbar.set,
-            selectmode=tk.SINGLE,
+            selectmode=tk.EXTENDED,
             font=("Arial", 10)
         )
         self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
 
         scrollbar.config(command=self.column_listbox.yview)
+
+        # ── Peak Finder selector ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        self.peak_method_combo = ttk.Combobox(
+            sidebar_frame, textvariable=self.peak_method_var,
+            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
+                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
+            state='readonly', width=20
+        )
+        self.peak_method_combo.pack(padx=5, pady=(0, 5))
+        self.peak_method_combo.bind('<<ComboboxSelected>>', lambda e: self._run_peak_on_column(show_dialog=True))
+        self.peak_method_combo.config(state=DISABLED)
+
+        # ── Correlation method selector ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        corr_method_combo = ttk.Combobox(
+            sidebar_frame, textvariable=self.corr_method_var,
+            values=['pearson', 'kendall', 'spearman'],
+            state='readonly', width=15
+        )
+        corr_method_combo.pack(padx=5, pady=(0, 5))
+        corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
 
         # ── Selection section ──
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
@@ -501,7 +497,22 @@ class NecLabApp:
             command=self._remove_from_selection, state=DISABLED
         )
         self.btn_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
-        
+
+        # ── Save buttons ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        self.btn_save_data = tk.Button(
+            sidebar_frame, text="Save Data Image",
+            command=self._save_data_image, state=DISABLED
+        )
+        self.btn_save_data.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        self.btn_save_corr = tk.Button(
+            sidebar_frame, text="Save Correlation",
+            command=self._save_correlation_image, state=DISABLED
+        )
+        self.btn_save_corr.pack(fill=tk.X, padx=5, pady=(0, 5))
+
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
         self.main_plot_frame.grid(row=0, column=1, sticky='nsew')
@@ -520,7 +531,7 @@ class NecLabApp:
     # ==================== DATA VISUALIZATION METHODS ====================
     
     def update_column_display(self, event=None):
-        """Update the plot when a different column is selected from the listbox."""
+        """Update the data graph when a column is selected. Does not refresh correlation."""
         if self.loaded_data is None:
             if hasattr(self.root, 'loaded_data'):
                 self.loaded_data = self.root.loaded_data
@@ -531,47 +542,27 @@ class NecLabApp:
         if not selection:
             return
 
-        self.current_column = selection[0]
+        # In EXTENDED mode use the last-clicked (ACTIVE) item for the display column
+        try:
+            self.current_column = self.column_listbox.index(tk.ACTIVE)
+        except Exception:
+            self.current_column = selection[0]
 
-        # Close existing figures
-        if self._data_fig is not None:
-            plt.close(self._data_fig)
-            self._data_fig = None
-        if self._corr_fig is not None:
-            plt.close(self._corr_fig)
-            self._corr_fig = None
+        # Initialize the split layout on first call (or if frames were destroyed)
+        if self.plot_top_frame is None or not self.plot_top_frame.winfo_exists():
+            for widget in list(self.main_plot_frame.winfo_children()):
+                widget.destroy()
+            self.main_plot_frame.rowconfigure(0, weight=3)
+            self.main_plot_frame.rowconfigure(1, weight=2)
+            self.main_plot_frame.columnconfigure(0, weight=1)
+            self.plot_top_frame = tk.Frame(self.main_plot_frame)
+            self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
+            self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
+            self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
+            self._update_correlation_display()
 
-        # Clear all widgets from the plot frame
-        for widget in list(self.main_plot_frame.winfo_children()):
-            widget.destroy()
-
-        # Build split layout: top (data graph 60%) / bottom (correlation 40%)
-        self.main_plot_frame.rowconfigure(0, weight=3)
-        self.main_plot_frame.rowconfigure(1, weight=2)
-        self.main_plot_frame.columnconfigure(0, weight=1)
-
-        self.plot_top_frame = tk.Frame(self.main_plot_frame)
-        self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
-
-        self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
-        self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
-
-        # Plot selected column in top frame
-        col_label = self.column_listbox.get(self.current_column)
-        self._data_fig, ax = plt.subplots()
-        ax.plot(
-            np.array(range(len(self.loaded_data[:, self.current_column]))).reshape(-1, 1),
-            self.loaded_data[:, self.current_column]
-        )
-        ax.set_title(col_label)
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        self._data_fig.tight_layout()
-        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self._update_correlation_display()
+        # Delegate drawing to peak runner (handles None → raw data, or a peak method)
+        self._run_peak_on_column()
 
     def _update_correlation_display(self):
         """Refresh the Pearson correlation heatmap in the bottom frame."""
@@ -595,11 +586,12 @@ class NecLabApp:
             return
 
         import pandas as pd
+        method = self.corr_method_var.get()
         sel_indices = self.selection_column_indices
         data_sel = self.loaded_data[:, sel_indices]
         col_labels = [self.column_listbox.get(i) for i in sel_indices]
         df = pd.DataFrame(data_sel, columns=col_labels)
-        corr = df.corr(method='pearson')
+        corr = df.corr(method=method)
 
         self._corr_fig, ax = plt.subplots()
         cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
@@ -608,7 +600,7 @@ class NecLabApp:
         ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
         ax.set_yticklabels(col_labels, fontsize=8)
         self._corr_fig.colorbar(cax, ax=ax, ticks=[-1, 0, 1], shrink=0.8)
-        ax.set_title('Pearson Correlation (Selection)', pad=20)
+        ax.set_title(f'{method.capitalize()} Correlation (Selection)', pad=20)
         self._corr_fig.tight_layout()
 
         corr_canvas = FigureCanvasTkAgg(self._corr_fig, master=self.plot_bottom_frame)
@@ -616,14 +608,17 @@ class NecLabApp:
         corr_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _add_to_selection(self):
-        """Add the currently highlighted Data Column to the Selection list."""
+        """Add all highlighted Data Columns to the Selection list."""
         sel = self.column_listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
-        if idx not in self.selection_column_indices:
-            self.selection_column_indices.append(idx)
-            self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
+        changed = False
+        for idx in sel:
+            if idx not in self.selection_column_indices:
+                self.selection_column_indices.append(idx)
+                self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
+                changed = True
+        if changed:
             self._update_correlation_display()
 
     def _remove_from_selection(self):
@@ -635,7 +630,138 @@ class NecLabApp:
         self.selection_listbox.delete(list_idx)
         self.selection_column_indices.pop(list_idx)
         self._update_correlation_display()
-    
+
+    # Parameter specs for each peak method (used by the dialog and param cache)
+    _PEAK_PARAM_SPECS = {
+        'Elliptic Envelope': ('Elliptic Envelope Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ]),
+        'Peak Caller': ('Peak Caller Parameters', [
+            {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
+            {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
+            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
+            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
+        ]),
+        'Local Outlier Factor': ('Local Outlier Factor Parameters', [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ]),
+        'Peak Function 4': ('Peak Function 4 (Elliptic Envelope + SVR) Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ]),
+        'Isolation Forest': ('Isolation Forest Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
+        ]),
+        'Linear Model': ('Linear Model (SGDOneClassSVM) Parameters', [
+            {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
+        ]),
+        'Peak Function 7': ('Peak Function 7 (Lasso + LOF) Parameters', [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ]),
+    }
+
+    def _run_peak_on_column(self, show_dialog=False, event=None):
+        """Draw raw data or run the selected peak finder on the current column.
+        show_dialog=True forces the parameter dialog (used when the method changes).
+        show_dialog=False reuses cached params (used when the column changes)."""
+        if self.loaded_data is None or self.plot_top_frame is None:
+            return
+        if not self.plot_top_frame.winfo_exists():
+            return
+
+        method = self.peak_method_var.get()
+        col_idx = self.current_column
+
+        if self._data_fig is not None:
+            plt.close(self._data_fig)
+            self._data_fig = None
+        for w in list(self.plot_top_frame.winfo_children()):
+            w.destroy()
+
+        if method == 'None':
+            self._draw_raw_data(col_idx)
+            return
+
+        # Show dialog only when method changes or no params saved yet
+        if show_dialog or method not in self.peak_method_params:
+            from peak_functions import show_parameter_dialog
+            spec = self._PEAK_PARAM_SPECS.get(method)
+            if spec:
+                title, param_list = spec
+                new_params = show_parameter_dialog(self.root, title, param_list)
+                if new_params is None:
+                    # User cancelled — revert to raw data view
+                    self.peak_method_var.set('None')
+                    self._draw_raw_data(col_idx)
+                    return
+                self.peak_method_params[method] = new_params
+
+        saved_params = self.peak_method_params.get(method)
+
+        from peak_functions import (elliptic_envelope_peak, actual_peak_caller,
+                                    local_outlier_factor_peak, clf_peak,
+                                    isolation_forest_peak, linear_model_peak, lasso_peak)
+        method_map = {
+            'Elliptic Envelope': elliptic_envelope_peak,
+            'Peak Caller': actual_peak_caller,
+            'Local Outlier Factor': local_outlier_factor_peak,
+            'Peak Function 4': clf_peak,
+            'Isolation Forest': isolation_forest_peak,
+            'Linear Model': linear_model_peak,
+            'Peak Function 7': lasso_peak,
+        }
+        func = method_map.get(method)
+        if func:
+            result = func(self.loaded_data, col_idx,
+                          main_window=None, canvas=None,
+                          target_frame=self.plot_top_frame,
+                          params=saved_params)
+            if result is not None:
+                self.canvas, self._data_fig = result
+
+    def _draw_raw_data(self, col_idx):
+        """Plot the raw normalized data for col_idx into plot_top_frame."""
+        col_label = self.column_listbox.get(col_idx)
+        self._data_fig, ax = plt.subplots()
+        ax.plot(
+            np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
+            self.loaded_data[:, col_idx]
+        )
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        self._data_fig.tight_layout()
+        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _save_data_image(self):
+        """Save the current data / peak-finder plot to a file."""
+        if self._data_fig is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+            title="Save Data Image"
+        )
+        if filename:
+            self._data_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_correlation_image(self):
+        """Save the current correlation heatmap to a file."""
+        if self._corr_fig is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+            title="Save Correlation Image"
+        )
+        if filename:
+            self._corr_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
     def open_visualization_data(self):
         """Abre datos para visualización de picos."""
         canvas = initialize_visualization(
@@ -654,6 +780,9 @@ class NecLabApp:
         if self.loaded_data is not None:
             self.btn_add_sel.config(state=NORMAL)
             self.btn_remove_sel.config(state=NORMAL)
+            self.btn_save_data.config(state=NORMAL)
+            self.btn_save_corr.config(state=NORMAL)
+            self.peak_method_combo.config(state='readonly')
     
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
@@ -927,6 +1056,117 @@ class NecLabApp:
             return
         show_variability_analysis(self.img_array, method_index, self.root)
 
+    # ==================== HELP / AUTO-UPDATER ====================
+
+    _REPO = "sergiocruzunamia/neclabunam"
+    _UPDATABLE_FILES = [
+        "interface3.py",
+        "peak_functions.py",
+        "visualization_helpers.py",
+        "corr_dendo_functions.py",
+        "variability_functions.py",
+        "image_loader.py",
+        "image_processing.py",
+    ]
+
+    def _get_local_sha(self):
+        version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+        try:
+            with open(version_path, "r") as f:
+                return json.load(f).get("sha", "")
+        except Exception:
+            return ""
+
+    def _save_local_sha(self, sha):
+        version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+        with open(version_path, "w") as f:
+            json.dump({"sha": sha}, f)
+
+    def _check_for_updates(self):
+        """Check GitHub for a newer version in a background thread."""
+        messagebox.showinfo("Checking for Updates", "Checking for updates, please wait…")
+        threading.Thread(target=self._fetch_update_info, daemon=True).start()
+
+    def _fetch_update_info(self):
+        api_url = f"https://api.github.com/repos/{self._REPO}/commits/main"
+        try:
+            req = urllib.request.Request(
+                api_url,
+                headers={"Accept": "application/vnd.github+json",
+                         "User-Agent": "NecLab-Updater/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            remote_sha = data["sha"]
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror(
+                "Update Check Failed",
+                f"Could not reach GitHub:\n{e}"
+            ))
+            return
+
+        local_sha = self._get_local_sha()
+        if remote_sha == local_sha:
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Up to Date", "NecLab is already up to date."
+            ))
+            return
+
+        # Ask user before downloading
+        self.root.after(0, lambda: self._offer_update(remote_sha))
+
+    def _offer_update(self, remote_sha):
+        if not messagebox.askyesno(
+            "Update Available",
+            "A new version of NecLab is available on GitHub.\n\n"
+            "Download and restart now?"
+        ):
+            return
+        threading.Thread(target=self._download_and_restart,
+                         args=(remote_sha,), daemon=True).start()
+
+    def _download_and_restart(self, remote_sha):
+        base_url = f"https://raw.githubusercontent.com/{self._REPO}/main/"
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        errors = []
+        for filename in self._UPDATABLE_FILES:
+            url = base_url + filename
+            dest = os.path.join(app_dir, filename)
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "NecLab-Updater/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    content = resp.read()
+                with open(dest, "wb") as f:
+                    f.write(content)
+            except Exception as e:
+                errors.append(f"{filename}: {e}")
+
+        if errors:
+            msg = "Some files could not be downloaded:\n" + "\n".join(errors)
+            self.root.after(0, lambda: messagebox.showwarning("Partial Update", msg))
+            return
+
+        try:
+            self._save_local_sha(remote_sha)
+        except Exception:
+            pass
+
+        self.root.after(0, self._restart_app)
+
+    def _restart_app(self):
+        if messagebox.askyesno("Restart", "Update complete. Restart NecLab now?"):
+            subprocess.Popen([sys.executable] + sys.argv)
+            self.root.quit()
+            self.root.destroy()
+            sys.exit(0)
+
+    def _show_about(self):
+        messagebox.showinfo(
+            "About NecLab",
+            "NecLab — Análisis de Imágenes de Microscopía y Visualización de Datos\n\n"
+            f"Repository: github.com/{self._REPO}\n"
+            "Contact: sergio.cruz@ciencias.unam.mx"
+        )
 
 
 def main():
