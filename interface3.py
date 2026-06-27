@@ -68,6 +68,7 @@ class NecLabApp:
         self.plot_bottom_frame = None
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
+        self.show_corr_labels_var = tk.BooleanVar(value=True)
         self.btn_save_data = None
         self.btn_save_corr = None
         self.peak_method_combo = None
@@ -466,6 +467,12 @@ class NecLabApp:
         corr_method_combo.pack(padx=5, pady=(0, 5))
         corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
 
+        ttk.Checkbutton(
+            sidebar_frame, text="Show Labels",
+            variable=self.show_corr_labels_var,
+            command=self._update_correlation_display
+        ).pack(anchor='w', padx=5, pady=(0, 5))
+
         # ── Selection section ──
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
 
@@ -597,8 +604,12 @@ class NecLabApp:
         cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
         ax.set_xticks(range(len(col_labels)))
         ax.set_yticks(range(len(col_labels)))
-        ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
-        ax.set_yticklabels(col_labels, fontsize=8)
+        if self.show_corr_labels_var.get():
+            ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
+            ax.set_yticklabels(col_labels, fontsize=8)
+        else:
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
         self._corr_fig.colorbar(cax, ax=ax, ticks=[-1, 0, 1], shrink=0.8)
         ax.set_title(f'{method.capitalize()} Correlation (Selection)', pad=20)
         self._corr_fig.tight_layout()
