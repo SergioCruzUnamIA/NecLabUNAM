@@ -62,6 +62,7 @@ class NecLabApp:
         self.selection_column_indices = []
         self.plot_top_frame = None
         self.plot_bottom_frame = None
+        self.corr_method_var = tk.StringVar(value='pearson')
         
         # Construir la interfaz
         self._create_menu()
@@ -470,6 +471,18 @@ class NecLabApp:
 
         scrollbar.config(command=self.column_listbox.yview)
 
+        # ── Correlation method selector ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        corr_method_combo = ttk.Combobox(
+            sidebar_frame, textvariable=self.corr_method_var,
+            values=['pearson', 'kendall', 'spearman'],
+            state='readonly', width=15
+        )
+        corr_method_combo.pack(padx=5, pady=(0, 5))
+        corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
+
         # ── Selection section ──
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
 
@@ -520,7 +533,7 @@ class NecLabApp:
     # ==================== DATA VISUALIZATION METHODS ====================
     
     def update_column_display(self, event=None):
-        """Update the plot when a different column is selected from the listbox."""
+        """Update only the data graph when a column is selected. Does not refresh correlation."""
         if self.loaded_data is None:
             if hasattr(self.root, 'loaded_data'):
                 self.loaded_data = self.root.loaded_data
@@ -533,30 +546,27 @@ class NecLabApp:
 
         self.current_column = selection[0]
 
-        # Close existing figures
+        # Initialize the split layout on first call (or if frames were destroyed)
+        if self.plot_top_frame is None or not self.plot_top_frame.winfo_exists():
+            for widget in list(self.main_plot_frame.winfo_children()):
+                widget.destroy()
+            self.main_plot_frame.rowconfigure(0, weight=3)
+            self.main_plot_frame.rowconfigure(1, weight=2)
+            self.main_plot_frame.columnconfigure(0, weight=1)
+            self.plot_top_frame = tk.Frame(self.main_plot_frame)
+            self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
+            self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
+            self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
+            # Draw initial placeholder / correlation state in bottom frame
+            self._update_correlation_display()
+
+        # Only update the top frame — close the old data figure and redraw
         if self._data_fig is not None:
             plt.close(self._data_fig)
             self._data_fig = None
-        if self._corr_fig is not None:
-            plt.close(self._corr_fig)
-            self._corr_fig = None
-
-        # Clear all widgets from the plot frame
-        for widget in list(self.main_plot_frame.winfo_children()):
+        for widget in list(self.plot_top_frame.winfo_children()):
             widget.destroy()
 
-        # Build split layout: top (data graph 60%) / bottom (correlation 40%)
-        self.main_plot_frame.rowconfigure(0, weight=3)
-        self.main_plot_frame.rowconfigure(1, weight=2)
-        self.main_plot_frame.columnconfigure(0, weight=1)
-
-        self.plot_top_frame = tk.Frame(self.main_plot_frame)
-        self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
-
-        self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
-        self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
-
-        # Plot selected column in top frame
         col_label = self.column_listbox.get(self.current_column)
         self._data_fig, ax = plt.subplots()
         ax.plot(
@@ -570,8 +580,6 @@ class NecLabApp:
         self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self._update_correlation_display()
 
     def _update_correlation_display(self):
         """Refresh the Pearson correlation heatmap in the bottom frame."""
@@ -595,11 +603,12 @@ class NecLabApp:
             return
 
         import pandas as pd
+        method = self.corr_method_var.get()
         sel_indices = self.selection_column_indices
         data_sel = self.loaded_data[:, sel_indices]
         col_labels = [self.column_listbox.get(i) for i in sel_indices]
         df = pd.DataFrame(data_sel, columns=col_labels)
-        corr = df.corr(method='pearson')
+        corr = df.corr(method=method)
 
         self._corr_fig, ax = plt.subplots()
         cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
@@ -608,7 +617,7 @@ class NecLabApp:
         ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
         ax.set_yticklabels(col_labels, fontsize=8)
         self._corr_fig.colorbar(cax, ax=ax, ticks=[-1, 0, 1], shrink=0.8)
-        ax.set_title('Pearson Correlation (Selection)', pad=20)
+        ax.set_title(f'{method.capitalize()} Correlation (Selection)', pad=20)
         self._corr_fig.tight_layout()
 
         corr_canvas = FigureCanvasTkAgg(self._corr_fig, master=self.plot_bottom_frame)
