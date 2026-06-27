@@ -63,6 +63,10 @@ class NecLabApp:
         self.plot_top_frame = None
         self.plot_bottom_frame = None
         self.corr_method_var = tk.StringVar(value='pearson')
+        self.peak_method_var = tk.StringVar(value='None')
+        self.btn_save_data = None
+        self.btn_save_corr = None
+        self.peak_method_combo = None
         
         # Construir la interfaz
         self._create_menu()
@@ -96,6 +100,17 @@ class NecLabApp:
             label="Abrir OME-TIFF",
             accelerator="Ctrl+O",
             command=self.open_ometiff_file
+        )
+        self.menu_archivo.add_separator()
+        self.menu_archivo.add_command(
+            label='Abrir Datos (.npy / .csv)',
+            command=self.open_visualization_data,
+            state=NORMAL
+        )
+        self.menu_archivo.add_command(
+            label='Cargar Matriz de Correlacion',
+            command=self.load_correlation_matrix_wrapper,
+            state=NORMAL
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
@@ -141,17 +156,11 @@ class NecLabApp:
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
         
-        # Menú Visualización
+        # Menú Visualización (sin peak methods — se usan desde el dropdown en el panel)
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
-        self.menu_visual.add_command(
-            label='Abrir Datos (.npy)',
-            command=self.open_visualization_data,
-            state=NORMAL
-        )
-        self.menu_visual.add_separator()
-        
-        # Opciones de suavizado
+
+        # Opciones de suavizado (futuras)
         self.menu_visual.add_command(
             label='Finite difference diffusion smoothing',
             command=None,
@@ -168,22 +177,7 @@ class NecLabApp:
             state=DISABLED
         )
         self.menu_visual.add_separator()
-        
-        # Opciones de detección de picos
-        peak_methods = [
-            'Elliptic Envelope',
-            'Peak Caller',
-            'Local Outlier Factor',
-            'Peak Function 4',
-            'Isolation Forest',
-            'Linear Model',
-            'Peak Function 7'
-        ]
-        for method in peak_methods:
-            self.menu_visual.add_command(label=method, command=None, state=DISABLED)
-        
-        self.menu_visual.add_separator()
-        
+
         # Opciones de correlación
         corr_methods = [
             'Correlacion Pearson',
@@ -192,20 +186,11 @@ class NecLabApp:
         ]
         for method in corr_methods:
             self.menu_visual.add_command(label=method, command=None, state=DISABLED)
-        
+
         self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
         self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
-        
-        # Menú Correlación
-        self.menu_correlacion = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_correlacion, label="Correlacion")
-        self.menu_correlacion.add_command(
-            label='Cargar matriz de correlacion',
-            command=self.load_correlation_matrix_wrapper,
-            state=NORMAL
-        )
         
         # Atajo de teclado
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
@@ -471,6 +456,20 @@ class NecLabApp:
 
         scrollbar.config(command=self.column_listbox.yview)
 
+        # ── Peak Finder selector ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        self.peak_method_combo = ttk.Combobox(
+            sidebar_frame, textvariable=self.peak_method_var,
+            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
+                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
+            state='readonly', width=20
+        )
+        self.peak_method_combo.pack(padx=5, pady=(0, 5))
+        self.peak_method_combo.bind('<<ComboboxSelected>>', self._run_peak_on_column)
+        self.peak_method_combo.config(state=DISABLED)
+
         # ── Correlation method selector ──
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
 
@@ -514,7 +513,22 @@ class NecLabApp:
             command=self._remove_from_selection, state=DISABLED
         )
         self.btn_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
-        
+
+        # ── Save buttons ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        self.btn_save_data = tk.Button(
+            sidebar_frame, text="Save Data Image",
+            command=self._save_data_image, state=DISABLED
+        )
+        self.btn_save_data.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        self.btn_save_corr = tk.Button(
+            sidebar_frame, text="Save Correlation",
+            command=self._save_correlation_image, state=DISABLED
+        )
+        self.btn_save_corr.pack(fill=tk.X, padx=5, pady=(0, 5))
+
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
         self.main_plot_frame.grid(row=0, column=1, sticky='nsew')
@@ -533,7 +547,7 @@ class NecLabApp:
     # ==================== DATA VISUALIZATION METHODS ====================
     
     def update_column_display(self, event=None):
-        """Update only the data graph when a column is selected. Does not refresh correlation."""
+        """Update the data graph when a column is selected. Does not refresh correlation."""
         if self.loaded_data is None:
             if hasattr(self.root, 'loaded_data'):
                 self.loaded_data = self.root.loaded_data
@@ -557,29 +571,10 @@ class NecLabApp:
             self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
             self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
             self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
-            # Draw initial placeholder / correlation state in bottom frame
             self._update_correlation_display()
 
-        # Only update the top frame — close the old data figure and redraw
-        if self._data_fig is not None:
-            plt.close(self._data_fig)
-            self._data_fig = None
-        for widget in list(self.plot_top_frame.winfo_children()):
-            widget.destroy()
-
-        col_label = self.column_listbox.get(self.current_column)
-        self._data_fig, ax = plt.subplots()
-        ax.plot(
-            np.array(range(len(self.loaded_data[:, self.current_column]))).reshape(-1, 1),
-            self.loaded_data[:, self.current_column]
-        )
-        ax.set_title(col_label)
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        self._data_fig.tight_layout()
-        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        # Delegate drawing to peak runner (handles None → raw data, or a peak method)
+        self._run_peak_on_column()
 
     def _update_correlation_display(self):
         """Refresh the Pearson correlation heatmap in the bottom frame."""
@@ -644,7 +639,91 @@ class NecLabApp:
         self.selection_listbox.delete(list_idx)
         self.selection_column_indices.pop(list_idx)
         self._update_correlation_display()
-    
+
+    def _run_peak_on_column(self, event=None):
+        """Draw raw data or run the selected peak finder on the current column."""
+        if self.loaded_data is None or self.plot_top_frame is None:
+            return
+        if not self.plot_top_frame.winfo_exists():
+            return
+
+        method = self.peak_method_var.get()
+        col_idx = self.current_column
+
+        if self._data_fig is not None:
+            plt.close(self._data_fig)
+            self._data_fig = None
+        for w in list(self.plot_top_frame.winfo_children()):
+            w.destroy()
+
+        if method == 'None':
+            self._draw_raw_data(col_idx)
+            return
+
+        from peak_functions import (elliptic_envelope_peak, actual_peak_caller,
+                                    local_outlier_factor_peak, clf_peak,
+                                    isolation_forest_peak, linear_model_peak, lasso_peak)
+        method_map = {
+            'Elliptic Envelope': elliptic_envelope_peak,
+            'Peak Caller': actual_peak_caller,
+            'Local Outlier Factor': local_outlier_factor_peak,
+            'Peak Function 4': clf_peak,
+            'Isolation Forest': isolation_forest_peak,
+            'Linear Model': linear_model_peak,
+            'Peak Function 7': lasso_peak,
+        }
+        func = method_map.get(method)
+        if func:
+            result = func(self.loaded_data, col_idx,
+                          main_window=None, canvas=None,
+                          target_frame=self.plot_top_frame)
+            if result is not None:
+                self.canvas, self._data_fig = result
+
+    def _draw_raw_data(self, col_idx):
+        """Plot the raw normalized data for col_idx into plot_top_frame."""
+        col_label = self.column_listbox.get(col_idx)
+        self._data_fig, ax = plt.subplots()
+        ax.plot(
+            np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
+            self.loaded_data[:, col_idx]
+        )
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        self._data_fig.tight_layout()
+        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _save_data_image(self):
+        """Save the current data / peak-finder plot to a file."""
+        if self._data_fig is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+            title="Save Data Image"
+        )
+        if filename:
+            self._data_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_correlation_image(self):
+        """Save the current correlation heatmap to a file."""
+        if self._corr_fig is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+            title="Save Correlation Image"
+        )
+        if filename:
+            self._corr_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
     def open_visualization_data(self):
         """Abre datos para visualización de picos."""
         canvas = initialize_visualization(
@@ -663,6 +742,9 @@ class NecLabApp:
         if self.loaded_data is not None:
             self.btn_add_sel.config(state=NORMAL)
             self.btn_remove_sel.config(state=NORMAL)
+            self.btn_save_data.config(state=NORMAL)
+            self.btn_save_corr.config(state=NORMAL)
+            self.peak_method_combo.config(state='readonly')
     
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""

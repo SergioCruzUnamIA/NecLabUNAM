@@ -190,13 +190,13 @@ def normalize_data(data):
     normalized_data = _normalize_data_helper(data)
     return normalized_data
 
-def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None):
+def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Elliptic Envelope Parameters", [
         {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
     ])
     if params is None:
-        return
-    
+        return None
+
     plot_mode = 0
     pico_norm_data = norm_data[:, roi_index]
 
@@ -208,9 +208,9 @@ def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None):
     y_pred = clf.predict(new_data.reshape(-1, 1))
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
 
-    draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas)
+    return draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead, main_window=None, canvas=None):
+def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead, main_window=None, canvas=None, target_frame=None):
     plot_mode = 1
     peaks = []
     n = len(data)
@@ -253,10 +253,14 @@ def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_l
 
     res = np.zeros_like(data_sel)
     y_res = peaks
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, data, roi_index, peaks, rise_percent, fall_percent, max_lookahead, max_lookback)
+    result = draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas,
+                         data, roi_index, peaks, rise_percent, fall_percent, max_lookahead, max_lookback,
+                         target_frame=target_frame)
+    if target_frame is not None:
+        return result
     return peaks
 
-def actual_peak_caller(data, roi_index, main_window=None, canvas=None):
+def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Peak Caller Parameters", [
         {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
         {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
@@ -264,21 +268,22 @@ def actual_peak_caller(data, roi_index, main_window=None, canvas=None):
         {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
     ])
     if params is None:
-        return
+        return None
     return peak_caller(data, roi_index,
                        rise_percent=params['rise_percent'],
                        fall_percent=params['fall_percent'],
                        max_lookback=params['max_lookback'],
                        max_lookahead=params['max_lookahead'],
-                       main_window=main_window, canvas=canvas)
+                       main_window=main_window, canvas=canvas,
+                       target_frame=target_frame)
 
-def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None):
+def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Local Outlier Factor Parameters", [
         {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
     ])
     if params is None:
-        return
-    
+        return None
+
     plot_mode = 2
     data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
@@ -289,15 +294,15 @@ def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     # Keep only upper peaks (above regression line)
     y_res = [i for i in y_res if new_data[i] > 0]
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
+    return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def clf_peak(data, roi_index, main_window=None, canvas=None):
+def clf_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Peak Function 4 (Elliptic Envelope + SVR) Parameters", [
         {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
     ])
     if params is None:
-        return
-    
+        return None
+
     plot_mode = 2
     data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
@@ -308,15 +313,15 @@ def clf_peak(data, roi_index, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     # Keep only upper peaks (above regression line)
     y_res = [i for i in y_res if new_data[i] > 0]
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
+    return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def isolation_forest_peak(data, roi_index, main_window=None, canvas=None):
+def isolation_forest_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Isolation Forest Parameters", [
         {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
     ])
     if params is None:
-        return
-    
+        return None
+
     plot_mode = 2
     data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
@@ -327,15 +332,15 @@ def isolation_forest_peak(data, roi_index, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     # Keep only upper peaks (above regression line)
     y_res = [i for i in y_res if new_data[i] > 0]
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
+    return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def linear_model_peak(data, roi_index, main_window=None, canvas=None):
+def linear_model_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Linear Model (SGDOneClassSVM) Parameters", [
         {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
     ])
     if params is None:
-        return
-    
+        return None
+
     plot_mode = 2
     data_sel = data[:, roi_index]
     reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
@@ -346,15 +351,15 @@ def linear_model_peak(data, roi_index, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     # Keep only upper peaks (above regression line)
     y_res = [i for i in y_res if new_data[i] > 0]
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
+    return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def lasso_peak(data, roi_index, main_window=None, canvas=None):
+def lasso_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
     params = show_parameter_dialog(main_window, "Peak Function 7 (Lasso + LOF) Parameters", [
         {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
     ])
     if params is None:
-        return
-    
+        return None
+
     plot_mode = 2
     data_sel = data[:, roi_index]
     reg = Lasso().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
@@ -365,7 +370,7 @@ def lasso_peak(data, roi_index, main_window=None, canvas=None):
     y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
     # Keep only upper peaks (above regression line)
     y_res = [i for i in y_res if new_data[i] > 0]
-    draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas)
+    return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
 def create_visualization_window():
     visualization_window = tk.Toplevel()
@@ -511,65 +516,82 @@ def restore_normal_buttons(main_window, data_sel, args):
     
     add_peak_buttons(main_window, data_sel, *args)
 
-def draw_canvas(data_sel, res, y_res, plot_mode, main_window=None, canvas=None, *args):
+def draw_canvas(data_sel, res, y_res, plot_mode, main_window=None, canvas=None, *args, target_frame=None):
     # Remove any existing peak button frames first (before creating new plot)
-    if main_window:
+    if main_window and not target_frame:
         for widget in list(main_window.winfo_children()):
             if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
                 widget.destroy()
-    
+
+    fig = None
+
     match plot_mode:
         case 0:
             fig, ax = plt.subplots()
             plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel - res)
             plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], (data_sel - res)[y_res], "o")
-                
+
         case 1:
-            if main_window:
+            if target_frame is not None:
+                # Tab integration: render result directly without the interactive Update UI
+                peaks = args[2] if len(args) > 2 else []
+                fig, ax = plt.subplots()
+                ax.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+                if peaks:
+                    ax.scatter(peaks, data_sel[peaks], color='darkorange', label='Peaks')
+                ax.set_title('Peak Caller')
+                ax.set_xlabel('Time')
+                ax.set_ylabel('Value')
+                ax.legend()
+            elif main_window:
                 canvas = update_peak_caller_main(data_sel, main_window, canvas, *args)
                 add_peak_buttons(main_window, data_sel, *args)
                 return canvas
             else:
                 update_peak_caller(data_sel, *args)
                 return
+
         case 2:
             fig, ax = plt.subplots()
             plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), data_sel, label='Signal')
             plt.plot(np.array(range(len(data_sel))).reshape(-1, 1), res, label='Regression fit', linestyle='--')
             plt.plot(np.array(range(len(data_sel))).reshape(-1, 1)[y_res], data_sel[y_res], "o", label='Detected peaks')
             plt.legend()
-            
-            if main_window and canvas:
-                pass  # No need to hide any widget in the simplified layout
 
-    if main_window:
+    if target_frame is not None:
+        for w in list(target_frame.winfo_children()):
+            w.destroy()
+        plt.close('all')
+        c = FigureCanvasTkAgg(fig, master=target_frame)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        return c, fig
+    elif main_window:
         # Get the main plot frame instead of plotting to entire window
         plot_frame = get_main_plot_frame(main_window)
-        
+
         # Clear ALL widgets from the plot frame
         for widget in list(plot_frame.winfo_children()):
             widget.destroy()
-        
+
         # Close all matplotlib figures
         plt.close('all')
-        
+
         # Create canvas in the plot frame using pack (not grid)
         canvas = FigureCanvasTkAgg(fig, master=plot_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
+
         if plot_mode in [0, 2]:
-            # For plot modes 0 and 2, pass y_res as the peaks
-            # Create a minimal args tuple: (None, None, peaks)
             peak_args = (None, None, y_res)
             add_peak_buttons(main_window, data_sel, *peak_args)
-        
+
         return canvas
     else:
         window = create_visualization_window()
         canvas = FigureCanvasTkAgg(fig, master=window)
         canvas.draw()
-        canvas.get_tk_widget().grid(row=0, column=0,columnspan=3, sticky='nsew')
+        canvas.get_tk_widget().grid(row=0, column=0, columnspan=3, sticky='nsew')
         return canvas
 
 def show_original_data(main_window, data_sel, args):
