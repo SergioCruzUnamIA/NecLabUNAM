@@ -608,7 +608,7 @@ class NecLabApp:
         corr_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _add_to_selection(self):
-        """Add all highlighted Data Columns to the Selection list."""
+        """Add all highlighted Data Columns to the Selection list, keeping it sorted."""
         sel = self.column_listbox.curselection()
         if not sel:
             return
@@ -616,9 +616,12 @@ class NecLabApp:
         for idx in sel:
             if idx not in self.selection_column_indices:
                 self.selection_column_indices.append(idx)
-                self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
                 changed = True
         if changed:
+            self.selection_column_indices.sort()
+            self.selection_listbox.delete(0, tk.END)
+            for idx in self.selection_column_indices:
+                self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
             self._update_correlation_display()
 
     def _remove_from_selection(self):

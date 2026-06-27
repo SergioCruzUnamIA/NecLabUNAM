@@ -572,10 +572,13 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         for idx in sel:
             if idx not in selection_indices:
                 selection_indices.append(idx)
-                col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
-                sel_listbox.insert(tk.END, col_name)
                 changed = True
         if changed:
+            selection_indices.sort()
+            sel_listbox.delete(0, tk.END)
+            for idx in selection_indices:
+                col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
+                sel_listbox.insert(tk.END, col_name)
             update_multi_series()
 
     def remove_from_selection():
