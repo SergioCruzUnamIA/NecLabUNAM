@@ -512,6 +512,14 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
     btn_remove = tk.Button(sidebar, text="Remove from Selection", command=lambda: remove_from_selection())
     btn_remove.pack(fill=tk.X, padx=5, pady=(0, 5))
 
+    show_labels_var = tk.BooleanVar(value=True)
+    ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
+    ttk.Checkbutton(
+        sidebar, text="Show Labels",
+        variable=show_labels_var,
+        command=lambda: update_multi_series()
+    ).pack(anchor='w', padx=5, pady=(0, 5))
+
     # ── Plot helpers ──
     def show_signal(event=None):
         sel = col_listbox.curselection()
@@ -557,7 +565,8 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         ax.set_title('Time Series')
         ax.set_xlabel('Time')
         ax.set_ylabel('Signal + Offset')
-        ax.legend(fontsize=8, loc='upper right')
+        if show_labels_var.get():
+            ax.legend(fontsize=8, loc='upper right')
         fig.tight_layout()
         ts_figs['multi'] = fig
         c = FigureCanvasTkAgg(fig, master=bottom_plot)
@@ -572,10 +581,13 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         for idx in sel:
             if idx not in selection_indices:
                 selection_indices.append(idx)
-                col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
-                sel_listbox.insert(tk.END, col_name)
                 changed = True
         if changed:
+            selection_indices.sort()
+            sel_listbox.delete(0, tk.END)
+            for idx in selection_indices:
+                col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
+                sel_listbox.insert(tk.END, col_name)
             update_multi_series()
 
     def remove_from_selection():
