@@ -190,10 +190,11 @@ def normalize_data(data):
     normalized_data = _normalize_data_helper(data)
     return normalized_data
 
-def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Elliptic Envelope Parameters", [
-        {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
-    ])
+def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Elliptic Envelope Parameters", [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ])
     if params is None:
         return None
 
@@ -260,13 +261,14 @@ def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_l
         return result
     return peaks
 
-def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Peak Caller Parameters", [
-        {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
-        {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
-        {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
-        {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
-    ])
+def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Peak Caller Parameters", [
+            {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
+            {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
+            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
+            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
+        ])
     if params is None:
         return None
     return peak_caller(data, roi_index,
@@ -277,10 +279,11 @@ def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_fr
                        main_window=main_window, canvas=canvas,
                        target_frame=target_frame)
 
-def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Local Outlier Factor Parameters", [
-        {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
-    ])
+def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Local Outlier Factor Parameters", [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ])
     if params is None:
         return None
 
@@ -296,10 +299,11 @@ def local_outlier_factor_peak(data, roi_index, main_window=None, canvas=None, ta
     y_res = [i for i in y_res if new_data[i] > 0]
     return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def clf_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Peak Function 4 (Elliptic Envelope + SVR) Parameters", [
-        {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
-    ])
+def clf_peak(data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Peak Function 4 (Elliptic Envelope + SVR) Parameters", [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ])
     if params is None:
         return None
 
@@ -315,10 +319,11 @@ def clf_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
     y_res = [i for i in y_res if new_data[i] > 0]
     return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def isolation_forest_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Isolation Forest Parameters", [
-        {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
-    ])
+def isolation_forest_peak(data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Isolation Forest Parameters", [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
+        ])
     if params is None:
         return None
 
@@ -334,10 +339,11 @@ def isolation_forest_peak(data, roi_index, main_window=None, canvas=None, target
     y_res = [i for i in y_res if new_data[i] > 0]
     return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def linear_model_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Linear Model (SGDOneClassSVM) Parameters", [
-        {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
-    ])
+def linear_model_peak(data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Linear Model (SGDOneClassSVM) Parameters", [
+            {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
+        ])
     if params is None:
         return None
 
@@ -353,10 +359,11 @@ def linear_model_peak(data, roi_index, main_window=None, canvas=None, target_fra
     y_res = [i for i in y_res if new_data[i] > 0]
     return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def lasso_peak(data, roi_index, main_window=None, canvas=None, target_frame=None):
-    params = show_parameter_dialog(main_window, "Peak Function 7 (Lasso + LOF) Parameters", [
-        {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
-    ])
+def lasso_peak(data, roi_index, main_window=None, canvas=None, target_frame=None, params=None):
+    if params is None:
+        params = show_parameter_dialog(main_window, "Peak Function 7 (Lasso + LOF) Parameters", [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ])
     if params is None:
         return None
 

@@ -67,6 +67,7 @@ class NecLabApp:
         self.btn_save_data = None
         self.btn_save_corr = None
         self.peak_method_combo = None
+        self.peak_method_params = {}  # saved params per method name
         
         # Construir la interfaz
         self._create_menu()
@@ -178,16 +179,6 @@ class NecLabApp:
         )
         self.menu_visual.add_separator()
 
-        # Opciones de correlación
-        corr_methods = [
-            'Correlacion Pearson',
-            'Correlacion Kendall',
-            'Correlacion Spearman'
-        ]
-        for method in corr_methods:
-            self.menu_visual.add_command(label=method, command=None, state=DISABLED)
-
-        self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
         self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
@@ -467,7 +458,7 @@ class NecLabApp:
             state='readonly', width=20
         )
         self.peak_method_combo.pack(padx=5, pady=(0, 5))
-        self.peak_method_combo.bind('<<ComboboxSelected>>', self._run_peak_on_column)
+        self.peak_method_combo.bind('<<ComboboxSelected>>', lambda e: self._run_peak_on_column(show_dialog=True))
         self.peak_method_combo.config(state=DISABLED)
 
         # ── Correlation method selector ──
@@ -640,8 +631,38 @@ class NecLabApp:
         self.selection_column_indices.pop(list_idx)
         self._update_correlation_display()
 
-    def _run_peak_on_column(self, event=None):
-        """Draw raw data or run the selected peak finder on the current column."""
+    # Parameter specs for each peak method (used by the dialog and param cache)
+    _PEAK_PARAM_SPECS = {
+        'Elliptic Envelope': ('Elliptic Envelope Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ]),
+        'Peak Caller': ('Peak Caller Parameters', [
+            {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
+            {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
+            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
+            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
+        ]),
+        'Local Outlier Factor': ('Local Outlier Factor Parameters', [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ]),
+        'Peak Function 4': ('Peak Function 4 (Elliptic Envelope + SVR) Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ]),
+        'Isolation Forest': ('Isolation Forest Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
+        ]),
+        'Linear Model': ('Linear Model (SGDOneClassSVM) Parameters', [
+            {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
+        ]),
+        'Peak Function 7': ('Peak Function 7 (Lasso + LOF) Parameters', [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ]),
+    }
+
+    def _run_peak_on_column(self, show_dialog=False, event=None):
+        """Draw raw data or run the selected peak finder on the current column.
+        show_dialog=True forces the parameter dialog (used when the method changes).
+        show_dialog=False reuses cached params (used when the column changes)."""
         if self.loaded_data is None or self.plot_top_frame is None:
             return
         if not self.plot_top_frame.winfo_exists():
@@ -660,6 +681,22 @@ class NecLabApp:
             self._draw_raw_data(col_idx)
             return
 
+        # Show dialog only when method changes or no params saved yet
+        if show_dialog or method not in self.peak_method_params:
+            from peak_functions import show_parameter_dialog
+            spec = self._PEAK_PARAM_SPECS.get(method)
+            if spec:
+                title, param_list = spec
+                new_params = show_parameter_dialog(self.root, title, param_list)
+                if new_params is None:
+                    # User cancelled — revert to raw data view
+                    self.peak_method_var.set('None')
+                    self._draw_raw_data(col_idx)
+                    return
+                self.peak_method_params[method] = new_params
+
+        saved_params = self.peak_method_params.get(method)
+
         from peak_functions import (elliptic_envelope_peak, actual_peak_caller,
                                     local_outlier_factor_peak, clf_peak,
                                     isolation_forest_peak, linear_model_peak, lasso_peak)
@@ -676,7 +713,8 @@ class NecLabApp:
         if func:
             result = func(self.loaded_data, col_idx,
                           main_window=None, canvas=None,
-                          target_frame=self.plot_top_frame)
+                          target_frame=self.plot_top_frame,
+                          params=saved_params)
             if result is not None:
                 self.canvas, self._data_fig = result
 

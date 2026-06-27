@@ -177,40 +177,7 @@ def _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list=Non
     def get_current_column():
         return getattr(main_window, 'current_column', 0)
 
-    # Enable all menu peak/analysis items
-    # Note: pass `window` (data_tab) not `main_window` (root) so that
-    # get_main_plot_frame() can find the plot frame at column=1.
-    # Do NOT capture `canvas` — it goes stale when columns are switched.
-    menu_picos.entryconfig("Elliptic Envelope",
-                           command=lambda: elliptic_envelope_peak(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Peak Caller",
-                           command=lambda: actual_peak_caller(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Local Outlier Factor",
-                           command=lambda: local_outlier_factor_peak(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Peak Function 4",
-                           command=lambda: clf_peak(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Isolation Forest",
-                           command=lambda: isolation_forest_peak(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Linear Model",
-                           command=lambda: linear_model_peak(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Peak Function 7",
-                           command=lambda: lasso_peak(data, get_current_column(), window, None),
-                           state=NORMAL)
-    menu_picos.entryconfig("Correlacion Pearson",
-                           command=lambda: _open_correlation_tab(data, 'pearson', notebook, column_names_list),
-                           state=NORMAL)
-    menu_picos.entryconfig("Correlacion Kendall",
-                           command=lambda: _open_correlation_tab(data, 'kendall', notebook, column_names_list),
-                           state=NORMAL)
-    menu_picos.entryconfig("Correlacion Spearman",
-                           command=lambda: _open_correlation_tab(data, 'spearman', notebook, column_names_list),
-                           state=NORMAL)
+    # Enable Dendograma and Series de tiempo menu items after data is loaded
     menu_picos.entryconfig("Dendograma",
                            command=lambda: plot_dendogram(data, window, None),
                            state=NORMAL)
