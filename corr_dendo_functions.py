@@ -35,27 +35,18 @@ def correlation_pearson(data):
     plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='pearson')
-    #plt.matshow(corr1, cmap='jet')
-    #plt.colorbar()
-    #plt.show()
     return corr1
 
 def correlation_kendall(data):
     plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='kendall')
-    #plt.matshow(corr1, cmap='jet')
-    #plt.colorbar()
-    #plt.show()
     return corr1
 
 def correlation_spearman(data):
     plt.close('all')
     df = pd.DataFrame(data)
     corr1 = df.corr(method='spearman')
-    #plt.matshow(corr1, cmap='jet')
-    #plt.colorbar()
-    #plt.show()
     return corr1
 
 def _plot_dendrogram_helper(model, **kwargs):
@@ -86,19 +77,22 @@ def _plot_dendrogram_helper(model, **kwargs):
     # Plot the corresponding dendrogram
     dendrogram(linkage_matrix, **kwargs)
 
-def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None):
+def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None, target_frame=None):
     '''Plot a graphical correlation matrix for a dataframe.
 
     Input:
         df: pandas DataFrame
         size: vertical and horizontal size of the plot
         is_precomputed_corr: if True, df is already a correlation matrix
-        corr_method: the correlation method used (e.g., 'pearson', 'kendall', 'spearman')'''
-    # Clean up by clearing the plot frame instead of relying on stale canvas
-    plot_frame = get_main_plot_frame(root)
-    for widget in list(plot_frame.winfo_children()):
-        widget.destroy()
-    plt.close('all')
+        corr_method: the correlation method used (e.g., 'pearson', 'kendall', 'spearman')
+        target_frame: if provided, render into this frame directly instead of the main plot frame'''
+    if target_frame is not None:
+        plot_frame = target_frame
+    else:
+        plot_frame = get_main_plot_frame(root)
+        for widget in list(plot_frame.winfo_children()):
+            widget.destroy()
+        plt.close('all')
     
     # Compute the correlation matrix for the received dataframe or use as-is
     if is_precomputed_corr:
@@ -265,8 +259,8 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
     save_csv_button.pack(side=tk.LEFT, padx=5)
     save_corr_img_button.pack(side=tk.LEFT, padx=5)
     save_all_button.pack(side=tk.LEFT, padx=5)
-    
-    return canvas
+
+    return canvas, fig
 
 def plot_correlation(data, corr, root, canvas, corr_method=None):
     # Clean up by clearing the plot frame (don't rely on stale canvas reference)
@@ -288,7 +282,7 @@ def plot_correlation(data, corr, root, canvas, corr_method=None):
     columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
     df = df.reindex(columns, axis=1)
     size = 5
-    canvas = _plot_correlation_helper(df, size, root, canvas, corr_method=corr_method)
+    canvas, _ = _plot_correlation_helper(df, size, root, canvas, corr_method=corr_method)
     return canvas
 
 def plot_dendogram(data, root, canvas):
@@ -414,19 +408,23 @@ def plot_dendogram(data, root, canvas):
     
     return canvas
 
-def plot_time_series(norm_data, column_names=None):
-    # New Tkinter window
-    plot_window = tk.Toplevel()
-    plot_window.title('Time Series Plot')
-    
-    # Size: 80% of screen, centered
-    screen_width = plot_window.winfo_screenwidth()
-    screen_height = plot_window.winfo_screenheight()
-    win_width = int(screen_width * 0.8)
-    win_height = int(screen_height * 0.8)
-    x = (screen_width - win_width) // 2
-    y = (screen_height - win_height) // 2
-    plot_window.geometry(f"{win_width}x{win_height}+{x}+{y}")
+def plot_time_series(norm_data, column_names=None, notebook=None):
+    if notebook is not None:
+        container = tk.Frame(notebook)
+        notebook.add(container, text='Time Series')
+        notebook.select(container)
+        is_tab = True
+    else:
+        container = tk.Toplevel()
+        container.title('Time Series Plot')
+        screen_width = container.winfo_screenwidth()
+        screen_height = container.winfo_screenheight()
+        win_width = int(screen_width * 0.8)
+        win_height = int(screen_height * 0.8)
+        x = (screen_width - win_width) // 2
+        y = (screen_height - win_height) // 2
+        container.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        is_tab = False
     
     # Get actual number of series from data
     num_series = norm_data.shape[1]
@@ -447,11 +445,11 @@ def plot_time_series(norm_data, column_names=None):
         return f"time_series{extension}"
     
     # Bottom frame for buttons (pack first so it doesn't overlap with plot)
-    button_frame = tk.Frame(plot_window)
+    button_frame = tk.Frame(container)
     button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
     
     # Main frame (pack after bottom frame)
-    main_frame = tk.Frame(plot_window)
+    main_frame = tk.Frame(container)
     main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
     
     # Left frame for listbox
@@ -504,9 +502,6 @@ def plot_time_series(norm_data, column_names=None):
     canvas_lower = None
     
     def update_plot():
-        """
-            Update the plot with current active series
-        """
         if ax is not None:
             ax.clear()
             for i, series_idx in enumerate(active_series):
@@ -518,9 +513,6 @@ def plot_time_series(norm_data, column_names=None):
             canvas_new.draw()
     
     def generate_series():
-        """
-            Generate the plot with selected series, or all series if none selected
-        """
         nonlocal fig, ax, canvas_new, active_series
         
         # Get selected items from listbox
@@ -552,9 +544,6 @@ def plot_time_series(norm_data, column_names=None):
         update_plot()
     
     def display_single_series(event=None):
-        """
-            Display the selected single series in the lower frame
-        """
         nonlocal fig_lower, ax_lower, canvas_lower
         
         # Get the currently selected item (only show one at a time)
@@ -594,9 +583,6 @@ def plot_time_series(norm_data, column_names=None):
     listbox.bind('<<ListboxSelect>>', display_single_series)
     
     def delete_selected_series():
-        """
-            Deletes the selected series from listbox and replots
-        """
         selection = listbox.curselection()
         if selection:
             selected_indices = sorted(selection, reverse=True)
@@ -607,9 +593,6 @@ def plot_time_series(norm_data, column_names=None):
             update_plot()
     
     def reset_series():
-        """
-            Reset the listbox to show all series again
-        """
         nonlocal active_series
         
         # Reset active series to all series
@@ -646,9 +629,6 @@ def plot_time_series(norm_data, column_names=None):
     
     # Save functions for bottom frame buttons
     def _save_time_series_image():
-        """
-            Saves the time series as an image
-        """
         default_name = get_default_time_series_name('.png')
         filename = asksaveasfilename(
             initialfile=default_name,
@@ -666,9 +646,6 @@ def plot_time_series(norm_data, column_names=None):
             fig.savefig(filename)
     
     def _save_time_series_csv():
-        """
-            Saves the time series as a .csv file
-        """
         default_name = get_default_time_series_name('.csv')
         filename = asksaveasfilename(
             initialfile=default_name,
@@ -702,10 +679,17 @@ def plot_time_series(norm_data, column_names=None):
     # Close button
     def close_window():
         if fig is not None:
-            plt.close(fig)  # Close the matplotlib figure to free memory
-        plot_window.destroy()
-    
-    close_button = tk.Button(button_frame, text="Close", command=close_window, width=12)
+            plt.close(fig)
+        if is_tab:
+            try:
+                notebook.forget(container)
+            except Exception:
+                pass
+        else:
+            container.destroy()
+
+    close_label = "Close Tab" if is_tab else "Close"
+    close_button = tk.Button(button_frame, text=close_label, command=close_window, width=12)
     close_button.pack(side=tk.RIGHT, padx=5)
 
 def load_correlation_matrix(root, canvas):
@@ -754,7 +738,7 @@ def load_correlation_matrix(root, canvas):
         
         # Display the correlation matrix
         size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
-        canvas = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True, corr_method='Loaded Correlation')
+        canvas, _ = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True, corr_method='Loaded Correlation')
         
         messagebox.showinfo(
             "Matrix Loaded", 
