@@ -483,7 +483,7 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
     col_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     col_listbox = tk.Listbox(col_lb_frame, yscrollcommand=col_scrollbar.set,
-                              selectmode=tk.SINGLE, font=("Arial", 10))
+                              selectmode=tk.EXTENDED, font=("Arial", 10))
     col_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     col_scrollbar.config(command=col_listbox.yview)
 
@@ -517,7 +517,10 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         sel = col_listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
+        try:
+            idx = col_listbox.index(tk.ACTIVE)
+        except Exception:
+            idx = sel[0]
         if ts_figs['signal'] is not None:
             plt.close(ts_figs['signal'])
             ts_figs['signal'] = None
@@ -565,11 +568,14 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         sel = col_listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
-        if idx not in selection_indices:
-            selection_indices.append(idx)
-            col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
-            sel_listbox.insert(tk.END, col_name)
+        changed = False
+        for idx in sel:
+            if idx not in selection_indices:
+                selection_indices.append(idx)
+                col_name = column_names[idx] if idx < len(column_names) else f"Column {idx+1}"
+                sel_listbox.insert(tk.END, col_name)
+                changed = True
+        if changed:
             update_multi_series()
 
     def remove_from_selection():

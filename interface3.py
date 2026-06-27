@@ -14,6 +14,10 @@ from functools import partial
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import sys
+import threading
+import subprocess
+import json
+import urllib.request
 
 # Módulos locales
 from pyometiff import OMETIFFReader
@@ -157,32 +161,21 @@ class NecLabApp:
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
         
-        # Menú Visualización (sin peak methods — se usan desde el dropdown en el panel)
+        # Menú Visualización
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
-
-        # Opciones de suavizado (futuras)
-        self.menu_visual.add_command(
-            label='Finite difference diffusion smoothing',
-            command=None,
-            state=DISABLED
-        )
-        self.menu_visual.add_command(
-            label='Exponential moving average smoothing',
-            command=None,
-            state=DISABLED
-        )
-        self.menu_visual.add_command(
-            label='Convex envelope smoothing',
-            command=None,
-            state=DISABLED
-        )
-        self.menu_visual.add_separator()
 
         self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
         self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
-        
+
+        # Menú Ayuda
+        self.menu_ayuda = Menu(self.menu_bar, tearoff=False)
+        self.menu_bar.add_cascade(menu=self.menu_ayuda, label="Help")
+        self.menu_ayuda.add_command(label='Check for Updates', command=self._check_for_updates)
+        self.menu_ayuda.add_separator()
+        self.menu_ayuda.add_command(label='About NecLab', command=self._show_about)
+
         # Atajo de teclado
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
     
@@ -439,7 +432,7 @@ class NecLabApp:
         self.column_listbox = tk.Listbox(
             listbox_frame,
             yscrollcommand=scrollbar.set,
-            selectmode=tk.SINGLE,
+            selectmode=tk.EXTENDED,
             font=("Arial", 10)
         )
         self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -549,7 +542,11 @@ class NecLabApp:
         if not selection:
             return
 
-        self.current_column = selection[0]
+        # In EXTENDED mode use the last-clicked (ACTIVE) item for the display column
+        try:
+            self.current_column = self.column_listbox.index(tk.ACTIVE)
+        except Exception:
+            self.current_column = selection[0]
 
         # Initialize the split layout on first call (or if frames were destroyed)
         if self.plot_top_frame is None or not self.plot_top_frame.winfo_exists():
@@ -611,14 +608,17 @@ class NecLabApp:
         corr_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _add_to_selection(self):
-        """Add the currently highlighted Data Column to the Selection list."""
+        """Add all highlighted Data Columns to the Selection list."""
         sel = self.column_listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
-        if idx not in self.selection_column_indices:
-            self.selection_column_indices.append(idx)
-            self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
+        changed = False
+        for idx in sel:
+            if idx not in self.selection_column_indices:
+                self.selection_column_indices.append(idx)
+                self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
+                changed = True
+        if changed:
             self._update_correlation_display()
 
     def _remove_from_selection(self):
@@ -1056,6 +1056,117 @@ class NecLabApp:
             return
         show_variability_analysis(self.img_array, method_index, self.root)
 
+    # ==================== HELP / AUTO-UPDATER ====================
+
+    _REPO = "sergiocruzunamia/neclabunam"
+    _UPDATABLE_FILES = [
+        "interface3.py",
+        "peak_functions.py",
+        "visualization_helpers.py",
+        "corr_dendo_functions.py",
+        "variability_functions.py",
+        "image_loader.py",
+        "image_processing.py",
+    ]
+
+    def _get_local_sha(self):
+        version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+        try:
+            with open(version_path, "r") as f:
+                return json.load(f).get("sha", "")
+        except Exception:
+            return ""
+
+    def _save_local_sha(self, sha):
+        version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+        with open(version_path, "w") as f:
+            json.dump({"sha": sha}, f)
+
+    def _check_for_updates(self):
+        """Check GitHub for a newer version in a background thread."""
+        messagebox.showinfo("Checking for Updates", "Checking for updates, please wait…")
+        threading.Thread(target=self._fetch_update_info, daemon=True).start()
+
+    def _fetch_update_info(self):
+        api_url = f"https://api.github.com/repos/{self._REPO}/commits/main"
+        try:
+            req = urllib.request.Request(
+                api_url,
+                headers={"Accept": "application/vnd.github+json",
+                         "User-Agent": "NecLab-Updater/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            remote_sha = data["sha"]
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror(
+                "Update Check Failed",
+                f"Could not reach GitHub:\n{e}"
+            ))
+            return
+
+        local_sha = self._get_local_sha()
+        if remote_sha == local_sha:
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Up to Date", "NecLab is already up to date."
+            ))
+            return
+
+        # Ask user before downloading
+        self.root.after(0, lambda: self._offer_update(remote_sha))
+
+    def _offer_update(self, remote_sha):
+        if not messagebox.askyesno(
+            "Update Available",
+            "A new version of NecLab is available on GitHub.\n\n"
+            "Download and restart now?"
+        ):
+            return
+        threading.Thread(target=self._download_and_restart,
+                         args=(remote_sha,), daemon=True).start()
+
+    def _download_and_restart(self, remote_sha):
+        base_url = f"https://raw.githubusercontent.com/{self._REPO}/main/"
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        errors = []
+        for filename in self._UPDATABLE_FILES:
+            url = base_url + filename
+            dest = os.path.join(app_dir, filename)
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "NecLab-Updater/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    content = resp.read()
+                with open(dest, "wb") as f:
+                    f.write(content)
+            except Exception as e:
+                errors.append(f"{filename}: {e}")
+
+        if errors:
+            msg = "Some files could not be downloaded:\n" + "\n".join(errors)
+            self.root.after(0, lambda: messagebox.showwarning("Partial Update", msg))
+            return
+
+        try:
+            self._save_local_sha(remote_sha)
+        except Exception:
+            pass
+
+        self.root.after(0, self._restart_app)
+
+    def _restart_app(self):
+        if messagebox.askyesno("Restart", "Update complete. Restart NecLab now?"):
+            subprocess.Popen([sys.executable] + sys.argv)
+            self.root.quit()
+            self.root.destroy()
+            sys.exit(0)
+
+    def _show_about(self):
+        messagebox.showinfo(
+            "About NecLab",
+            "NecLab — Análisis de Imágenes de Microscopía y Visualización de Datos\n\n"
+            f"Repository: github.com/{self._REPO}\n"
+            "Contact: sergio.cruz@ciencias.unam.mx"
+        )
 
 
 def main():
