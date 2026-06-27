@@ -2,6 +2,7 @@ from tkinter import *
 from tkinter import filedialog
 from peak_functions import *
 from corr_dendo_functions import *
+import scipy.cluster.hierarchy as sch
 import os
 import pandas as pd
 import tkinter as tk
@@ -18,73 +19,58 @@ def set_column_listbox(listbox):
     global column_listbox
     column_listbox = listbox
 
-def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column_select=None):
+def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column_select=None, notebook=None):
     global selected_roi_index, loaded_filename, selected_roi_name, column_listbox, column_select_callback
-    
-    # Store listbox and callback if provided
+
     if listbox is not None:
         column_listbox = listbox
     if on_column_select is not None:
         column_select_callback = on_column_select
-    
+
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
-    
+
     filename = filedialog.askopenfilename(
         parent=window,
         title="Open File",
         initialdir=project_root,
         filetypes=[("Data files", "*.npy;*.csv"), ("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")]
     )
-    
+
     if not filename:
         return
-    
-    # Store the loaded filename
+
     loaded_filename = filename
-    
     column_names_list = None
 
-    # Load raw data to get column names for CSV files
     if filename.lower().endswith('.csv'):
         df = pd.read_csv(filename)
         column_names = df.columns.tolist()
-        
-        # Remove 'TIME' column if it exists
         if 'TIME' in column_names:
             column_names.remove('TIME')
-        
         column_names_list = column_names
 
-        # Show ROI selection dialog
         selected_roi_index = _show_roi_selection_dialog(window, column_names)
-        
-        if selected_roi_index is None:
-            return  # User cancelled selection
-        
-        # Store the selected ROI name
-        selected_roi_name = column_names[selected_roi_index]
-    else:
-        # For .npy files, select by column index
-        temp_data = np.load(filename)
-        num_columns = temp_data.shape[1]
-        column_names = [f"Column {i}" for i in range(num_columns)]
-        column_names_list = column_names
-        
-        selected_roi_index = _show_roi_selection_dialog(window, column_names)
-        
         if selected_roi_index is None:
             return
-        
-        # Store the selected ROI name
         selected_roi_name = column_names[selected_roi_index]
-    
-    # Pass filename and ROI info to peak functions
+    else:
+        # .npy: no ROI dialog needed — use all data columns
+        try:
+            temp_data = np.load(filename, allow_pickle=True)
+            num_columns = temp_data.shape[1] if temp_data.ndim == 2 else 1
+        except Exception:
+            num_columns = 1
+        column_names = [f"Column {i + 1}" for i in range(num_columns)]
+        column_names_list = column_names
+        selected_roi_index = 0
+        selected_roi_name = column_names[0]
+
     set_file_info(loaded_filename, selected_roi_name)
-    
+
     data = normalize_data(filename)
-    canvas = _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list)
-    
+    canvas = _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list, notebook)
+
     return canvas
 
 
@@ -160,7 +146,7 @@ def _show_roi_selection_dialog(parent, column_names):
     return selected_index
 
 
-def _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list=None):
+def _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list=None, notebook=None):
     """
     Plot data and configure menu entries. Separated from _plot_data so _plot_data
     can be called independently for column switching.
@@ -217,19 +203,19 @@ def _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list=Non
                            command=lambda: lasso_peak(data, get_current_column(), window, None),
                            state=NORMAL)
     menu_picos.entryconfig("Correlacion Pearson",
-                           command=lambda: plot_correlation(data, correlation_pearson(data), window, None, 'pearson'),
+                           command=lambda: _open_correlation_tab(data, 'pearson', notebook, column_names_list),
                            state=NORMAL)
     menu_picos.entryconfig("Correlacion Kendall",
-                           command=lambda: plot_correlation(data, correlation_kendall(data), window, None, 'kendall'),
+                           command=lambda: _open_correlation_tab(data, 'kendall', notebook, column_names_list),
                            state=NORMAL)
     menu_picos.entryconfig("Correlacion Spearman",
-                           command=lambda: plot_correlation(data, correlation_spearman(data), window, None, 'spearman'),
+                           command=lambda: _open_correlation_tab(data, 'spearman', notebook, column_names_list),
                            state=NORMAL)
     menu_picos.entryconfig("Dendograma",
                            command=lambda: plot_dendogram(data, window, None),
                            state=NORMAL)
     menu_picos.entryconfig("Series de tiempo",
-                           command=lambda: plot_time_series(data, column_names_list),
+                           command=lambda: plot_time_series(data, column_names_list, notebook),
                            state=NORMAL)
 
     return canvas
@@ -279,3 +265,46 @@ def _plot_data(data, window, canvas, column_idx=0):
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     return canvas
+
+
+def _open_correlation_tab(data, method, notebook, column_names_list=None):
+    """Open a new notebook tab displaying the correlation matrix + dendrogram."""
+    if notebook is None:
+        return
+
+    from corr_dendo_functions import _plot_correlation_helper
+
+    df = pd.DataFrame(data)
+    if column_names_list and len(column_names_list) >= data.shape[1]:
+        df.columns = column_names_list[:data.shape[1]]
+
+    corr = df.corr(method=method)
+    try:
+        X = corr.values
+        d = sch.distance.pdist(X)
+        L = sch.linkage(d, method='complete')
+        ind = sch.fcluster(L, 50, criterion='maxclust')
+        cols = [df.columns.tolist()[i] for i in list(np.argsort(ind))]
+        df = df.reindex(cols, axis=1)
+    except Exception:
+        pass
+
+    tab_frame = tk.Frame(notebook)
+    notebook.add(tab_frame, text=f'{method.capitalize()} Corr.')
+    notebook.select(tab_frame)
+
+    header = tk.Frame(tab_frame)
+    header.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2)
+
+    content = tk.Frame(tab_frame)
+    content.pack(fill=tk.BOTH, expand=True)
+
+    canvas_tab, fig = _plot_correlation_helper(
+        df, 5, None, None, corr_method=method, target_frame=content
+    )
+
+    tk.Button(
+        header,
+        text='Close Tab',
+        command=lambda: [plt.close(fig), notebook.forget(tab_frame)]
+    ).pack(side=tk.RIGHT, padx=5)

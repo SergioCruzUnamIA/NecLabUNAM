@@ -57,6 +57,11 @@ class NecLabApp:
         self.current_column = 0
         self.canvas = None
         self.corr = None
+        self._data_fig = None
+        self._corr_fig = None
+        self.selection_column_indices = []
+        self.plot_top_frame = None
+        self.plot_bottom_frame = None
         
         # Construir la interfaz
         self._create_menu()
@@ -102,26 +107,30 @@ class NecLabApp:
         self.menu_bar.add_cascade(menu=self.menu_imagen, label="Imagen")
         self.menu_imagen.add_command(
             label="Auto Contraste",
-            command=self.apply_auto_contrast
+            command=self.apply_auto_contrast,
+            state=DISABLED
         )
         self.menu_imagen.add_command(
             label="Histogram",
-            command=self.show_histogram
+            command=self.show_histogram,
+            state=DISABLED
         )
         self.menu_imagen.add_command(
             label="Binarize",
-            command=self.show_binarize
+            command=self.show_binarize,
+            state=DISABLED
         )
         self.menu_imagen.add_separator()
         self.menu_imagen.add_command(
             label="Restaurar Original",
-            command=self.restore_original
+            command=self.restore_original,
+            state=DISABLED
         )
-        
+
         # Submenú de Análisis de Variabilidad
         self.menu_imagen.add_separator()
         self.menu_variabilidad = Menu(self.menu_imagen, tearoff=False)
-        self.menu_imagen.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad")
+        self.menu_imagen.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
         
         # Agregar los 7 métodos de variabilidad
         methods = get_variability_methods()
@@ -458,18 +467,40 @@ class NecLabApp:
         )
         self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
-        
+
         scrollbar.config(command=self.column_listbox.yview)
-        
-        # Info label
-        info_label = tk.Label(
-            sidebar_frame,
-            text="Load a file to\nsee columns",
-            justify=tk.CENTER,
-            wraplength=220,
+
+        # ── Selection section ──
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+
+        sel_listbox_frame = tk.Frame(sidebar_frame)
+        sel_listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        sel_scrollbar = tk.Scrollbar(sel_listbox_frame)
+        sel_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.selection_listbox = tk.Listbox(
+            sel_listbox_frame,
+            yscrollcommand=sel_scrollbar.set,
+            selectmode=tk.SINGLE,
             font=("Arial", 10)
         )
-        info_label.pack(pady=10)
+        self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sel_scrollbar.config(command=self.selection_listbox.yview)
+
+        self.btn_add_sel = tk.Button(
+            sidebar_frame, text="Add to Selection",
+            command=self._add_to_selection, state=DISABLED
+        )
+        self.btn_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        self.btn_remove_sel = tk.Button(
+            sidebar_frame, text="Remove from Selection",
+            command=self._remove_from_selection, state=DISABLED
+        )
+        self.btn_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
         
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
@@ -491,60 +522,138 @@ class NecLabApp:
     def update_column_display(self, event=None):
         """Update the plot when a different column is selected from the listbox."""
         if self.loaded_data is None:
+            if hasattr(self.root, 'loaded_data'):
+                self.loaded_data = self.root.loaded_data
+        if self.loaded_data is None:
             return
-        
+
         selection = self.column_listbox.curselection()
         if not selection:
             return
-        
+
         self.current_column = selection[0]
-        
-        # Remove any peak button frames when switching columns
-        for widget in list(self.root.winfo_children()):
-            if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
-                widget.destroy()
-        
-        # Clear ALL widgets from the plot frame
+
+        # Close existing figures
+        if self._data_fig is not None:
+            plt.close(self._data_fig)
+            self._data_fig = None
+        if self._corr_fig is not None:
+            plt.close(self._corr_fig)
+            self._corr_fig = None
+
+        # Clear all widgets from the plot frame
         for widget in list(self.main_plot_frame.winfo_children()):
             widget.destroy()
-        
-        # Close all matplotlib figures to free memory
-        plt.close('all')
-        
-        # Create new plot
-        fig, ax = plt.subplots()
-        plt.plot(
+
+        # Build split layout: top (data graph 60%) / bottom (correlation 40%)
+        self.main_plot_frame.rowconfigure(0, weight=3)
+        self.main_plot_frame.rowconfigure(1, weight=2)
+        self.main_plot_frame.columnconfigure(0, weight=1)
+
+        self.plot_top_frame = tk.Frame(self.main_plot_frame)
+        self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
+
+        self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
+        self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
+
+        # Plot selected column in top frame
+        col_label = self.column_listbox.get(self.current_column)
+        self._data_fig, ax = plt.subplots()
+        ax.plot(
             np.array(range(len(self.loaded_data[:, self.current_column]))).reshape(-1, 1),
             self.loaded_data[:, self.current_column]
         )
-        plt.title(f'Column {self.current_column + 1}')
-        plt.xlabel('Time')
-        plt.ylabel('Value')
-        
-        # Display in main frame
-        self.canvas = FigureCanvasTkAgg(fig, master=self.main_plot_frame)
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        self._data_fig.tight_layout()
+        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self._update_correlation_display()
+
+    def _update_correlation_display(self):
+        """Refresh the Pearson correlation heatmap in the bottom frame."""
+        if self.plot_bottom_frame is None:
+            return
+
+        for widget in list(self.plot_bottom_frame.winfo_children()):
+            widget.destroy()
+
+        if self._corr_fig is not None:
+            plt.close(self._corr_fig)
+            self._corr_fig = None
+
+        if len(self.selection_column_indices) < 2:
+            tk.Label(
+                self.plot_bottom_frame,
+                text="Add 2+ columns to Selection to see correlation",
+                font=("Arial", 12),
+                fg="#666666"
+            ).pack(fill=tk.BOTH, expand=True)
+            return
+
+        import pandas as pd
+        sel_indices = self.selection_column_indices
+        data_sel = self.loaded_data[:, sel_indices]
+        col_labels = [self.column_listbox.get(i) for i in sel_indices]
+        df = pd.DataFrame(data_sel, columns=col_labels)
+        corr = df.corr(method='pearson')
+
+        self._corr_fig, ax = plt.subplots()
+        cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
+        ax.set_xticks(range(len(col_labels)))
+        ax.set_yticks(range(len(col_labels)))
+        ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
+        ax.set_yticklabels(col_labels, fontsize=8)
+        self._corr_fig.colorbar(cax, ax=ax, ticks=[-1, 0, 1], shrink=0.8)
+        ax.set_title('Pearson Correlation (Selection)', pad=20)
+        self._corr_fig.tight_layout()
+
+        corr_canvas = FigureCanvasTkAgg(self._corr_fig, master=self.plot_bottom_frame)
+        corr_canvas.draw()
+        corr_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _add_to_selection(self):
+        """Add the currently highlighted Data Column to the Selection list."""
+        sel = self.column_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx not in self.selection_column_indices:
+            self.selection_column_indices.append(idx)
+            self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
+            self._update_correlation_display()
+
+    def _remove_from_selection(self):
+        """Remove the highlighted entry from the Selection list."""
+        sel = self.selection_listbox.curselection()
+        if not sel:
+            return
+        list_idx = sel[0]
+        self.selection_listbox.delete(list_idx)
+        self.selection_column_indices.pop(list_idx)
+        self._update_correlation_display()
     
     def open_visualization_data(self):
         """Abre datos para visualización de picos."""
-        # Pass data_tab so _plot_data can find main_plot_frame (at column=1)
-        # instead of self.root whose children include the menu bar and notebook.
         canvas = initialize_visualization(
             self.data_tab,
             self.menu_visual,
             self.canvas,
             self.column_listbox,
-            self.update_column_display
+            self.update_column_display,
+            self.notebook
         )
         if canvas is not None:
             self.canvas = canvas
-            # Switch to the data visualization tab
             self.notebook.select(self.data_tab)
-        # Update loaded_data reference after initialization
-        # (stored on root by _plot_data_with_menu via master traversal)
         if hasattr(self.root, 'loaded_data'):
             self.loaded_data = self.root.loaded_data
+        if self.loaded_data is not None:
+            self.btn_add_sel.config(state=NORMAL)
+            self.btn_remove_sel.config(state=NORMAL)
     
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
@@ -692,9 +801,16 @@ class NecLabApp:
         info_text = f"Dimensiones: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nTipo: {self.img_array.dtype}"
         self.info_text.config(text=info_text)
         
+        # Enable image menu items now that an image is loaded
+        self.menu_imagen.entryconfig("Auto Contraste", state=NORMAL)
+        self.menu_imagen.entryconfig("Histogram", state=NORMAL)
+        self.menu_imagen.entryconfig("Binarize", state=NORMAL)
+        self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
+        self.menu_imagen.entryconfig("Análisis de Variabilidad", state=NORMAL)
+
         # Cambiar a la pestaña de imagen
         self.notebook.select(self.image_tab)
-        
+
         self._update_image_display()
     
     # ==================== COMANDOS DE MENÚ - IMAGEN ====================
@@ -822,4 +938,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
