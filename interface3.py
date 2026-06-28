@@ -831,13 +831,14 @@ class NecLabApp:
                 self.canvas, self._data_fig = result
 
     def _draw_raw_data(self, col_idx):
-        """Plot the raw normalized data for col_idx into plot_top_frame."""
+        """Plot data for col_idx into plot_top_frame, applying smoothing if enabled."""
         col_label = self.column_listbox.get(col_idx)
+        signal = self.loaded_data[:, col_idx]
+        if self.smoothing_var.get():
+            from peak_functions import _detrend_signal
+            signal = _detrend_signal(signal, self.smooth_window_var.get())
         self._data_fig, ax = plt.subplots()
-        ax.plot(
-            np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
-            self.loaded_data[:, col_idx]
-        )
+        ax.plot(np.array(range(len(signal))).reshape(-1, 1), signal)
         ax.set_title(col_label)
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
