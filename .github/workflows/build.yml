@@ -34,7 +34,14 @@ jobs:
           cd dist
           zip -r NecLab-mac.zip NecLab.app
 
-      - name: Upload to Release
+      - name: Upload artifact (always available in Actions tab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NecLab-mac
+          path: dist/NecLab-mac.zip
+
+      - name: Upload to Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/NecLab-mac.zip
@@ -61,7 +68,14 @@ jobs:
       - name: Build .exe
         run: pyinstaller NecLab.spec
 
-      - name: Upload to Release
+      - name: Upload artifact (always available in Actions tab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NecLab-windows
+          path: dist\NecLab.exe
+
+      - name: Upload to Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist\NecLab.exe
