@@ -166,11 +166,10 @@ class NecLabApp:
             state=DISABLED
         )
 
-        # Submenú de Análisis de Variabilidad
-        self.menu_imagen.add_separator()
-        self.menu_variabilidad = Menu(self.menu_imagen, tearoff=False)
-        self.menu_imagen.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
-        
+        # Menú Análisis de Variabilidad (top-level, between Imagen and Visualizacion)
+        self.menu_variabilidad = Menu(self.menu_bar, tearoff=False)
+        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
+
         # Agregar los 7 métodos de variabilidad
         methods = get_variability_methods()
         for i, method_name in enumerate(methods):
@@ -178,7 +177,7 @@ class NecLabApp:
                 label=method_name,
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
-        
+
         # Menú Visualización
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
@@ -436,115 +435,156 @@ class NecLabApp:
         sidebar_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1, width=250)
         sidebar_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
         sidebar_frame.grid_propagate(False)
-        
+
+        # Configure sidebar grid: columnconfigure; row weights set after building rows
+        sidebar_frame.columnconfigure(0, weight=1)
+
+        row = 0
         # Column list title
-        list_title = tk.Label(sidebar_frame, text="Data Columns", font=("Arial", 12, "bold"))
-        list_title.pack(pady=(10, 5))
-        
+        tk.Label(sidebar_frame, text="Data Columns", font=("Arial", 12, "bold")).grid(
+            row=row, column=0, pady=(10, 5), sticky='ew'
+        )
+        row += 1
+
         # Column listbox with scrollbar
         listbox_frame = tk.Frame(sidebar_frame)
-        listbox_frame.pack(fill=tk.X, padx=5, pady=5)
+        listbox_frame.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar_frame.rowconfigure(row, weight=2)
+        listbox_frame.rowconfigure(0, weight=1)
+        listbox_frame.columnconfigure(0, weight=1)
+        row += 1
 
         scrollbar = tk.Scrollbar(listbox_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar.grid(row=0, column=1, sticky='ns')
 
         self.column_listbox = tk.Listbox(
             listbox_frame,
             yscrollcommand=scrollbar.set,
             selectmode=tk.EXTENDED,
-            font=("Arial", 10),
-            height=8
+            font=("Arial", 10)
         )
-        self.column_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.column_listbox.grid(row=0, column=0, sticky='nsew')
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
-
         scrollbar.config(command=self.column_listbox.yview)
 
         # ── Peak Finder selector ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
-        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).grid(
+            row=row, column=0, pady=(5, 2), sticky='ew'
+        )
+        row += 1
+
         self.peak_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.peak_method_var,
             values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
                     'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
             state='readonly', width=20
         )
-        self.peak_method_combo.pack(padx=5, pady=(0, 5))
+        self.peak_method_combo.grid(row=row, column=0, padx=5, pady=(0, 5))
         self.peak_method_combo.bind('<<ComboboxSelected>>', lambda e: self._run_peak_on_column(show_dialog=True))
         self.peak_method_combo.config(state=DISABLED)
+        row += 1
 
         # ── Correlation method selector ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
-        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).grid(
+            row=row, column=0, pady=(5, 2), sticky='ew'
+        )
+        row += 1
+
         corr_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.corr_method_var,
             values=['pearson', 'kendall', 'spearman'],
             state='readonly', width=15
         )
-        corr_method_combo.pack(padx=5, pady=(0, 5))
+        corr_method_combo.grid(row=row, column=0, padx=5, pady=(0, 5))
         corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
+        row += 1
 
         ttk.Checkbutton(
             sidebar_frame, text="Show Labels",
             variable=self.show_corr_labels_var,
             command=self._update_correlation_display
-        ).pack(anchor='w', padx=5, pady=(0, 5))
+        ).grid(row=row, column=0, sticky='w', padx=5, pady=(0, 5))
+        row += 1
 
         # ── Selection section ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
-        tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+        tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).grid(
+            row=row, column=0, pady=(0, 5), sticky='ew'
+        )
+        row += 1  # row 9 is the listbox (set weight=1 above)
 
         sel_listbox_frame = tk.Frame(sidebar_frame)
-        sel_listbox_frame.pack(fill=tk.X, padx=5, pady=5)
+        sel_listbox_frame.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar_frame.rowconfigure(row, weight=1)
+        sel_listbox_frame.rowconfigure(0, weight=1)
+        sel_listbox_frame.columnconfigure(0, weight=1)
+        row += 1
 
         sel_scrollbar = tk.Scrollbar(sel_listbox_frame)
-        sel_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        sel_scrollbar.grid(row=0, column=1, sticky='ns')
 
         self.selection_listbox = tk.Listbox(
             sel_listbox_frame,
             yscrollcommand=sel_scrollbar.set,
             selectmode=tk.SINGLE,
-            font=("Arial", 10),
-            height=5
+            font=("Arial", 10)
         )
-        self.selection_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.selection_listbox.grid(row=0, column=0, sticky='nsew')
         sel_scrollbar.config(command=self.selection_listbox.yview)
 
         self.btn_add_sel = tk.Button(
             sidebar_frame, text="Add to Selection",
             command=self._add_to_selection, state=DISABLED
         )
-        self.btn_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_add_sel.grid(row=row, column=0, sticky='ew', padx=5, pady=(2, 2))
+        row += 1
 
         self.btn_remove_sel = tk.Button(
             sidebar_frame, text="Remove from Selection",
             command=self._remove_from_selection, state=DISABLED
         )
-        self.btn_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_remove_sel.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 5))
+        row += 1
 
         # ── Save buttons ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
         self.btn_save_data = tk.Button(
             sidebar_frame, text="Save Data Image",
             command=self._save_data_image, state=DISABLED
         )
-        self.btn_save_data.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_save_data.grid(row=row, column=0, sticky='ew', padx=5, pady=(2, 2))
+        row += 1
 
         self.btn_save_corr = tk.Button(
             sidebar_frame, text="Save Correlation",
             command=self._save_correlation_image, state=DISABLED
         )
-        self.btn_save_corr.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_save_corr.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 5))
+        row += 1
 
         self.btn_save_peaks = tk.Button(
             sidebar_frame, text="Save Peaks CSV",
             command=self._save_peaks_csv, state=DISABLED
         )
-        self.btn_save_peaks.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_save_peaks.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 10))
 
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
@@ -909,61 +949,89 @@ class NecLabApp:
         sidebar = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1, width=250)
         sidebar.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
         sidebar.grid_propagate(False)
+        sidebar.columnconfigure(0, weight=1)
 
-        tk.Label(sidebar, text="Data Columns", font=("Arial", 12, "bold")).pack(pady=(10, 5))
+        drow = 0
+        tk.Label(sidebar, text="Data Columns", font=("Arial", 12, "bold")).grid(
+            row=drow, column=0, pady=(10, 5), sticky='ew'
+        )
+        drow += 1
 
         lb_frame = tk.Frame(sidebar)
-        lb_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        lb_frame.grid(row=drow, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar.rowconfigure(drow, weight=2)
+        lb_frame.rowconfigure(0, weight=1)
+        lb_frame.columnconfigure(0, weight=1)
+        drow += 1
+
         lb_sb = tk.Scrollbar(lb_frame)
-        lb_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        lb_sb.grid(row=0, column=1, sticky='ns')
         self.dendo_column_listbox = tk.Listbox(
             lb_frame, yscrollcommand=lb_sb.set,
             selectmode=tk.EXTENDED, font=("Arial", 10)
         )
-        self.dendo_column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.dendo_column_listbox.grid(row=0, column=0, sticky='nsew')
         lb_sb.config(command=self.dendo_column_listbox.yview)
 
         # ── Selection ──
-        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
-        tk.Label(sidebar, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+        ttk.Separator(sidebar, orient='horizontal').grid(
+            row=drow, column=0, sticky='ew', padx=5, pady=5
+        )
+        drow += 1
+
+        tk.Label(sidebar, text="Selection", font=("Arial", 12, "bold")).grid(
+            row=drow, column=0, pady=(0, 5), sticky='ew'
+        )
+        drow += 1
 
         sel_frame = tk.Frame(sidebar)
-        sel_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        sel_frame.grid(row=drow, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar.rowconfigure(drow, weight=1)
+        sel_frame.rowconfigure(0, weight=1)
+        sel_frame.columnconfigure(0, weight=1)
+        drow += 1
+
         sel_sb = tk.Scrollbar(sel_frame)
-        sel_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        sel_sb.grid(row=0, column=1, sticky='ns')
         self.dendo_selection_listbox = tk.Listbox(
             sel_frame, yscrollcommand=sel_sb.set,
             selectmode=tk.SINGLE, font=("Arial", 10)
         )
-        self.dendo_selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.dendo_selection_listbox.grid(row=0, column=0, sticky='nsew')
         sel_sb.config(command=self.dendo_selection_listbox.yview)
 
         self.btn_dendo_add_sel = tk.Button(
             sidebar, text="Add to Selection",
             command=self._dendo_add_to_selection, state=DISABLED
         )
-        self.btn_dendo_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_dendo_add_sel.grid(row=drow, column=0, sticky='ew', padx=5, pady=(2, 2))
+        drow += 1
 
         self.btn_dendo_remove_sel = tk.Button(
             sidebar, text="Remove from Selection",
             command=self._dendo_remove_from_selection, state=DISABLED
         )
-        self.btn_dendo_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_dendo_remove_sel.grid(row=drow, column=0, sticky='ew', padx=5, pady=(0, 5))
+        drow += 1
 
         # ── Save buttons ──
-        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar, orient='horizontal').grid(
+            row=drow, column=0, sticky='ew', padx=5, pady=5
+        )
+        drow += 1
 
         self.btn_dendo_save_img = tk.Button(
             sidebar, text="Save Dendrogram Image",
             command=self._dendo_save_image, state=DISABLED
         )
-        self.btn_dendo_save_img.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_dendo_save_img.grid(row=drow, column=0, sticky='ew', padx=5, pady=(2, 2))
+        drow += 1
 
         self.btn_dendo_save_csv = tk.Button(
             sidebar, text="Save Dendrogram CSV",
             command=self._dendo_save_csv, state=DISABLED
         )
-        self.btn_dendo_save_csv.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_dendo_save_csv.grid(row=drow, column=0, sticky='ew', padx=5, pady=(0, 10))
 
         # ── Plot area (top: signal preview, bottom: dendrogram) ──
         self.dendo_plot_frame = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1)
@@ -1309,7 +1377,7 @@ class NecLabApp:
         self.menu_imagen.entryconfig("Histogram", state=NORMAL)
         self.menu_imagen.entryconfig("Binarize", state=NORMAL)
         self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
-        self.menu_imagen.entryconfig("Análisis de Variabilidad", state=NORMAL)
+        self.menu_bar.entryconfig("Análisis de Variabilidad", state=NORMAL)
 
         # Cambiar a la pestaña de imagen
         self.notebook.select(self.image_tab)
