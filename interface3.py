@@ -821,14 +821,6 @@ class NecLabApp:
             self.btn_save_corr.config(state=NORMAL)
             self.btn_save_peaks.config(state=NORMAL)
             self.peak_method_combo.config(state='readonly')
-            # Enable Dendogram tab controls
-            self._dendo_populate_columns()
-            self.btn_dendo_add_sel.config(state=NORMAL)
-            self.btn_dendo_remove_sel.config(state=NORMAL)
-            self.btn_dendo_save_peaks.config(state=NORMAL)
-            self.btn_dendo_save_img.config(state=NORMAL)
-            self.btn_dendo_save_csv.config(state=NORMAL)
-            self.dendo_peak_method_combo.config(state='readonly')
             self.menu_visual.entryconfig(
                 "Dendograma",
                 command=self._run_dendogram_on_selection,
