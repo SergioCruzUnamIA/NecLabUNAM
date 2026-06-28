@@ -8,6 +8,8 @@ os.environ["OMP_NUM_THREADS"] = "1"  # Limita número de threads
 
 import tkinter as tk
 from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messagebox
+import customtkinter as ctk
+ctk.set_appearance_mode("light")
 from PIL import Image, ImageTk, ImageOps
 import numpy as np
 from functools import partial
@@ -18,6 +20,19 @@ import threading
 import subprocess
 import json
 import urllib.request
+
+# ── L1 Sky Blue colour palette ────────────────────────────────────────────────
+_C = {
+    'bg':     '#f0f4f8',   # main background
+    'nav':    '#1e3a5f',   # left nav bar
+    'panel':  '#ffffff',   # white sidebar / header panels
+    'card':   '#f8fafc',   # listbox / inner card background
+    'acc':    '#2563eb',   # blue accent (buttons, active tab)
+    'acc2':   '#1d4ed8',   # darker blue (hover)
+    'text':   '#1e293b',   # primary text
+    'sub':    '#94a3b8',   # secondary / label text
+    'border': '#e2e8f0',   # divider lines
+}
 
 # Módulos locales
 from pyometiff import OMETIFFReader
@@ -184,62 +199,99 @@ class NecLabApp:
     
     def _create_layout(self):
         """Crea el layout principal con tabs para diferentes modos."""
-        # Configurar grid principal
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        
-        # Crear notebook (tabs) para cambiar entre modos
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        
+        self.root.configure(bg=_C['bg'])
+
+        # ── Left icon nav bar (56 px, navy) ──────────────────────────────────
+        nav = tk.Frame(self.root, bg=_C['nav'], width=56)
+        nav.pack(side='left', fill='y')
+        nav.pack_propagate(False)
+
+        tk.Label(nav, text='N', font=('Arial', 17, 'bold'),
+                 bg=_C['nav'], fg='white').pack(pady=(14, 4))
+
+        def _nav_btn(parent, icon, cmd):
+            b = tk.Button(parent, text=icon, font=('Arial', 15),
+                          bg=_C['nav'], fg='white', relief='flat',
+                          activebackground='#2a4a6f', activeforeground='white',
+                          bd=0, cursor='hand2', command=cmd)
+            b.pack(pady=3, padx=4, fill='x')
+            return b
+
+        # Nav buttons (added after notebook is created)
+        self._nav_img_btn  = None
+        self._nav_data_btn = None
+        self._nav_dendo_btn = None
+
+        # ── Right area ────────────────────────────────────────────────────────
+        right = tk.Frame(self.root, bg=_C['bg'])
+        right.pack(side='left', fill='both', expand=True)
+
+        # Style the ttk.Notebook to look like L1 tab buttons
+        style = ttk.Style()
+        try:
+            style.theme_use('clam')
+        except Exception:
+            pass
+        style.configure('L1.TNotebook',
+                        background=_C['bg'], borderwidth=0, tabposition='n')
+        style.configure('L1.TNotebook.Tab',
+                        background=_C['card'], foreground=_C['sub'],
+                        padding=[18, 8], font=('Arial', 10),
+                        borderwidth=0, relief='flat')
+        style.map('L1.TNotebook.Tab',
+                  background=[('selected', _C['panel'])],
+                  foreground=[('selected', _C['acc'])],
+                  expand=[('selected', [0, 0, 0, 0])])
+
+        # Thin accent line across the top of the content area
+        tk.Frame(right, bg=_C['acc'], height=2).pack(fill='x')
+
+        self.notebook = ttk.Notebook(right, style='L1.TNotebook')
+        self.notebook.pack(fill='both', expand=True)
+
         # Tab 1: Procesamiento de Imágenes
-        self.image_tab = tk.Frame(self.notebook, bg='#f0f0f0')
-        self.notebook.add(self.image_tab, text="Procesamiento de Imágenes")
+        self.image_tab = tk.Frame(self.notebook, bg=_C['bg'])
+        self.notebook.add(self.image_tab, text="  Procesamiento de Imágenes  ")
         self._create_image_processing_layout()
-        
+
         # Tab 2: Visualización de Datos
-        self.data_tab = tk.Frame(self.notebook, bg='#f0f0f0')
-        self.notebook.add(self.data_tab, text="Visualización de Datos")
+        self.data_tab = tk.Frame(self.notebook, bg=_C['bg'])
+        self.notebook.add(self.data_tab, text="  Visualización de Datos  ")
         self._create_data_visualization_layout()
+
+        # Wire up nav bar icon buttons now that notebook + tabs exist
+        self._nav_img_btn = _nav_btn(nav, '🖼', lambda: self.notebook.select(self.image_tab))
+        self._nav_data_btn = _nav_btn(nav, '📊', lambda: self.notebook.select(self.data_tab))
+
     
     def _create_image_processing_layout(self):
         """Crea el layout para procesamiento de imágenes."""
-        # Configurar grid
         self.image_tab.columnconfigure(0, weight=3)
         self.image_tab.columnconfigure(1, weight=1)
         self.image_tab.rowconfigure(0, weight=1)
-        
-        # Frame izquierdo para la imagen
-        self.image_frame = tk.Frame(self.image_tab, bg='#1e1e1e', relief=tk.SUNKEN, borderwidth=2)
-        self.image_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        
-        # Label para mostrar la imagen
-        self.image_label = tk.Label(self.image_frame, bg='#1e1e1e')
+
+        self.image_frame = tk.Frame(self.image_tab, bg='#0f172a',
+                                    highlightbackground=_C['border'],
+                                    highlightthickness=1)
+        self.image_frame.grid(row=0, column=0, sticky='nsew', padx=(8, 4), pady=8)
+
+        self.image_label = tk.Label(self.image_frame, bg='#0f172a')
         self.image_label.pack(fill=tk.BOTH, expand=True)
-        
-        # Panel de controles
+
         self._create_image_controls_panel()
-        
-        # Cargar imagen por defecto o placeholder
         self._load_default_image()
     
     def _create_image_controls_panel(self):
         """Crea el panel lateral derecho con controles de imagen."""
-        # Frame principal del panel
-        self.controls_panel = tk.Frame(self.image_tab, bg='#f0f0f0', relief=tk.RAISED, borderwidth=2)
-        self.controls_panel.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
-        
-        # Título del panel
-        title_label = tk.Label(
-            self.controls_panel,
-            text="Controles de Imagen",
-            font=('Arial', 14, 'bold'),
-            bg='#f0f0f0'
-        )
-        title_label.pack(pady=10)
-        
-        # Separador
-        ttk.Separator(self.controls_panel, orient='horizontal').pack(fill='x', padx=10)
+        self.controls_panel = tk.Frame(self.image_tab, bg=_C['panel'],
+                                       highlightbackground=_C['border'],
+                                       highlightthickness=1)
+        self.controls_panel.grid(row=0, column=1, sticky='nsew', padx=(4, 8), pady=8)
+
+        tk.Label(self.controls_panel, text="Controles de Imagen",
+                 font=('Arial', 13, 'bold'), bg=_C['panel'], fg=_C['text']).pack(pady=12)
+
+        tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
         
         # ===== SECCIÓN: Navegación =====
         self._create_section_navigation()
@@ -255,284 +307,296 @@ class NecLabApp:
     
     def _create_section_navigation(self):
         """Sección de navegación de frames."""
-        section = tk.LabelFrame(
-            self.controls_panel,
-            text="Navegación",
-            font=('Arial', 10, 'bold'),
-            bg='#f0f0f0',
-            padx=10,
-            pady=5
-        )
-        section.pack(fill='x', padx=10, pady=10)
-        
-        # Slider de capa
-        tk.Label(section, text="Capa (Frame):", bg='#f0f0f0').pack(anchor='w')
-        
-        slider_frame = tk.Frame(section, bg='#f0f0f0')
-        slider_frame.pack(fill='x')
-        
-        self.slice_slider = tk.Scale(
-            slider_frame,
-            from_=0,
-            to=0,
-            orient="horizontal",
-            command=self._on_slice_changed,
-            bg='#f0f0f0',
-            highlightthickness=0
-        )
-        self.slice_slider.pack(fill='x', expand=True)
-        
-        # Label para mostrar frame actual / total
-        self.frame_info_label = tk.Label(
-            section,
-            text="Frame: 0 / 0",
-            bg='#f0f0f0',
-            font=('Arial', 9)
-        )
+        def _sec_label(parent, text):
+            tk.Label(parent, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
+            tk.Frame(parent, bg=_C['border'], height=1).pack(fill='x', padx=10)
+
+        _sec_label(self.controls_panel, "NAVEGACIÓN")
+
+        inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
+        inner.pack(fill='x')
+
+        tk.Label(inner, text="Capa (Frame):", bg=_C['panel'],
+                 fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
+
+        self.slice_slider = tk.Scale(inner, from_=0, to=0, orient="horizontal",
+                                     command=self._on_slice_changed,
+                                     bg=_C['panel'], fg=_C['text'],
+                                     troughcolor=_C['card'], highlightthickness=0,
+                                     relief='flat', sliderlength=16)
+        self.slice_slider.pack(fill='x')
+
+        self.frame_info_label = tk.Label(inner, text="Frame: 0 / 0",
+                                          bg=_C['panel'], fg=_C['sub'], font=('Arial', 9))
         self.frame_info_label.pack(anchor='w')
-    
+
     def _create_section_image_adjustments(self):
         """Sección de ajustes de imagen."""
-        section = tk.LabelFrame(
-            self.controls_panel,
-            text="Ajustes de Imagen",
-            font=('Arial', 10, 'bold'),
-            bg='#f0f0f0',
-            padx=10,
-            pady=5
-        )
-        section.pack(fill='x', padx=10, pady=10)
-        
-        # Brillo
-        tk.Label(section, text="Brillo:", bg='#f0f0f0').pack(anchor='w')
-        self.brightness_slider = tk.Scale(
-            section,
-            from_=-100,
-            to=100,
-            orient="horizontal",
-            command=self._on_adjustment_changed,
-            bg='#f0f0f0',
-            highlightthickness=0
-        )
+        def _sec_label(text):
+            tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
+            tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
+
+        _sec_label("AJUSTES DE IMAGEN")
+        inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
+        inner.pack(fill='x')
+
+        tk.Label(inner, text="Brillo:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
+        self.brightness_slider = tk.Scale(inner, from_=-100, to=100, orient="horizontal",
+                                          command=self._on_adjustment_changed,
+                                          bg=_C['panel'], troughcolor=_C['card'],
+                                          highlightthickness=0, relief='flat', sliderlength=16)
         self.brightness_slider.set(0)
         self.brightness_slider.pack(fill='x')
-        
-        # Contraste
-        tk.Label(section, text="Contraste:", bg='#f0f0f0').pack(anchor='w', pady=(5,0))
-        self.contrast_slider = tk.Scale(
-            section,
-            from_=-100,
-            to=100,
-            orient="horizontal",
-            command=self._on_adjustment_changed,
-            bg='#f0f0f0',
-            highlightthickness=0
-        )
+
+        tk.Label(inner, text="Contraste:", bg=_C['panel'], fg=_C['text'],
+                 font=('Arial', 9)).pack(anchor='w', pady=(5, 0))
+        self.contrast_slider = tk.Scale(inner, from_=-100, to=100, orient="horizontal",
+                                        command=self._on_adjustment_changed,
+                                        bg=_C['panel'], troughcolor=_C['card'],
+                                        highlightthickness=0, relief='flat', sliderlength=16)
         self.contrast_slider.set(0)
         self.contrast_slider.pack(fill='x')
-        
-        # Botón Auto Contraste
-        tk.Button(
-            section,
-            text="Auto Contraste",
-            command=self.apply_auto_contrast
-        ).pack(fill='x', pady=5)
-        
-        # Botón Reset
-        tk.Button(
-            section,
-            text="Resetear Ajustes",
-            command=self._reset_adjustments
-        ).pack(fill='x')
-    
+
+        ctk.CTkButton(inner, text="Auto Contraste", height=30, corner_radius=6,
+                      fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
+                      font=ctk.CTkFont(size=11),
+                      command=self.apply_auto_contrast).pack(fill='x', pady=(6, 2))
+        ctk.CTkButton(inner, text="Resetear Ajustes", height=30, corner_radius=6,
+                      fg_color=_C['card'], hover_color=_C['border'],
+                      text_color=_C['text'], border_width=1, border_color=_C['border'],
+                      font=ctk.CTkFont(size=11),
+                      command=self._reset_adjustments).pack(fill='x', pady=2)
+
     def _create_section_processing(self):
         """Sección de procesamiento."""
-        section = tk.LabelFrame(
-            self.controls_panel,
-            text="Procesamiento",
-            font=('Arial', 10, 'bold'),
-            bg='#f0f0f0',
-            padx=10,
-            pady=5
-        )
-        section.pack(fill='x', padx=10, pady=10)
-        
-        # Threshold
-        threshold_frame = tk.Frame(section, bg='#f0f0f0')
-        threshold_frame.pack(fill='x')
-        
-        tk.Label(threshold_frame, text="Threshold:", bg='#f0f0f0').pack(side='left')
-        
+        def _sec_label(text):
+            tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
+            tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
+
+        _sec_label("PROCESAMIENTO")
+        inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
+        inner.pack(fill='x')
+
+        row = tk.Frame(inner, bg=_C['panel'])
+        row.pack(fill='x')
+        tk.Label(row, text="Threshold:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(side='left')
         self.threshold_enabled = tk.BooleanVar(value=False)
-        self.threshold_check = tk.Checkbutton(
-            threshold_frame,
-            text="Aplicar",
-            variable=self.threshold_enabled,
-            command=self._update_image_display,
-            bg='#f0f0f0'
-        )
+        self.threshold_check = tk.Checkbutton(row, text="Aplicar", variable=self.threshold_enabled,
+                                               command=self._update_image_display,
+                                               bg=_C['panel'], fg=_C['text'],
+                                               selectcolor=_C['card'], activebackground=_C['panel'])
         self.threshold_check.pack(side='right')
-        
-        self.threshold_slider = tk.Scale(
-            section,
-            from_=0,
-            to=255,
-            orient="horizontal",
-            command=self._on_threshold_changed,
-            bg='#f0f0f0',
-            highlightthickness=0
-        )
+
+        self.threshold_slider = tk.Scale(inner, from_=0, to=255, orient="horizontal",
+                                         command=self._on_threshold_changed,
+                                         bg=_C['panel'], troughcolor=_C['card'],
+                                         highlightthickness=0, relief='flat', sliderlength=16)
         self.threshold_slider.set(128)
         self.threshold_slider.pack(fill='x')
-    
+
     def _create_section_info(self):
         """Sección de información de la imagen."""
-        section = tk.LabelFrame(
-            self.controls_panel,
-            text="Información",
-            font=('Arial', 10, 'bold'),
-            bg='#f0f0f0',
-            padx=10,
-            pady=5
-        )
-        section.pack(fill='x', padx=10, pady=10)
-        
-        self.info_text = tk.Label(
-            section,
-            text="No hay imagen cargada",
-            bg='#f0f0f0',
-            justify='left',
-            anchor='w',
-            font=('Arial', 9)
-        )
+        def _sec_label(text):
+            tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
+            tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
+
+        _sec_label("INFORMACIÓN")
+        inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
+        inner.pack(fill='x')
+
+        self.info_text = tk.Label(inner, text="No hay imagen cargada", bg=_C['panel'],
+                                   fg=_C['text'], justify='left', anchor='w', font=('Arial', 9))
         self.info_text.pack(fill='x')
     
     def _create_data_visualization_layout(self):
         """Crea el layout para visualización de datos."""
-        # Configurar grid
         Grid.rowconfigure(self.data_tab, 0, weight=1)
         Grid.columnconfigure(self.data_tab, 0, weight=0)
         Grid.columnconfigure(self.data_tab, 1, weight=1)
-        
-        # Left sidebar for column selection
-        sidebar_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1, width=250)
-        sidebar_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+
+        # ── Sidebar ──────────────────────────────────────────────────────────
+        sidebar_frame = tk.Frame(self.data_tab, bg=_C['panel'], width=250,
+                                 highlightbackground=_C['border'], highlightthickness=1)
+        sidebar_frame.grid(row=0, column=0, sticky='nsew', padx=(8, 0), pady=8)
         sidebar_frame.grid_propagate(False)
-        
-        # Column list title
-        list_title = tk.Label(sidebar_frame, text="Data Columns", font=("Arial", 12, "bold"))
-        list_title.pack(pady=(10, 5))
-        
-        # Column listbox with scrollbar
-        listbox_frame = tk.Frame(sidebar_frame)
-        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        scrollbar = tk.Scrollbar(listbox_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+        sidebar_frame.columnconfigure(0, weight=1)
+
+        def _sec(parent, text, row):
+            tk.Label(parent, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).grid(row=row, column=0, sticky='w',
+                                                         padx=12, pady=(12, 2))
+            row += 1
+            tk.Frame(parent, bg=_C['border'], height=1).grid(row=row, column=0,
+                                                              sticky='ew', padx=10)
+            return row + 1
+
+        row = _sec(sidebar_frame, "COLUMNAS DE DATOS", 0)
+
+        # Column listbox
+        listbox_frame = tk.Frame(sidebar_frame, bg=_C['card'],
+                                 highlightbackground=_C['border'], highlightthickness=1)
+        listbox_frame.grid(row=row, column=0, sticky='nsew', padx=10, pady=(2, 4))
+        sidebar_frame.rowconfigure(row, weight=2)
+        listbox_frame.rowconfigure(0, weight=1)
+        listbox_frame.columnconfigure(0, weight=1)
+        row += 1
+
+        scrollbar = tk.Scrollbar(listbox_frame, relief='flat', width=10)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
         self.column_listbox = tk.Listbox(
-            listbox_frame,
-            yscrollcommand=scrollbar.set,
-            selectmode=tk.EXTENDED,
-            font=("Arial", 10)
+            listbox_frame, yscrollcommand=scrollbar.set,
+            selectmode=tk.EXTENDED, font=('Arial', 10),
+            bg=_C['card'], fg=_C['text'],
+            selectbackground=_C['acc'], selectforeground='white',
+            relief='flat', bd=0, highlightthickness=0, activestyle='none'
         )
         self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
 
         scrollbar.config(command=self.column_listbox.yview)
 
-        # ── Peak Finder selector ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        # ── Peak Finder ──
+        row = _sec(sidebar_frame, "PEAK FINDER", row)
 
         tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
         self.peak_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.peak_method_var,
             values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
                     'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
-            state='readonly', width=20
+            state='readonly', width=22
         )
-        self.peak_method_combo.pack(padx=5, pady=(0, 5))
+        self.peak_method_combo.grid(row=row, column=0, padx=10, pady=(2, 2), sticky='ew')
         self.peak_method_combo.bind('<<ComboboxSelected>>', lambda e: self._run_peak_on_column(show_dialog=True))
         self.peak_method_combo.config(state=DISABLED)
+        row += 1
 
-        # ── Correlation method selector ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        # Smoothing row
+        smooth_frame = tk.Frame(sidebar_frame, bg=_C['panel'])
+        smooth_frame.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
+        smooth_frame.columnconfigure(2, weight=1)
+        row += 1
+
+        tk.Checkbutton(smooth_frame, text="Smoothing", variable=self.smoothing_var,
+                       command=self._on_smoothing_toggle,
+                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
+                       activebackground=_C['panel'], font=('Arial', 9)).grid(
+            row=0, column=0, sticky='w')
+
+        tk.Label(smooth_frame, text="Window:", bg=_C['panel'], fg=_C['sub'],
+                 font=('Arial', 8)).grid(row=0, column=1, padx=(10, 2))
+        self.smooth_window_spinbox = ttk.Spinbox(
+            smooth_frame, from_=2, to=500, textvariable=self.smooth_window_var,
+            width=5, command=self._on_smoothing_toggle
+        )
+        self.smooth_window_spinbox.grid(row=0, column=2, sticky='w')
+        self.smooth_window_spinbox.config(state=DISABLED)
+
+        # ── Correlation ──
+        row = _sec(sidebar_frame, "CORRELACIÓN", row)
 
         tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).pack(pady=(5, 2))
         corr_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.corr_method_var,
-            values=['pearson', 'kendall', 'spearman'],
-            state='readonly', width=15
+            values=['pearson', 'kendall', 'spearman'], state='readonly', width=15
         )
-        corr_method_combo.pack(padx=5, pady=(0, 5))
+        corr_method_combo.grid(row=row, column=0, padx=10, pady=(2, 2), sticky='w')
         corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
 
-        ttk.Checkbutton(
-            sidebar_frame, text="Show Labels",
-            variable=self.show_corr_labels_var,
-            command=self._update_correlation_display
-        ).pack(anchor='w', padx=5, pady=(0, 5))
+        tk.Checkbutton(sidebar_frame, text="Show Labels", variable=self.show_corr_labels_var,
+                       command=self._update_correlation_display,
+                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
+                       activebackground=_C['panel'], font=('Arial', 9)).grid(
+            row=row, column=0, sticky='w', padx=10, pady=(0, 4))
+        row += 1
 
-        # ── Selection section ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        # ── Selection ──
+        row = _sec(sidebar_frame, "SELECCIÓN", row)
 
-        tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+        sel_listbox_frame = tk.Frame(sidebar_frame, bg=_C['card'],
+                                     highlightbackground=_C['border'], highlightthickness=1)
+        sel_listbox_frame.grid(row=row, column=0, sticky='nsew', padx=10, pady=(2, 4))
+        sidebar_frame.rowconfigure(row, weight=1)
+        sel_listbox_frame.rowconfigure(0, weight=1)
+        sel_listbox_frame.columnconfigure(0, weight=1)
+        row += 1
 
-        sel_listbox_frame = tk.Frame(sidebar_frame)
-        sel_listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        sel_scrollbar = tk.Scrollbar(sel_listbox_frame)
-        sel_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        sel_scrollbar = tk.Scrollbar(sel_listbox_frame, relief='flat', width=10)
+        sel_scrollbar.grid(row=0, column=1, sticky='ns')
 
         self.selection_listbox = tk.Listbox(
-            sel_listbox_frame,
-            yscrollcommand=sel_scrollbar.set,
-            selectmode=tk.SINGLE,
-            font=("Arial", 10)
+            sel_listbox_frame, yscrollcommand=sel_scrollbar.set,
+            selectmode=tk.SINGLE, font=('Arial', 10),
+            bg=_C['card'], fg=_C['text'],
+            selectbackground=_C['acc'], selectforeground='white',
+            relief='flat', bd=0, highlightthickness=0, activestyle='none'
         )
         self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sel_scrollbar.config(command=self.selection_listbox.yview)
 
-        self.btn_add_sel = tk.Button(
-            sidebar_frame, text="Add to Selection",
-            command=self._add_to_selection, state=DISABLED
+        self.btn_add_sel = ctk.CTkButton(
+            sidebar_frame, text="Add to Selection", height=28, corner_radius=6,
+            fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
+            font=ctk.CTkFont(size=11), state='disabled',
+            command=self._add_to_selection
         )
-        self.btn_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_add_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(2, 2))
+        row += 1
 
-        self.btn_remove_sel = tk.Button(
-            sidebar_frame, text="Remove from Selection",
-            command=self._remove_from_selection, state=DISABLED
+        self.btn_remove_sel = ctk.CTkButton(
+            sidebar_frame, text="Remove from Selection", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._remove_from_selection
         )
-        self.btn_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_remove_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 4))
+        row += 1
 
         # ── Save buttons ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
-
-        self.btn_save_data = tk.Button(
-            sidebar_frame, text="Save Data Image",
-            command=self._save_data_image, state=DISABLED
+        tk.Frame(sidebar_frame, bg=_C['border'], height=1).grid(
+            row=row, column=0, sticky='ew', padx=10, pady=4
         )
-        self.btn_save_data.pack(fill=tk.X, padx=5, pady=(2, 2))
+        row += 1
 
-        self.btn_save_corr = tk.Button(
-            sidebar_frame, text="Save Correlation",
-            command=self._save_correlation_image, state=DISABLED
+        self.btn_save_data = ctk.CTkButton(
+            sidebar_frame, text="Save Data Image", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_data_image
         )
-        self.btn_save_corr.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_save_data.grid(row=row, column=0, sticky='ew', padx=10, pady=(2, 2))
+        row += 1
+
+        self.btn_save_corr = ctk.CTkButton(
+            sidebar_frame, text="Save Correlation", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_correlation_image
+        )
+        self.btn_save_corr.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
+        row += 1
+
+        self.btn_save_peaks = ctk.CTkButton(
+            sidebar_frame, text="Save Peaks CSV", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_peaks_csv
+        )
+        self.btn_save_peaks.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - main plot area
-        self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
-        self.main_plot_frame.grid(row=0, column=1, sticky='nsew')
-        
-        # Create placeholder label
-        placeholder_label = tk.Label(
-            self.main_plot_frame,
-            text="Load a data file to start",
-            font=("Arial", 20),
-            bg="#f0f0f0",
-            fg="#666666"
-        )
-        placeholder_label.pack(fill=tk.BOTH, expand=True)
+        self.main_plot_frame = tk.Frame(self.data_tab, bg=_C['panel'],
+                                         highlightbackground=_C['border'],
+                                         highlightthickness=1)
+        self.main_plot_frame.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+
+        tk.Label(self.main_plot_frame, text="Load a data file to start",
+                 font=('Arial', 18), bg=_C['panel'], fg=_C['sub']).pack(
+            fill=tk.BOTH, expand=True)
 
     
     # ==================== DATA VISUALIZATION METHODS ====================
@@ -587,8 +651,7 @@ class NecLabApp:
             tk.Label(
                 self.plot_bottom_frame,
                 text="Add 2+ columns to Selection to see correlation",
-                font=("Arial", 12),
-                fg="#666666"
+                font=('Arial', 12), bg=_C['panel'], fg=_C['sub']
             ).pack(fill=tk.BOTH, expand=True)
             return
 
@@ -792,12 +855,384 @@ class NecLabApp:
         if hasattr(self.root, 'loaded_data'):
             self.loaded_data = self.root.loaded_data
         if self.loaded_data is not None:
-            self.btn_add_sel.config(state=NORMAL)
-            self.btn_remove_sel.config(state=NORMAL)
-            self.btn_save_data.config(state=NORMAL)
-            self.btn_save_corr.config(state=NORMAL)
+            self.btn_add_sel.configure(state='normal')
+            self.btn_remove_sel.configure(state='normal')
+            self.btn_save_data.configure(state='normal')
+            self.btn_save_corr.configure(state='normal')
+            self.btn_save_peaks.configure(state='normal')
             self.peak_method_combo.config(state='readonly')
     
+    def _save_peaks_csv(self):
+        """Run peak detection on every selection column and save peak indices to CSV."""
+        method = self.peak_method_var.get()
+        if method == 'None':
+            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
+            return
+        if not self.selection_column_indices:
+            messagebox.showwarning("No Selection", "Add columns to Selection first.")
+            return
+        params = self.peak_method_params.get(method)
+        if params is None:
+            messagebox.showwarning("No Parameters",
+                                   "Run the peak finder on a column first to set parameters.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        from peak_functions import compute_peaks
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Peaks CSV"
+        )
+        if not filename:
+            return
+
+        n_time = self.loaded_data.shape[0]
+        data_dict = {'TIME': list(range(n_time))}
+        for col_idx in self.selection_column_indices:
+            col_name = self.column_listbox.get(col_idx)
+            data_for_peak = self._get_data_for_peak(col_idx)
+            peaks = compute_peaks(data_for_peak, col_idx, method, params)
+            flags = np.zeros(n_time, dtype=int)
+            flags[peaks] = 1
+            data_dict[col_name] = flags
+
+        pd.DataFrame(data_dict).to_csv(filename, index=False)
+        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
+
+    def _run_dendogram_on_selection(self):
+        """Create the Dendogram tab on first use, then switch to it."""
+        if self.dendo_tab is None or not self.dendo_tab.winfo_exists():
+            self.dendo_tab = tk.Frame(self.notebook, bg=_C['bg'])
+            self.notebook.add(self.dendo_tab, text="Dendograma")
+            # Reset all dendo state so _create_dendogram_layout starts fresh
+            self.dendo_column_listbox = None
+            self.dendo_selection_listbox = None
+            self.dendo_selection_indices = []
+            self.dendo_plot_frame = None
+            self.dendo_top_frame = None
+            self.dendo_bottom_frame = None
+            self.dendo_fig = None
+            self.dendo_signal_fig = None
+            self.dendo_current_column = 0
+            self.btn_dendo_add_sel = None
+            self.btn_dendo_remove_sel = None
+            self.btn_dendo_save_img = None
+            self.btn_dendo_save_csv = None
+            self._create_dendogram_layout()
+            self._dendo_populate_columns()
+            if self.loaded_data is not None:
+                self.btn_dendo_add_sel.configure(state='normal')
+                self.btn_dendo_remove_sel.configure(state='normal')
+                self.btn_dendo_save_img.configure(state='normal')
+                self.btn_dendo_save_csv.configure(state='normal')
+        self.notebook.select(self.dendo_tab)
+
+    # ==================== DENDOGRAM TAB ====================
+
+    def _create_dendogram_layout(self):
+        """Build the permanent Dendogram tab (sidebar + plot area)."""
+        Grid.rowconfigure(self.dendo_tab, 0, weight=1)
+        Grid.columnconfigure(self.dendo_tab, 0, weight=0)
+        Grid.columnconfigure(self.dendo_tab, 1, weight=1)
+
+        # ── Sidebar ──
+        sidebar = tk.Frame(self.dendo_tab, bg=_C['panel'], width=250,
+                           highlightbackground=_C['border'], highlightthickness=1)
+        sidebar.grid(row=0, column=0, sticky='nsew', padx=(8, 0), pady=8)
+        sidebar.grid_propagate(False)
+        sidebar.columnconfigure(0, weight=1)
+
+        def _dsec(text, row):
+            tk.Label(sidebar, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).grid(
+                row=row, column=0, sticky='w', padx=12, pady=(12, 2))
+            row += 1
+            tk.Frame(sidebar, bg=_C['border'], height=1).grid(
+                row=row, column=0, sticky='ew', padx=10)
+            return row + 1
+
+        drow = _dsec("COLUMNAS DE DATOS", 0)
+
+        lb_frame = tk.Frame(sidebar, bg=_C['card'],
+                            highlightbackground=_C['border'], highlightthickness=1)
+        lb_frame.grid(row=drow, column=0, sticky='nsew', padx=10, pady=(2, 4))
+        sidebar.rowconfigure(drow, weight=2)
+        lb_frame.rowconfigure(0, weight=1)
+        lb_frame.columnconfigure(0, weight=1)
+        drow += 1
+
+        lb_sb = tk.Scrollbar(lb_frame, relief='flat', width=10)
+        lb_sb.grid(row=0, column=1, sticky='ns')
+        self.dendo_column_listbox = tk.Listbox(
+            lb_frame, yscrollcommand=lb_sb.set,
+            selectmode=tk.EXTENDED, font=('Arial', 10),
+            bg=_C['card'], fg=_C['text'],
+            selectbackground=_C['acc'], selectforeground='white',
+            relief='flat', bd=0, highlightthickness=0, activestyle='none'
+        )
+        self.dendo_column_listbox.grid(row=0, column=0, sticky='nsew')
+        lb_sb.config(command=self.dendo_column_listbox.yview)
+
+        drow = _dsec("SELECCIÓN", drow)
+
+        sel_frame = tk.Frame(sidebar, bg=_C['card'],
+                             highlightbackground=_C['border'], highlightthickness=1)
+        sel_frame.grid(row=drow, column=0, sticky='nsew', padx=10, pady=(2, 4))
+        sidebar.rowconfigure(drow, weight=1)
+        sel_frame.rowconfigure(0, weight=1)
+        sel_frame.columnconfigure(0, weight=1)
+        drow += 1
+
+        sel_sb = tk.Scrollbar(sel_frame, relief='flat', width=10)
+        sel_sb.grid(row=0, column=1, sticky='ns')
+        self.dendo_selection_listbox = tk.Listbox(
+            sel_frame, yscrollcommand=sel_sb.set,
+            selectmode=tk.SINGLE, font=('Arial', 10),
+            bg=_C['card'], fg=_C['text'],
+            selectbackground=_C['acc'], selectforeground='white',
+            relief='flat', bd=0, highlightthickness=0, activestyle='none'
+        )
+        self.dendo_selection_listbox.grid(row=0, column=0, sticky='nsew')
+        sel_sb.config(command=self.dendo_selection_listbox.yview)
+
+        self.btn_dendo_add_sel = ctk.CTkButton(
+            sidebar, text="Add to Selection", height=28, corner_radius=6,
+            fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
+            font=ctk.CTkFont(size=11), state='disabled',
+            command=self._dendo_add_to_selection
+        )
+        self.btn_dendo_add_sel.grid(row=drow, column=0, sticky='ew', padx=10, pady=(2, 2))
+        drow += 1
+
+        self.btn_dendo_remove_sel = ctk.CTkButton(
+            sidebar, text="Remove from Selection", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._dendo_remove_from_selection
+        )
+        self.btn_dendo_remove_sel.grid(row=drow, column=0, sticky='ew', padx=10, pady=(0, 4))
+        drow += 1
+
+        tk.Frame(sidebar, bg=_C['border'], height=1).grid(
+            row=drow, column=0, sticky='ew', padx=10, pady=4)
+        drow += 1
+
+        self.btn_dendo_save_img = ctk.CTkButton(
+            sidebar, text="Save Dendrogram Image", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._dendo_save_image
+        )
+        self.btn_dendo_save_img.grid(row=drow, column=0, sticky='ew', padx=10, pady=(2, 2))
+        drow += 1
+
+        self.btn_dendo_save_csv = ctk.CTkButton(
+            sidebar, text="Save Dendrogram CSV", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._dendo_save_csv
+        )
+        self.btn_dendo_save_csv.grid(row=drow, column=0, sticky='ew', padx=10, pady=(0, 10))
+
+        # ── Plot area (top: signal preview, bottom: dendrogram) ──
+        self.dendo_plot_frame = tk.Frame(self.dendo_tab, bg=_C['panel'],
+                                        highlightbackground=_C['border'], highlightthickness=1)
+        self.dendo_plot_frame.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+        self.dendo_plot_frame.rowconfigure(0, weight=1)
+        self.dendo_plot_frame.rowconfigure(1, weight=1)
+        self.dendo_plot_frame.columnconfigure(0, weight=1)
+
+        self.dendo_top_frame = tk.Frame(self.dendo_plot_frame, bg=_C['panel'])
+        self.dendo_top_frame.grid(row=0, column=0, sticky='nsew')
+        tk.Label(
+            self.dendo_top_frame,
+            text="Click a column to view its signal",
+            font=('Arial', 14), bg=_C['panel'], fg=_C['sub']
+        ).pack(fill=tk.BOTH, expand=True)
+
+        tk.Frame(self.dendo_plot_frame, bg=_C['border'], height=1).grid(
+            row=1, column=0, sticky='ew')
+
+        self.dendo_bottom_frame = tk.Frame(self.dendo_plot_frame, bg=_C['panel'])
+        self.dendo_bottom_frame.grid(row=2, column=0, sticky='nsew')
+        self.dendo_plot_frame.rowconfigure(2, weight=1)
+        tk.Label(
+            self.dendo_bottom_frame,
+            text="Add 2+ columns to Selection to see the dendrogram",
+            font=('Arial', 14), bg=_C['panel'], fg=_C['sub']
+        ).pack(fill=tk.BOTH, expand=True)
+
+        # Bind column click to signal preview
+        self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_show_signal)
+
+    def _dendo_populate_columns(self):
+        """Fill the Dendogram tab column listbox with the same names as the main tab."""
+        if self.dendo_column_listbox is None or self.loaded_data is None:
+            return
+        self.dendo_column_listbox.delete(0, tk.END)
+        for i in range(self.column_listbox.size()):
+            self.dendo_column_listbox.insert(tk.END, self.column_listbox.get(i))
+
+    def _dendo_add_to_selection(self):
+        """Add all highlighted columns to the dendrogram selection list, sorted."""
+        sel = self.dendo_column_listbox.curselection()
+        if not sel:
+            return
+        changed = False
+        for idx in sel:
+            if idx not in self.dendo_selection_indices:
+                self.dendo_selection_indices.append(idx)
+                changed = True
+        if changed:
+            self.dendo_selection_indices.sort()
+            self.dendo_selection_listbox.delete(0, tk.END)
+            for idx in self.dendo_selection_indices:
+                self.dendo_selection_listbox.insert(tk.END, self.dendo_column_listbox.get(idx))
+            self._dendo_update_plot()
+
+    def _dendo_remove_from_selection(self):
+        """Remove highlighted entry from the dendrogram selection list."""
+        sel = self.dendo_selection_listbox.curselection()
+        if not sel:
+            return
+        list_idx = sel[0]
+        self.dendo_selection_listbox.delete(list_idx)
+        self.dendo_selection_indices.pop(list_idx)
+        self._dendo_update_plot()
+
+    def _dendo_show_signal(self, event=None):
+        """Draw the clicked column's signal into the top frame."""
+        if self.loaded_data is None or self.dendo_top_frame is None:
+            return
+        sel = self.dendo_column_listbox.curselection()
+        if not sel:
+            return
+        try:
+            col_idx = self.dendo_column_listbox.index(tk.ACTIVE)
+        except Exception:
+            col_idx = sel[0]
+        self.dendo_current_column = col_idx
+
+        if self.dendo_signal_fig is not None:
+            plt.close(self.dendo_signal_fig)
+            self.dendo_signal_fig = None
+        for w in list(self.dendo_top_frame.winfo_children()):
+            w.destroy()
+
+        col_label = self.dendo_column_listbox.get(col_idx)
+        self.dendo_signal_fig, ax = plt.subplots()
+        ax.plot(np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
+                self.loaded_data[:, col_idx])
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        self.dendo_signal_fig.tight_layout()
+        c = FigureCanvasTkAgg(self.dendo_signal_fig, master=self.dendo_top_frame)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _dendo_update_plot(self):
+        """Render the dendrogram in the bottom frame once selection has 2+ columns."""
+        if self.loaded_data is None or self.dendo_bottom_frame is None:
+            return
+
+        if self.dendo_fig is not None:
+            plt.close(self.dendo_fig)
+            self.dendo_fig = None
+        for w in list(self.dendo_bottom_frame.winfo_children()):
+            w.destroy()
+
+        if len(self.dendo_selection_indices) < 2:
+            tk.Label(
+                self.dendo_bottom_frame,
+                text="Add 2+ columns to Selection to see the dendrogram",
+                font=('Arial', 14), bg=_C['panel'], fg=_C['sub']
+            ).pack(fill=tk.BOTH, expand=True)
+            return
+
+        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+
+        plot_data = self.loaded_data[:, self.dendo_selection_indices]
+        clustering = AgglomerativeClustering(
+            distance_threshold=0, n_clusters=None
+        ).fit(plot_data.T)
+        self.dendo_fig, ax = plt.subplots()
+        plt.sca(ax)
+        _plot_dendrogram_helper(
+            clustering, truncate_mode="none", count_sort='none', show_contracted='true'
+        )
+        ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
+        self.dendo_fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_bottom_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+
+
+    def _dendo_save_image(self):
+        """Save the current dendrogram figure to a file."""
+        if self.dendo_fig is None:
+            messagebox.showwarning("No Plot", "Generate a dendrogram first.")
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("PDF Document", "*.pdf"),
+                       ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"),
+                       ("All Files", "*.*")],
+            title="Save Dendrogram Image"
+        )
+        if filename:
+            self.dendo_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _dendo_save_csv(self):
+        """Save dendrogram clustering data (labels + linkage matrix) to CSV."""
+        if self.loaded_data is None:
+            return
+        from corr_dendo_functions import AgglomerativeClustering
+        from tkinter.filedialog import asksaveasfilename
+        import pandas as pd
+
+        if len(self.dendo_selection_indices) >= 2:
+            plot_data = self.loaded_data[:, self.dendo_selection_indices]
+        else:
+            plot_data = self.loaded_data
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Dendrogram CSV"
+        )
+        if not filename:
+            return
+
+        clustering = AgglomerativeClustering(
+            distance_threshold=0, n_clusters=None
+        ).fit(plot_data.T)
+
+        df_labels = pd.DataFrame({
+            'Sample_Index': list(range(len(clustering.labels_))),
+            'Cluster_Label': clustering.labels_
+        })
+        linkage_rows = [
+            {'Merge_Step': i, 'Child_1': int(c1), 'Child_2': int(c2),
+             'Distance': clustering.distances_[i]}
+            for i, (c1, c2) in enumerate(clustering.children_)
+        ]
+        df_linkage = pd.DataFrame(linkage_rows)
+
+        with open(filename, 'w', newline='') as f:
+            f.write("# Cluster Labels\n")
+            df_labels.to_csv(f, index=False)
+            f.write("\n# Linkage Matrix\n")
+            df_linkage.to_csv(f, index=False)
+
+        messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
+
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
         load_correlation_matrix(self.data_tab, self.canvas)
