@@ -831,7 +831,7 @@ class NecLabApp:
             self.dendo_peak_method_combo.config(state='readonly')
             self.menu_visual.entryconfig(
                 "Dendograma",
-                command=lambda: self.notebook.select(self.dendo_tab),
+                command=self._run_dendogram_on_selection,
                 state=NORMAL
             )
     
