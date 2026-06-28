@@ -247,7 +247,7 @@ def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_l
         for j in range(i - 1, lookback_start - 1, -1):
             if j in peaks:
                 break
-            lookback_range.insert(0, data_sel[j])
+            lookback_range.insert(0, data[j])
 
         # Shorten look-ahead if it reaches the end of data or a higher point.
         lookahead_end = min(n, i + max_lookahead + 1)

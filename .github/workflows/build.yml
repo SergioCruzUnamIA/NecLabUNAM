@@ -1,0 +1,66 @@
+name: Build Executables
+
+on:
+  push:
+    tags:
+      - 'v*'        # triggers on tags like v1.0, v1.2.3, etc.
+
+jobs:
+  build-mac:
+    name: Build macOS App
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install numpy pandas matplotlib pillow scikit-learn scipy
+          pip install pyometiff tifffile imagecodecs opencv-python
+          pip install roifile
+
+      - name: Build .app
+        run: pyinstaller NecLab.spec
+
+      - name: Zip the .app bundle
+        run: |
+          cd dist
+          zip -r NecLab-mac.zip NecLab.app
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/NecLab-mac.zip
+
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install numpy pandas matplotlib pillow scikit-learn scipy
+          pip install pyometiff tifffile imagecodecs opencv-python
+          pip install roifile
+
+      - name: Build .exe
+        run: pyinstaller NecLab.spec
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist\NecLab.exe
