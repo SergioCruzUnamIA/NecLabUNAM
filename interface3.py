@@ -24,7 +24,6 @@ import urllib.request
 # ── L1 Sky Blue colour palette ────────────────────────────────────────────────
 _C = {
     'bg':     '#f0f4f8',   # main background
-    'nav':    '#1e3a5f',   # left nav bar
     'panel':  '#ffffff',   # white sidebar / header panels
     'card':   '#f8fafc',   # listbox / inner card background
     'acc':    '#2563eb',   # blue accent (buttons, active tab)
@@ -220,32 +219,10 @@ class NecLabApp:
         """Crea el layout principal con tabs para diferentes modos."""
         self.root.configure(bg=_C['bg'])
 
-        # ── Left icon nav bar (56 px, navy) ──────────────────────────────────
-        nav = tk.Frame(self.root, bg=_C['nav'], width=56)
-        nav.pack(side='left', fill='y')
-        nav.pack_propagate(False)
+        # Thin accent line across the top of the content area
+        tk.Frame(self.root, bg=_C['acc'], height=2).pack(fill='x')
 
-        tk.Label(nav, text='N', font=('Arial', 17, 'bold'),
-                 bg=_C['nav'], fg='white').pack(pady=(14, 4))
-
-        def _nav_btn(parent, icon, cmd):
-            b = tk.Button(parent, text=icon, font=('Arial', 15),
-                          bg=_C['nav'], fg='white', relief='flat',
-                          activebackground='#2a4a6f', activeforeground='white',
-                          bd=0, cursor='hand2', command=cmd)
-            b.pack(pady=3, padx=4, fill='x')
-            return b
-
-        # Nav buttons (added after notebook is created)
-        self._nav_img_btn  = None
-        self._nav_data_btn = None
-        self._nav_dendo_btn = None
-
-        # ── Right area ────────────────────────────────────────────────────────
-        right = tk.Frame(self.root, bg=_C['bg'])
-        right.pack(side='left', fill='both', expand=True)
-
-        # Style the ttk.Notebook to look like L1 tab buttons
+        # Style the ttk.Notebook
         style = ttk.Style()
         try:
             style.theme_use('clam')
@@ -262,10 +239,7 @@ class NecLabApp:
                   foreground=[('selected', _C['acc'])],
                   expand=[('selected', [0, 0, 0, 0])])
 
-        # Thin accent line across the top of the content area
-        tk.Frame(right, bg=_C['acc'], height=2).pack(fill='x')
-
-        self.notebook = ttk.Notebook(right, style='L1.TNotebook')
+        self.notebook = ttk.Notebook(self.root, style='L1.TNotebook')
         self.notebook.pack(fill='both', expand=True)
 
         # Tab 1: Procesamiento de Imágenes
@@ -277,10 +251,6 @@ class NecLabApp:
         self.data_tab = tk.Frame(self.notebook, bg=_C['bg'])
         self.notebook.add(self.data_tab, text="  Visualización de Datos  ")
         self._create_data_visualization_layout()
-
-        # Wire up nav bar icon buttons now that notebook + tabs exist
-        self._nav_img_btn = _nav_btn(nav, '🖼', lambda: self.notebook.select(self.image_tab))
-        self._nav_data_btn = _nav_btn(nav, '📊', lambda: self.notebook.select(self.data_tab))
 
     
     def _create_image_processing_layout(self):
