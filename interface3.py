@@ -84,11 +84,31 @@ class NecLabApp:
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
+        self.smoothing_var = tk.BooleanVar(value=False)
+        self.smooth_window_var = tk.IntVar(value=10)
         self.btn_save_data = None
         self.btn_save_corr = None
+        self.btn_save_peaks = None
         self.peak_method_combo = None
+        self.smooth_window_spinbox = None
         self.peak_method_params = {}  # saved params per method name
-        
+
+        # Variables de estado - Tab Dendograma
+        self.dendo_tab = None
+        self.dendo_column_listbox = None
+        self.dendo_selection_listbox = None
+        self.dendo_selection_indices = []
+        self.dendo_plot_frame = None
+        self.dendo_top_frame = None
+        self.dendo_bottom_frame = None
+        self.dendo_fig = None
+        self.dendo_signal_fig = None
+        self.dendo_current_column = 0
+        self.btn_dendo_add_sel = None
+        self.btn_dendo_remove_sel = None
+        self.btn_dendo_save_img = None
+        self.btn_dendo_save_csv = None
+
         # Construir la interfaz
         self._create_menu()
         self._create_layout()
@@ -164,11 +184,10 @@ class NecLabApp:
             state=DISABLED
         )
 
-        # Submenú de Análisis de Variabilidad
-        self.menu_imagen.add_separator()
-        self.menu_variabilidad = Menu(self.menu_imagen, tearoff=False)
-        self.menu_imagen.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
-        
+        # Menú Análisis de Variabilidad (top-level, between Imagen and Visualizacion)
+        self.menu_variabilidad = Menu(self.menu_bar, tearoff=False)
+        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
+
         # Agregar los 7 métodos de variabilidad
         methods = get_variability_methods()
         for i, method_name in enumerate(methods):
@@ -176,7 +195,7 @@ class NecLabApp:
                 label=method_name,
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
-        
+
         # Menú Visualización
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
@@ -455,15 +474,13 @@ class NecLabApp:
             selectbackground=_C['acc'], selectforeground='white',
             relief='flat', bd=0, highlightthickness=0, activestyle='none'
         )
-        self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.column_listbox.grid(row=0, column=0, sticky='nsew')
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
-
         scrollbar.config(command=self.column_listbox.yview)
 
         # ── Peak Finder ──
         row = _sec(sidebar_frame, "PEAK FINDER", row)
 
-        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
         self.peak_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.peak_method_var,
             values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
@@ -499,13 +516,13 @@ class NecLabApp:
         # ── Correlation ──
         row = _sec(sidebar_frame, "CORRELACIÓN", row)
 
-        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).pack(pady=(5, 2))
         corr_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.corr_method_var,
             values=['pearson', 'kendall', 'spearman'], state='readonly', width=15
         )
         corr_method_combo.grid(row=row, column=0, padx=10, pady=(2, 2), sticky='w')
         corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
+        row += 1
 
         tk.Checkbutton(sidebar_frame, text="Show Labels", variable=self.show_corr_labels_var,
                        command=self._update_correlation_display,
@@ -535,7 +552,7 @@ class NecLabApp:
             selectbackground=_C['acc'], selectforeground='white',
             relief='flat', bd=0, highlightthickness=0, activestyle='none'
         )
-        self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.selection_listbox.grid(row=0, column=0, sticky='nsew')
         sel_scrollbar.config(command=self.selection_listbox.yview)
 
         self.btn_add_sel = ctk.CTkButton(
@@ -736,6 +753,23 @@ class NecLabApp:
         ]),
     }
 
+    def _on_smoothing_toggle(self):
+        """Enable/disable the window spinbox and re-run peak detection."""
+        if self.smooth_window_spinbox:
+            state = 'normal' if self.smoothing_var.get() else DISABLED
+            self.smooth_window_spinbox.config(state=state)
+        self._run_peak_on_column()
+
+    def _get_data_for_peak(self, col_idx):
+        """Return a data array with col_idx optionally detrended for peak detection."""
+        if not self.smoothing_var.get():
+            return self.loaded_data
+        from peak_functions import _detrend_signal
+        data = self.loaded_data.copy()
+        data[:, col_idx] = _detrend_signal(self.loaded_data[:, col_idx],
+                                           self.smooth_window_var.get())
+        return data
+
     def _run_peak_on_column(self, show_dialog=False, event=None):
         """Draw raw data or run the selected peak finder on the current column.
         show_dialog=True forces the parameter dialog (used when the method changes).
@@ -788,7 +822,8 @@ class NecLabApp:
         }
         func = method_map.get(method)
         if func:
-            result = func(self.loaded_data, col_idx,
+            data_for_peak = self._get_data_for_peak(col_idx)
+            result = func(data_for_peak, col_idx,
                           main_window=None, canvas=None,
                           target_frame=self.plot_top_frame,
                           params=saved_params)
@@ -861,6 +896,11 @@ class NecLabApp:
             self.btn_save_corr.configure(state='normal')
             self.btn_save_peaks.configure(state='normal')
             self.peak_method_combo.config(state='readonly')
+            self.menu_visual.entryconfig(
+                "Dendograma",
+                command=self._run_dendogram_on_selection,
+                state=NORMAL
+            )
     
     def _save_peaks_csv(self):
         """Run peak detection on every selection column and save peak indices to CSV."""
@@ -1384,7 +1424,7 @@ class NecLabApp:
         self.menu_imagen.entryconfig("Histogram", state=NORMAL)
         self.menu_imagen.entryconfig("Binarize", state=NORMAL)
         self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
-        self.menu_imagen.entryconfig("Análisis de Variabilidad", state=NORMAL)
+        self.menu_bar.entryconfig("Análisis de Variabilidad", state=NORMAL)
 
         # Cambiar a la pestaña de imagen
         self.notebook.select(self.image_tab)
