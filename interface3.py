@@ -69,10 +69,13 @@ class NecLabApp:
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
+        self.smoothing_var = tk.BooleanVar(value=False)
+        self.smooth_window_var = tk.IntVar(value=10)
         self.btn_save_data = None
         self.btn_save_corr = None
         self.btn_save_peaks = None
         self.peak_method_combo = None
+        self.smooth_window_spinbox = None
         self.peak_method_params = {}  # saved params per method name
 
         # Variables de estado - Tab Dendograma
@@ -489,6 +492,34 @@ class NecLabApp:
         self.peak_method_combo.config(state=DISABLED)
         row += 1
 
+        # ── Smoothing (PeakCaller detrend) ──
+        smooth_frame = tk.Frame(sidebar_frame)
+        smooth_frame.grid(row=row, column=0, sticky='ew', padx=5, pady=(2, 0))
+        smooth_frame.columnconfigure(1, weight=1)
+        row += 1
+
+        ttk.Checkbutton(
+            smooth_frame, text="Smoothing",
+            variable=self.smoothing_var,
+            command=self._on_smoothing_toggle
+        ).grid(row=0, column=0, sticky='w')
+
+        smooth_win_frame = tk.Frame(sidebar_frame)
+        smooth_win_frame.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 5))
+        smooth_win_frame.columnconfigure(1, weight=1)
+        row += 1
+
+        tk.Label(smooth_win_frame, text="Window (pts):", font=("Arial", 9)).grid(
+            row=0, column=0, sticky='w'
+        )
+        self.smooth_window_spinbox = ttk.Spinbox(
+            smooth_win_frame, from_=2, to=500,
+            textvariable=self.smooth_window_var, width=6,
+            command=self._on_smoothing_toggle
+        )
+        self.smooth_window_spinbox.grid(row=0, column=1, sticky='w', padx=(4, 0))
+        self.smooth_window_spinbox.config(state=DISABLED)
+
         # ── Correlation method selector ──
         ttk.Separator(sidebar_frame, orient='horizontal').grid(
             row=row, column=0, sticky='ew', padx=5, pady=5
@@ -739,6 +770,23 @@ class NecLabApp:
         ]),
     }
 
+    def _on_smoothing_toggle(self):
+        """Enable/disable the window spinbox and re-run peak detection."""
+        if self.smooth_window_spinbox:
+            state = 'normal' if self.smoothing_var.get() else DISABLED
+            self.smooth_window_spinbox.config(state=state)
+        self._run_peak_on_column()
+
+    def _get_data_for_peak(self, col_idx):
+        """Return a data array with col_idx optionally detrended for peak detection."""
+        if not self.smoothing_var.get():
+            return self.loaded_data
+        from peak_functions import _detrend_signal
+        data = self.loaded_data.copy()
+        data[:, col_idx] = _detrend_signal(self.loaded_data[:, col_idx],
+                                           self.smooth_window_var.get())
+        return data
+
     def _run_peak_on_column(self, show_dialog=False, event=None):
         """Draw raw data or run the selected peak finder on the current column.
         show_dialog=True forces the parameter dialog (used when the method changes).
@@ -791,7 +839,8 @@ class NecLabApp:
         }
         func = method_map.get(method)
         if func:
-            result = func(self.loaded_data, col_idx,
+            data_for_peak = self._get_data_for_peak(col_idx)
+            result = func(data_for_peak, col_idx,
                           main_window=None, canvas=None,
                           target_frame=self.plot_top_frame,
                           params=saved_params)
@@ -901,7 +950,8 @@ class NecLabApp:
         data_dict = {'TIME': list(range(n_time))}
         for col_idx in self.selection_column_indices:
             col_name = self.column_listbox.get(col_idx)
-            peaks = compute_peaks(self.loaded_data, col_idx, method, params)
+            data_for_peak = self._get_data_for_peak(col_idx)
+            peaks = compute_peaks(data_for_peak, col_idx, method, params)
             flags = np.zeros(n_time, dtype=int)
             flags[peaks] = 1
             data_dict[col_name] = flags

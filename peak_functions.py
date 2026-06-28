@@ -229,14 +229,16 @@ def _detrend_signal(data_sel, smooth_window):
 
 
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,
-                smooth_window=1, main_window=None, canvas=None, target_frame=None):
+                main_window=None, canvas=None, target_frame=None):
+    """Detect peaks in data[:, roi_index] using look-back/look-ahead rise/fall criteria.
+
+    Smoothing/detrending should be applied externally (via _detrend_signal) before
+    calling this function — pass the already-detrended data array as ``data``.
+    """
     plot_mode = 1
     peaks = []
     n = len(data)
     data_sel = data[:, roi_index]
-
-    # De-trend: divide by smoothed background trend (core PeakCaller step).
-    detrended = _detrend_signal(data_sel, smooth_window)
 
     for i in range(n):
         # Shorten look-back if it reaches the start of data or a previous peak.
@@ -245,21 +247,21 @@ def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_l
         for j in range(i - 1, lookback_start - 1, -1):
             if j in peaks:
                 break
-            lookback_range.insert(0, detrended[j])  # use de-trended scalar value
+            lookback_range.insert(0, data_sel[j])
 
         # Shorten look-ahead if it reaches the end of data or a higher point.
         lookahead_end = min(n, i + max_lookahead + 1)
         lookahead_range = []
         for j in range(i + 1, lookahead_end):
-            if detrended[j] > detrended[i]:
+            if data_sel[j] > data_sel[i]:
                 break
-            lookahead_range.append(detrended[j])
+            lookahead_range.append(data_sel[j])
 
         if lookback_range and lookahead_range:
-            rise = detrended[i] * (rise_percent / 100.0)
-            fall = detrended[i] * (fall_percent / 100.0)
-            significant_rise = detrended[i] - np.min(lookback_range) >= rise
-            significant_fall = detrended[i] - np.min(lookahead_range) >= fall
+            rise = data_sel[i] * (rise_percent / 100.0)
+            fall = data_sel[i] * (fall_percent / 100.0)
+            significant_rise = data_sel[i] - np.min(lookback_range) >= rise
+            significant_fall = data_sel[i] - np.min(lookahead_range) >= fall
             if significant_rise and significant_fall:
                 peaks.append(i)
 
@@ -280,7 +282,6 @@ def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_fr
             {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
             {'name': 'Max Lookback (pts)', 'key': 'max_lookback', 'default': 10, 'type': int},
             {'name': 'Max Lookahead (pts)', 'key': 'max_lookahead', 'default': 10, 'type': int},
-            {'name': 'Smoothing Window (pts, 1=mean)', 'key': 'smooth_window', 'default': 1, 'type': int},
         ])
     if params is None:
         return None
@@ -289,7 +290,6 @@ def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_fr
                        fall_percent=params['fall_percent'],
                        max_lookback=params['max_lookback'],
                        max_lookahead=params['max_lookahead'],
-                       smooth_window=params.get('smooth_window', 1),
                        main_window=main_window, canvas=canvas,
                        target_frame=target_frame)
 
@@ -412,26 +412,24 @@ def compute_peaks(data, col_idx, method_name, params):
         fall_percent = params['fall_percent']
         max_lookback = params['max_lookback']
         max_lookahead = params['max_lookahead']
-        smooth_window = params.get('smooth_window', 1)
-        detrended = _detrend_signal(data_sel, smooth_window)
         for i in range(n):
             lookback_start = max(0, i - max_lookback)
             lookback_range = []
             for j in range(i - 1, lookback_start - 1, -1):
                 if j in peaks:
                     break
-                lookback_range.insert(0, detrended[j])
+                lookback_range.insert(0, data_sel[j])
             lookahead_end = min(n, i + max_lookahead + 1)
             lookahead_range = []
             for j in range(i + 1, lookahead_end):
-                if detrended[j] > detrended[i]:
+                if data_sel[j] > data_sel[i]:
                     break
-                lookahead_range.append(detrended[j])
+                lookahead_range.append(data_sel[j])
             if lookback_range and lookahead_range:
-                rise = detrended[i] * (rise_percent / 100.0)
-                fall = detrended[i] * (fall_percent / 100.0)
-                if (detrended[i] - np.min(lookback_range) >= rise and
-                        detrended[i] - np.min(lookahead_range) >= fall):
+                rise = data_sel[i] * (rise_percent / 100.0)
+                fall = data_sel[i] * (fall_percent / 100.0)
+                if (data_sel[i] - np.min(lookback_range) >= rise and
+                        data_sel[i] - np.min(lookahead_range) >= fall):
                     peaks.append(i)
         return peaks
 
