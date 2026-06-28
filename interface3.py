@@ -218,10 +218,6 @@ class NecLabApp:
         self.notebook.add(self.data_tab, text="Visualización de Datos")
         self._create_data_visualization_layout()
 
-        # Tab 3: Dendograma
-        self.dendo_tab = tk.Frame(self.notebook, bg='#f0f0f0')
-        self.notebook.add(self.dendo_tab, text="Dendograma")
-        self._create_dendogram_layout()
     
     def _create_image_processing_layout(self):
         """Crea el layout para procesamiento de imágenes."""
@@ -879,7 +875,32 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _run_dendogram_on_selection(self):
-        """Switch to Dendogram tab (menu shortcut)."""
+        """Create the Dendogram tab on first use, then switch to it."""
+        if self.dendo_tab is None or not self.dendo_tab.winfo_exists():
+            self.dendo_tab = tk.Frame(self.notebook, bg='#f0f0f0')
+            self.notebook.add(self.dendo_tab, text="Dendograma")
+            # Reset all dendo state so _create_dendogram_layout starts fresh
+            self.dendo_column_listbox = None
+            self.dendo_selection_listbox = None
+            self.dendo_selection_indices = []
+            self.dendo_plot_frame = None
+            self.dendo_fig = None
+            self.dendo_peak_method_var.set('None')
+            self.dendo_peak_method_combo = None
+            self.btn_dendo_add_sel = None
+            self.btn_dendo_remove_sel = None
+            self.btn_dendo_save_peaks = None
+            self.btn_dendo_save_img = None
+            self.btn_dendo_save_csv = None
+            self._create_dendogram_layout()
+            self._dendo_populate_columns()
+            if self.loaded_data is not None:
+                self.btn_dendo_add_sel.config(state=NORMAL)
+                self.btn_dendo_remove_sel.config(state=NORMAL)
+                self.btn_dendo_save_peaks.config(state=NORMAL)
+                self.btn_dendo_save_img.config(state=NORMAL)
+                self.btn_dendo_save_csv.config(state=NORMAL)
+                self.dendo_peak_method_combo.config(state='readonly')
         self.notebook.select(self.dendo_tab)
 
     # ==================== DENDOGRAM TAB ====================
@@ -977,8 +998,8 @@ class NecLabApp:
         self.dendo_plot_frame.grid(row=0, column=1, sticky='nsew')
         tk.Label(
             self.dendo_plot_frame,
-            text="Load a data file to start",
-            font=("Arial", 20), bg="#f0f0f0", fg="#666666"
+            text="Add 2+ columns to Selection to see the dendrogram",
+            font=("Arial", 14), fg="#666666"
         ).pack(fill=tk.BOTH, expand=True)
 
     def _dendo_populate_columns(self):
@@ -988,11 +1009,6 @@ class NecLabApp:
         self.dendo_column_listbox.delete(0, tk.END)
         for i in range(self.column_listbox.size()):
             self.dendo_column_listbox.insert(tk.END, self.column_listbox.get(i))
-        self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_on_col_select)
-
-    def _dendo_on_col_select(self, event=None):
-        """Re-render dendrogram when column selection changes."""
-        self._dendo_update_plot()
 
     def _dendo_add_to_selection(self):
         """Add all highlighted columns to the dendrogram selection list, sorted."""
@@ -1022,15 +1038,9 @@ class NecLabApp:
         self._dendo_update_plot()
 
     def _dendo_update_plot(self):
-        """Re-render the dendrogram using the current selection (or all data if empty)."""
+        """Render the dendrogram once the selection has 2+ columns; show placeholder otherwise."""
         if self.loaded_data is None or self.dendo_plot_frame is None:
             return
-        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
-
-        if len(self.dendo_selection_indices) >= 2:
-            plot_data = self.loaded_data[:, self.dendo_selection_indices]
-        else:
-            plot_data = self.loaded_data
 
         if self.dendo_fig is not None:
             plt.close(self.dendo_fig)
@@ -1038,6 +1048,17 @@ class NecLabApp:
         for w in list(self.dendo_plot_frame.winfo_children()):
             w.destroy()
 
+        if len(self.dendo_selection_indices) < 2:
+            tk.Label(
+                self.dendo_plot_frame,
+                text="Add 2+ columns to Selection to see the dendrogram",
+                font=("Arial", 14), fg="#666666"
+            ).pack(fill=tk.BOTH, expand=True)
+            return
+
+        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+
+        plot_data = self.loaded_data[:, self.dendo_selection_indices]
         clustering = AgglomerativeClustering(
             distance_threshold=0, n_clusters=None
         ).fit(plot_data.T)
@@ -1046,8 +1067,7 @@ class NecLabApp:
         _plot_dendrogram_helper(
             clustering, truncate_mode="none", count_sort='none', show_contracted='true'
         )
-        n_shown = len(self.dendo_selection_indices) if self.dendo_selection_indices else plot_data.shape[1]
-        ax.set_title(f'Dendrogram ({n_shown} signals)')
+        ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
         self.dendo_fig.tight_layout()
 
         canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_plot_frame)
