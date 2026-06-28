@@ -28,6 +28,7 @@ hidden += [
 hidden += collect_submodules('tifffile')
 hidden += collect_submodules('imagecodecs')
 hidden += collect_submodules('pyometiff')
+hidden += collect_submodules('skimage')
 
 # misc
 hidden += [
@@ -44,6 +45,7 @@ datas += collect_data_files('sklearn')
 datas += collect_data_files('scipy')
 datas += collect_data_files('matplotlib')
 datas += collect_data_files('pyometiff')
+datas += collect_data_files('skimage')
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
 a = Analysis(

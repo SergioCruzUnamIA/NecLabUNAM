@@ -24,7 +24,7 @@ jobs:
           pip install pyinstaller
           pip install numpy pandas matplotlib pillow scikit-learn scipy
           pip install pyometiff tifffile imagecodecs opencv-python
-          pip install roifile
+          pip install scikit-image roifile
 
       - name: Build .app
         run: pyinstaller NecLab.spec
@@ -63,7 +63,7 @@ jobs:
           pip install pyinstaller
           pip install numpy pandas matplotlib pillow scikit-learn scipy
           pip install pyometiff tifffile imagecodecs opencv-python
-          pip install roifile
+          pip install scikit-image roifile
 
       - name: Build .exe
         run: pyinstaller NecLab.spec
