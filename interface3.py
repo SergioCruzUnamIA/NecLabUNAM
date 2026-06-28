@@ -443,18 +443,19 @@ class NecLabApp:
         
         # Column listbox with scrollbar
         listbox_frame = tk.Frame(sidebar_frame)
-        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+        listbox_frame.pack(fill=tk.X, padx=5, pady=5)
+
         scrollbar = tk.Scrollbar(listbox_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+
         self.column_listbox = tk.Listbox(
             listbox_frame,
             yscrollcommand=scrollbar.set,
             selectmode=tk.EXTENDED,
-            font=("Arial", 10)
+            font=("Arial", 10),
+            height=8
         )
-        self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.column_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
 
         scrollbar.config(command=self.column_listbox.yview)
@@ -497,7 +498,7 @@ class NecLabApp:
         tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
 
         sel_listbox_frame = tk.Frame(sidebar_frame)
-        sel_listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        sel_listbox_frame.pack(fill=tk.X, padx=5, pady=5)
 
         sel_scrollbar = tk.Scrollbar(sel_listbox_frame)
         sel_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -506,9 +507,10 @@ class NecLabApp:
             sel_listbox_frame,
             yscrollcommand=sel_scrollbar.set,
             selectmode=tk.SINGLE,
-            font=("Arial", 10)
+            font=("Arial", 10),
+            height=5
         )
-        self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.selection_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
         sel_scrollbar.config(command=self.selection_listbox.yview)
 
         self.btn_add_sel = tk.Button(
