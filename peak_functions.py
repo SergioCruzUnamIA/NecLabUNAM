@@ -211,51 +211,63 @@ def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, 
 
     return draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead, main_window=None, canvas=None, target_frame=None):
+def _detrend_signal(data_sel, smooth_window):
+    """Detrend a 1-D signal by dividing by a smoothed background trend.
+
+    Mirrors PeakCaller's approach: generate a smoothed version of the time
+    series, then divide the original by it.  When smooth_window <= 1 the
+    signal is divided by its mean (PeakCaller's "no trend" option, which
+    scales the profile so the mean equals 1).
+    """
+    if smooth_window > 1:
+        kernel = np.ones(smooth_window) / smooth_window
+        smooth = np.convolve(data_sel, kernel, mode='same')
+    else:
+        smooth = np.full_like(data_sel, np.mean(data_sel))
+    smooth = np.where(np.abs(smooth) < 1e-10, 1e-10, smooth)
+    return data_sel / smooth
+
+
+def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,
+                smooth_window=1, main_window=None, canvas=None, target_frame=None):
     plot_mode = 1
     peaks = []
     n = len(data)
     data_sel = data[:, roi_index]
-    
+
+    # De-trend: divide by smoothed background trend (core PeakCaller step).
+    detrended = _detrend_signal(data_sel, smooth_window)
+
     for i in range(n):
-        # Ajusta el rango de lookback si se excede el rango de datos
+        # Shorten look-back if it reaches the start of data or a previous peak.
         lookback_start = max(0, i - max_lookback)
-        
-        # Ajusta el rango de lookback para acortar si encuentra un pico
         lookback_range = []
         for j in range(i - 1, lookback_start - 1, -1):
             if j in peaks:
                 break
-            lookback_range.insert(0, data[j])
-        
-        # Ajusta el rango de lookahead si se excede el rango de datos
+            lookback_range.insert(0, detrended[j])  # use de-trended scalar value
+
+        # Shorten look-ahead if it reaches the end of data or a higher point.
         lookahead_end = min(n, i + max_lookahead + 1)
-        
-        # Ajusta el range de lookahead para acortar si encuentra un punto mas grande que el actual
         lookahead_range = []
         for j in range(i + 1, lookahead_end):
-            if data_sel[j] > data_sel[i]:
+            if detrended[j] > detrended[i]:
                 break
-            lookahead_range.append(data_sel[j])
-        
-        # Si no esta vacio el rango de lookback y lookahead se calcula si es un pico
-        if len(lookback_range) > 0 and len(lookahead_range) > 0:
-            rise = data_sel[i] * (rise_percent / 100.0)
-            fall = data_sel[i] * (fall_percent / 100.0)
-            
-            # Checa si los datos incrementan y decrementan lo suficiente para ser pico
-            # Compara el valor actual con el minimo de los datos en el rango de lookback
-            # Compara el valor actual con el maximo de los datos en el rango de lookahead
-            significant_rise = data_sel[i] - np.min(lookback_range) >= rise
-            significant_fall = data_sel[i] - np.min(lookahead_range) >= fall
-            
+            lookahead_range.append(detrended[j])
+
+        if lookback_range and lookahead_range:
+            rise = detrended[i] * (rise_percent / 100.0)
+            fall = detrended[i] * (fall_percent / 100.0)
+            significant_rise = detrended[i] - np.min(lookback_range) >= rise
+            significant_fall = detrended[i] - np.min(lookahead_range) >= fall
             if significant_rise and significant_fall:
                 peaks.append(i)
 
     res = np.zeros_like(data_sel)
     y_res = peaks
     result = draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas,
-                         data, roi_index, peaks, rise_percent, fall_percent, max_lookahead, max_lookback,
+                         data, roi_index, peaks, rise_percent, fall_percent,
+                         max_lookahead, max_lookback,
                          target_frame=target_frame)
     if target_frame is not None:
         return result
@@ -266,8 +278,9 @@ def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_fr
         params = show_parameter_dialog(main_window, "Peak Caller Parameters", [
             {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
             {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
-            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
-            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
+            {'name': 'Max Lookback (pts)', 'key': 'max_lookback', 'default': 10, 'type': int},
+            {'name': 'Max Lookahead (pts)', 'key': 'max_lookahead', 'default': 10, 'type': int},
+            {'name': 'Smoothing Window (pts, 1=mean)', 'key': 'smooth_window', 'default': 1, 'type': int},
         ])
     if params is None:
         return None
@@ -276,6 +289,7 @@ def actual_peak_caller(data, roi_index, main_window=None, canvas=None, target_fr
                        fall_percent=params['fall_percent'],
                        max_lookback=params['max_lookback'],
                        max_lookahead=params['max_lookahead'],
+                       smooth_window=params.get('smooth_window', 1),
                        main_window=main_window, canvas=canvas,
                        target_frame=target_frame)
 
@@ -398,24 +412,26 @@ def compute_peaks(data, col_idx, method_name, params):
         fall_percent = params['fall_percent']
         max_lookback = params['max_lookback']
         max_lookahead = params['max_lookahead']
+        smooth_window = params.get('smooth_window', 1)
+        detrended = _detrend_signal(data_sel, smooth_window)
         for i in range(n):
             lookback_start = max(0, i - max_lookback)
             lookback_range = []
             for j in range(i - 1, lookback_start - 1, -1):
                 if j in peaks:
                     break
-                lookback_range.insert(0, data_sel[j])
+                lookback_range.insert(0, detrended[j])
             lookahead_end = min(n, i + max_lookahead + 1)
             lookahead_range = []
             for j in range(i + 1, lookahead_end):
-                if data_sel[j] > data_sel[i]:
+                if detrended[j] > detrended[i]:
                     break
-                lookahead_range.append(data_sel[j])
+                lookahead_range.append(detrended[j])
             if lookback_range and lookahead_range:
-                rise = data_sel[i] * (rise_percent / 100.0)
-                fall = data_sel[i] * (fall_percent / 100.0)
-                if (data_sel[i] - np.min(lookback_range) >= rise and
-                        data_sel[i] - np.min(lookahead_range) >= fall):
+                rise = detrended[i] * (rise_percent / 100.0)
+                fall = detrended[i] * (fall_percent / 100.0)
+                if (detrended[i] - np.min(lookback_range) >= rise and
+                        detrended[i] - np.min(lookahead_range) >= fall):
                     peaks.append(i)
         return peaks
 
