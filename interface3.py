@@ -74,7 +74,22 @@ class NecLabApp:
         self.btn_save_peaks = None
         self.peak_method_combo = None
         self.peak_method_params = {}  # saved params per method name
-        
+
+        # Variables de estado - Tab Dendograma
+        self.dendo_tab = None
+        self.dendo_column_listbox = None
+        self.dendo_selection_listbox = None
+        self.dendo_selection_indices = []
+        self.dendo_plot_frame = None
+        self.dendo_fig = None
+        self.dendo_peak_method_var = tk.StringVar(value='None')
+        self.dendo_peak_method_combo = None
+        self.btn_dendo_add_sel = None
+        self.btn_dendo_remove_sel = None
+        self.btn_dendo_save_peaks = None
+        self.btn_dendo_save_img = None
+        self.btn_dendo_save_csv = None
+
         # Construir la interfaz
         self._create_menu()
         self._create_layout()
@@ -202,6 +217,11 @@ class NecLabApp:
         self.data_tab = tk.Frame(self.notebook, bg='#f0f0f0')
         self.notebook.add(self.data_tab, text="Visualización de Datos")
         self._create_data_visualization_layout()
+
+        # Tab 3: Dendograma
+        self.dendo_tab = tk.Frame(self.notebook, bg='#f0f0f0')
+        self.notebook.add(self.dendo_tab, text="Dendograma")
+        self._create_dendogram_layout()
     
     def _create_image_processing_layout(self):
         """Crea el layout para procesamiento de imágenes."""
@@ -805,9 +825,17 @@ class NecLabApp:
             self.btn_save_corr.config(state=NORMAL)
             self.btn_save_peaks.config(state=NORMAL)
             self.peak_method_combo.config(state='readonly')
+            # Enable Dendogram tab controls
+            self._dendo_populate_columns()
+            self.btn_dendo_add_sel.config(state=NORMAL)
+            self.btn_dendo_remove_sel.config(state=NORMAL)
+            self.btn_dendo_save_peaks.config(state=NORMAL)
+            self.btn_dendo_save_img.config(state=NORMAL)
+            self.btn_dendo_save_csv.config(state=NORMAL)
+            self.dendo_peak_method_combo.config(state='readonly')
             self.menu_visual.entryconfig(
                 "Dendograma",
-                command=self._run_dendogram_on_selection,
+                command=lambda: self.notebook.select(self.dendo_tab),
                 state=NORMAL
             )
     
@@ -851,13 +879,295 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _run_dendogram_on_selection(self):
-        """Plot dendrogram using only the selected columns (falls back to all data if none selected)."""
-        from corr_dendo_functions import plot_dendogram
-        if len(self.selection_column_indices) >= 2:
-            sel_data = self.loaded_data[:, self.selection_column_indices]
+        """Switch to Dendogram tab (menu shortcut)."""
+        self.notebook.select(self.dendo_tab)
+
+    # ==================== DENDOGRAM TAB ====================
+
+    def _create_dendogram_layout(self):
+        """Build the permanent Dendogram tab (sidebar + plot area)."""
+        Grid.rowconfigure(self.dendo_tab, 0, weight=1)
+        Grid.columnconfigure(self.dendo_tab, 0, weight=0)
+        Grid.columnconfigure(self.dendo_tab, 1, weight=1)
+
+        # ── Sidebar ──
+        sidebar = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1, width=250)
+        sidebar.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        sidebar.grid_propagate(False)
+
+        tk.Label(sidebar, text="Data Columns", font=("Arial", 12, "bold")).pack(pady=(10, 5))
+
+        lb_frame = tk.Frame(sidebar)
+        lb_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        lb_sb = tk.Scrollbar(lb_frame)
+        lb_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.dendo_column_listbox = tk.Listbox(
+            lb_frame, yscrollcommand=lb_sb.set,
+            selectmode=tk.EXTENDED, font=("Arial", 10)
+        )
+        self.dendo_column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        lb_sb.config(command=self.dendo_column_listbox.yview)
+
+        # ── Peak Finder ──
+        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        tk.Label(sidebar, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        self.dendo_peak_method_combo = ttk.Combobox(
+            sidebar, textvariable=self.dendo_peak_method_var,
+            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
+                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
+            state='readonly', width=20
+        )
+        self.dendo_peak_method_combo.pack(padx=5, pady=(0, 5))
+        self.dendo_peak_method_combo.bind(
+            '<<ComboboxSelected>>',
+            lambda e: self._dendo_set_peak_method()
+        )
+        self.dendo_peak_method_combo.config(state=DISABLED)
+
+        # ── Selection ──
+        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        tk.Label(sidebar, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+
+        sel_frame = tk.Frame(sidebar)
+        sel_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        sel_sb = tk.Scrollbar(sel_frame)
+        sel_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.dendo_selection_listbox = tk.Listbox(
+            sel_frame, yscrollcommand=sel_sb.set,
+            selectmode=tk.SINGLE, font=("Arial", 10)
+        )
+        self.dendo_selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sel_sb.config(command=self.dendo_selection_listbox.yview)
+
+        self.btn_dendo_add_sel = tk.Button(
+            sidebar, text="Add to Selection",
+            command=self._dendo_add_to_selection, state=DISABLED
+        )
+        self.btn_dendo_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        self.btn_dendo_remove_sel = tk.Button(
+            sidebar, text="Remove from Selection",
+            command=self._dendo_remove_from_selection, state=DISABLED
+        )
+        self.btn_dendo_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+        # ── Save buttons ──
+        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
+
+        self.btn_dendo_save_peaks = tk.Button(
+            sidebar, text="Save Peaks CSV",
+            command=self._dendo_save_peaks_csv, state=DISABLED
+        )
+        self.btn_dendo_save_peaks.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        self.btn_dendo_save_img = tk.Button(
+            sidebar, text="Save Dendrogram Image",
+            command=self._dendo_save_image, state=DISABLED
+        )
+        self.btn_dendo_save_img.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        self.btn_dendo_save_csv = tk.Button(
+            sidebar, text="Save Dendrogram CSV",
+            command=self._dendo_save_csv, state=DISABLED
+        )
+        self.btn_dendo_save_csv.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+        # ── Plot area ──
+        self.dendo_plot_frame = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1)
+        self.dendo_plot_frame.grid(row=0, column=1, sticky='nsew')
+        tk.Label(
+            self.dendo_plot_frame,
+            text="Load a data file to start",
+            font=("Arial", 20), bg="#f0f0f0", fg="#666666"
+        ).pack(fill=tk.BOTH, expand=True)
+
+    def _dendo_populate_columns(self):
+        """Fill the Dendogram tab column listbox with the same names as the main tab."""
+        if self.dendo_column_listbox is None or self.loaded_data is None:
+            return
+        self.dendo_column_listbox.delete(0, tk.END)
+        for i in range(self.column_listbox.size()):
+            self.dendo_column_listbox.insert(tk.END, self.column_listbox.get(i))
+        self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_on_col_select)
+
+    def _dendo_on_col_select(self, event=None):
+        """Re-render dendrogram when column selection changes."""
+        self._dendo_update_plot()
+
+    def _dendo_add_to_selection(self):
+        """Add all highlighted columns to the dendrogram selection list, sorted."""
+        sel = self.dendo_column_listbox.curselection()
+        if not sel:
+            return
+        changed = False
+        for idx in sel:
+            if idx not in self.dendo_selection_indices:
+                self.dendo_selection_indices.append(idx)
+                changed = True
+        if changed:
+            self.dendo_selection_indices.sort()
+            self.dendo_selection_listbox.delete(0, tk.END)
+            for idx in self.dendo_selection_indices:
+                self.dendo_selection_listbox.insert(tk.END, self.dendo_column_listbox.get(idx))
+            self._dendo_update_plot()
+
+    def _dendo_remove_from_selection(self):
+        """Remove highlighted entry from the dendrogram selection list."""
+        sel = self.dendo_selection_listbox.curselection()
+        if not sel:
+            return
+        list_idx = sel[0]
+        self.dendo_selection_listbox.delete(list_idx)
+        self.dendo_selection_indices.pop(list_idx)
+        self._dendo_update_plot()
+
+    def _dendo_update_plot(self):
+        """Re-render the dendrogram using the current selection (or all data if empty)."""
+        if self.loaded_data is None or self.dendo_plot_frame is None:
+            return
+        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+
+        if len(self.dendo_selection_indices) >= 2:
+            plot_data = self.loaded_data[:, self.dendo_selection_indices]
         else:
-            sel_data = self.loaded_data
-        plot_dendogram(sel_data, self.data_tab, None)
+            plot_data = self.loaded_data
+
+        if self.dendo_fig is not None:
+            plt.close(self.dendo_fig)
+            self.dendo_fig = None
+        for w in list(self.dendo_plot_frame.winfo_children()):
+            w.destroy()
+
+        clustering = AgglomerativeClustering(
+            distance_threshold=0, n_clusters=None
+        ).fit(plot_data.T)
+        self.dendo_fig, ax = plt.subplots()
+        plt.sca(ax)
+        _plot_dendrogram_helper(
+            clustering, truncate_mode="none", count_sort='none', show_contracted='true'
+        )
+        n_shown = len(self.dendo_selection_indices) if self.dendo_selection_indices else plot_data.shape[1]
+        ax.set_title(f'Dendrogram ({n_shown} signals)')
+        self.dendo_fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_plot_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _dendo_set_peak_method(self):
+        """Handle peak method combo change in Dendogram tab — sync params from shared cache."""
+        method = self.dendo_peak_method_var.get()
+        if method == 'None':
+            return
+        if method not in self.peak_method_params:
+            from peak_functions import show_parameter_dialog
+            spec = self._PEAK_PARAM_SPECS.get(method)
+            if spec:
+                title, param_list = spec
+                new_params = show_parameter_dialog(self.root, title, param_list)
+                if new_params is None:
+                    self.dendo_peak_method_var.set('None')
+                    return
+                self.peak_method_params[method] = new_params
+
+    def _dendo_save_peaks_csv(self):
+        """Save peak detection results for all selection columns to CSV."""
+        method = self.dendo_peak_method_var.get()
+        if method == 'None':
+            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
+            return
+        if not self.dendo_selection_indices:
+            messagebox.showwarning("No Selection", "Add columns to Selection first.")
+            return
+        params = self.peak_method_params.get(method)
+        if params is None:
+            messagebox.showwarning("No Parameters",
+                                   "Run the peak finder on a column first to set parameters.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        from peak_functions import compute_peaks
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Peaks CSV"
+        )
+        if not filename:
+            return
+
+        n_time = self.loaded_data.shape[0]
+        data_dict = {'TIME': list(range(n_time))}
+        for col_idx in self.dendo_selection_indices:
+            col_name = self.dendo_column_listbox.get(col_idx)
+            peaks = compute_peaks(self.loaded_data, col_idx, method, params)
+            flags = np.zeros(n_time, dtype=int)
+            flags[peaks] = 1
+            data_dict[col_name] = flags
+
+        pd.DataFrame(data_dict).to_csv(filename, index=False)
+        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
+
+    def _dendo_save_image(self):
+        """Save the current dendrogram figure to a file."""
+        if self.dendo_fig is None:
+            messagebox.showwarning("No Plot", "Generate a dendrogram first.")
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("PDF Document", "*.pdf"),
+                       ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"),
+                       ("All Files", "*.*")],
+            title="Save Dendrogram Image"
+        )
+        if filename:
+            self.dendo_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _dendo_save_csv(self):
+        """Save dendrogram clustering data (labels + linkage matrix) to CSV."""
+        if self.loaded_data is None:
+            return
+        from corr_dendo_functions import AgglomerativeClustering
+        from tkinter.filedialog import asksaveasfilename
+        import pandas as pd
+
+        if len(self.dendo_selection_indices) >= 2:
+            plot_data = self.loaded_data[:, self.dendo_selection_indices]
+        else:
+            plot_data = self.loaded_data
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Dendrogram CSV"
+        )
+        if not filename:
+            return
+
+        clustering = AgglomerativeClustering(
+            distance_threshold=0, n_clusters=None
+        ).fit(plot_data.T)
+
+        df_labels = pd.DataFrame({
+            'Sample_Index': list(range(len(clustering.labels_))),
+            'Cluster_Label': clustering.labels_
+        })
+        linkage_rows = [
+            {'Merge_Step': i, 'Child_1': int(c1), 'Child_2': int(c2),
+             'Distance': clustering.distances_[i]}
+            for i, (c1, c2) in enumerate(clustering.children_)
+        ]
+        df_linkage = pd.DataFrame(linkage_rows)
+
+        with open(filename, 'w', newline='') as f:
+            f.write("# Cluster Labels\n")
+            df_labels.to_csv(f, index=False)
+            f.write("\n# Linkage Matrix\n")
+            df_linkage.to_csv(f, index=False)
+
+        messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
 
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
