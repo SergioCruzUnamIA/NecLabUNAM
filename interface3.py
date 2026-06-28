@@ -69,10 +69,13 @@ class NecLabApp:
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
+        self.smoothing_var = tk.BooleanVar(value=False)
+        self.smooth_window_var = tk.IntVar(value=10)
         self.btn_save_data = None
         self.btn_save_corr = None
         self.btn_save_peaks = None
         self.peak_method_combo = None
+        self.smooth_window_spinbox = None
         self.peak_method_params = {}  # saved params per method name
 
         # Variables de estado - Tab Dendograma
@@ -81,12 +84,13 @@ class NecLabApp:
         self.dendo_selection_listbox = None
         self.dendo_selection_indices = []
         self.dendo_plot_frame = None
+        self.dendo_top_frame = None
+        self.dendo_bottom_frame = None
         self.dendo_fig = None
-        self.dendo_peak_method_var = tk.StringVar(value='None')
-        self.dendo_peak_method_combo = None
+        self.dendo_signal_fig = None
+        self.dendo_current_column = 0
         self.btn_dendo_add_sel = None
         self.btn_dendo_remove_sel = None
-        self.btn_dendo_save_peaks = None
         self.btn_dendo_save_img = None
         self.btn_dendo_save_csv = None
 
@@ -165,11 +169,10 @@ class NecLabApp:
             state=DISABLED
         )
 
-        # Submenú de Análisis de Variabilidad
-        self.menu_imagen.add_separator()
-        self.menu_variabilidad = Menu(self.menu_imagen, tearoff=False)
-        self.menu_imagen.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
-        
+        # Menú Análisis de Variabilidad (top-level, between Imagen and Visualizacion)
+        self.menu_variabilidad = Menu(self.menu_bar, tearoff=False)
+        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
+
         # Agregar los 7 métodos de variabilidad
         methods = get_variability_methods()
         for i, method_name in enumerate(methods):
@@ -177,7 +180,7 @@ class NecLabApp:
                 label=method_name,
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
-        
+
         # Menú Visualización
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
@@ -218,10 +221,6 @@ class NecLabApp:
         self.notebook.add(self.data_tab, text="Visualización de Datos")
         self._create_data_visualization_layout()
 
-        # Tab 3: Dendograma
-        self.dendo_tab = tk.Frame(self.notebook, bg='#f0f0f0')
-        self.notebook.add(self.dendo_tab, text="Dendograma")
-        self._create_dendogram_layout()
     
     def _create_image_processing_layout(self):
         """Crea el layout para procesamiento de imágenes."""
@@ -439,71 +438,135 @@ class NecLabApp:
         sidebar_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1, width=250)
         sidebar_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
         sidebar_frame.grid_propagate(False)
-        
+
+        # Configure sidebar grid: columnconfigure; row weights set after building rows
+        sidebar_frame.columnconfigure(0, weight=1)
+
+        row = 0
         # Column list title
-        list_title = tk.Label(sidebar_frame, text="Data Columns", font=("Arial", 12, "bold"))
-        list_title.pack(pady=(10, 5))
-        
+        tk.Label(sidebar_frame, text="Data Columns", font=("Arial", 12, "bold")).grid(
+            row=row, column=0, pady=(10, 5), sticky='ew'
+        )
+        row += 1
+
         # Column listbox with scrollbar
         listbox_frame = tk.Frame(sidebar_frame)
-        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+        listbox_frame.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar_frame.rowconfigure(row, weight=2)
+        listbox_frame.rowconfigure(0, weight=1)
+        listbox_frame.columnconfigure(0, weight=1)
+        row += 1
+
         scrollbar = tk.Scrollbar(listbox_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
         self.column_listbox = tk.Listbox(
             listbox_frame,
             yscrollcommand=scrollbar.set,
             selectmode=tk.EXTENDED,
             font=("Arial", 10)
         )
-        self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.column_listbox.grid(row=0, column=0, sticky='nsew')
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
-
         scrollbar.config(command=self.column_listbox.yview)
 
         # ── Peak Finder selector ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
-        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        tk.Label(sidebar_frame, text="Peak Finder", font=("Arial", 10, "bold")).grid(
+            row=row, column=0, pady=(5, 2), sticky='ew'
+        )
+        row += 1
+
         self.peak_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.peak_method_var,
             values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
                     'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
             state='readonly', width=20
         )
-        self.peak_method_combo.pack(padx=5, pady=(0, 5))
+        self.peak_method_combo.grid(row=row, column=0, padx=5, pady=(0, 5))
         self.peak_method_combo.bind('<<ComboboxSelected>>', lambda e: self._run_peak_on_column(show_dialog=True))
         self.peak_method_combo.config(state=DISABLED)
+        row += 1
+
+        # ── Smoothing (PeakCaller detrend) ──
+        smooth_frame = tk.Frame(sidebar_frame)
+        smooth_frame.grid(row=row, column=0, sticky='ew', padx=5, pady=(2, 0))
+        smooth_frame.columnconfigure(1, weight=1)
+        row += 1
+
+        ttk.Checkbutton(
+            smooth_frame, text="Smoothing",
+            variable=self.smoothing_var,
+            command=self._on_smoothing_toggle
+        ).grid(row=0, column=0, sticky='w')
+
+        smooth_win_frame = tk.Frame(sidebar_frame)
+        smooth_win_frame.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 5))
+        smooth_win_frame.columnconfigure(1, weight=1)
+        row += 1
+
+        tk.Label(smooth_win_frame, text="Window (pts):", font=("Arial", 9)).grid(
+            row=0, column=0, sticky='w'
+        )
+        self.smooth_window_spinbox = ttk.Spinbox(
+            smooth_win_frame, from_=2, to=500,
+            textvariable=self.smooth_window_var, width=6,
+            command=self._on_smoothing_toggle
+        )
+        self.smooth_window_spinbox.grid(row=0, column=1, sticky='w', padx=(4, 0))
+        self.smooth_window_spinbox.config(state=DISABLED)
 
         # ── Correlation method selector ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
-        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).pack(pady=(5, 2))
+        tk.Label(sidebar_frame, text="Correlation Method", font=("Arial", 10, "bold")).grid(
+            row=row, column=0, pady=(5, 2), sticky='ew'
+        )
+        row += 1
+
         corr_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.corr_method_var,
             values=['pearson', 'kendall', 'spearman'],
             state='readonly', width=15
         )
-        corr_method_combo.pack(padx=5, pady=(0, 5))
+        corr_method_combo.grid(row=row, column=0, padx=5, pady=(0, 5))
         corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
+        row += 1
 
         ttk.Checkbutton(
             sidebar_frame, text="Show Labels",
             variable=self.show_corr_labels_var,
             command=self._update_correlation_display
-        ).pack(anchor='w', padx=5, pady=(0, 5))
+        ).grid(row=row, column=0, sticky='w', padx=5, pady=(0, 5))
+        row += 1
 
         # ── Selection section ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
-        tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+        tk.Label(sidebar_frame, text="Selection", font=("Arial", 12, "bold")).grid(
+            row=row, column=0, pady=(0, 5), sticky='ew'
+        )
+        row += 1  # row 9 is the listbox (set weight=1 above)
 
         sel_listbox_frame = tk.Frame(sidebar_frame)
-        sel_listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        sel_listbox_frame.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar_frame.rowconfigure(row, weight=1)
+        sel_listbox_frame.rowconfigure(0, weight=1)
+        sel_listbox_frame.columnconfigure(0, weight=1)
+        row += 1
 
         sel_scrollbar = tk.Scrollbar(sel_listbox_frame)
-        sel_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        sel_scrollbar.grid(row=0, column=1, sticky='ns')
 
         self.selection_listbox = tk.Listbox(
             sel_listbox_frame,
@@ -511,41 +574,48 @@ class NecLabApp:
             selectmode=tk.SINGLE,
             font=("Arial", 10)
         )
-        self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.selection_listbox.grid(row=0, column=0, sticky='nsew')
         sel_scrollbar.config(command=self.selection_listbox.yview)
 
         self.btn_add_sel = tk.Button(
             sidebar_frame, text="Add to Selection",
             command=self._add_to_selection, state=DISABLED
         )
-        self.btn_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_add_sel.grid(row=row, column=0, sticky='ew', padx=5, pady=(2, 2))
+        row += 1
 
         self.btn_remove_sel = tk.Button(
             sidebar_frame, text="Remove from Selection",
             command=self._remove_from_selection, state=DISABLED
         )
-        self.btn_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_remove_sel.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 5))
+        row += 1
 
         # ── Save buttons ──
-        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', padx=5, pady=5)
+        ttk.Separator(sidebar_frame, orient='horizontal').grid(
+            row=row, column=0, sticky='ew', padx=5, pady=5
+        )
+        row += 1
 
         self.btn_save_data = tk.Button(
             sidebar_frame, text="Save Data Image",
             command=self._save_data_image, state=DISABLED
         )
-        self.btn_save_data.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_save_data.grid(row=row, column=0, sticky='ew', padx=5, pady=(2, 2))
+        row += 1
 
         self.btn_save_corr = tk.Button(
             sidebar_frame, text="Save Correlation",
             command=self._save_correlation_image, state=DISABLED
         )
-        self.btn_save_corr.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_save_corr.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 5))
+        row += 1
 
         self.btn_save_peaks = tk.Button(
             sidebar_frame, text="Save Peaks CSV",
             command=self._save_peaks_csv, state=DISABLED
         )
-        self.btn_save_peaks.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_save_peaks.grid(row=row, column=0, sticky='ew', padx=5, pady=(0, 10))
 
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
@@ -700,6 +770,23 @@ class NecLabApp:
         ]),
     }
 
+    def _on_smoothing_toggle(self):
+        """Enable/disable the window spinbox and re-run peak detection."""
+        if self.smooth_window_spinbox:
+            state = 'normal' if self.smoothing_var.get() else DISABLED
+            self.smooth_window_spinbox.config(state=state)
+        self._run_peak_on_column()
+
+    def _get_data_for_peak(self, col_idx):
+        """Return a data array with col_idx optionally detrended for peak detection."""
+        if not self.smoothing_var.get():
+            return self.loaded_data
+        from peak_functions import _detrend_signal
+        data = self.loaded_data.copy()
+        data[:, col_idx] = _detrend_signal(self.loaded_data[:, col_idx],
+                                           self.smooth_window_var.get())
+        return data
+
     def _run_peak_on_column(self, show_dialog=False, event=None):
         """Draw raw data or run the selected peak finder on the current column.
         show_dialog=True forces the parameter dialog (used when the method changes).
@@ -752,7 +839,8 @@ class NecLabApp:
         }
         func = method_map.get(method)
         if func:
-            result = func(self.loaded_data, col_idx,
+            data_for_peak = self._get_data_for_peak(col_idx)
+            result = func(data_for_peak, col_idx,
                           main_window=None, canvas=None,
                           target_frame=self.plot_top_frame,
                           params=saved_params)
@@ -825,17 +913,9 @@ class NecLabApp:
             self.btn_save_corr.config(state=NORMAL)
             self.btn_save_peaks.config(state=NORMAL)
             self.peak_method_combo.config(state='readonly')
-            # Enable Dendogram tab controls
-            self._dendo_populate_columns()
-            self.btn_dendo_add_sel.config(state=NORMAL)
-            self.btn_dendo_remove_sel.config(state=NORMAL)
-            self.btn_dendo_save_peaks.config(state=NORMAL)
-            self.btn_dendo_save_img.config(state=NORMAL)
-            self.btn_dendo_save_csv.config(state=NORMAL)
-            self.dendo_peak_method_combo.config(state='readonly')
             self.menu_visual.entryconfig(
                 "Dendograma",
-                command=lambda: self.notebook.select(self.dendo_tab),
+                command=self._run_dendogram_on_selection,
                 state=NORMAL
             )
     
@@ -870,7 +950,8 @@ class NecLabApp:
         data_dict = {'TIME': list(range(n_time))}
         for col_idx in self.selection_column_indices:
             col_name = self.column_listbox.get(col_idx)
-            peaks = compute_peaks(self.loaded_data, col_idx, method, params)
+            data_for_peak = self._get_data_for_peak(col_idx)
+            peaks = compute_peaks(data_for_peak, col_idx, method, params)
             flags = np.zeros(n_time, dtype=int)
             flags[peaks] = 1
             data_dict[col_name] = flags
@@ -879,7 +960,31 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _run_dendogram_on_selection(self):
-        """Switch to Dendogram tab (menu shortcut)."""
+        """Create the Dendogram tab on first use, then switch to it."""
+        if self.dendo_tab is None or not self.dendo_tab.winfo_exists():
+            self.dendo_tab = tk.Frame(self.notebook, bg='#f0f0f0')
+            self.notebook.add(self.dendo_tab, text="Dendograma")
+            # Reset all dendo state so _create_dendogram_layout starts fresh
+            self.dendo_column_listbox = None
+            self.dendo_selection_listbox = None
+            self.dendo_selection_indices = []
+            self.dendo_plot_frame = None
+            self.dendo_top_frame = None
+            self.dendo_bottom_frame = None
+            self.dendo_fig = None
+            self.dendo_signal_fig = None
+            self.dendo_current_column = 0
+            self.btn_dendo_add_sel = None
+            self.btn_dendo_remove_sel = None
+            self.btn_dendo_save_img = None
+            self.btn_dendo_save_csv = None
+            self._create_dendogram_layout()
+            self._dendo_populate_columns()
+            if self.loaded_data is not None:
+                self.btn_dendo_add_sel.config(state=NORMAL)
+                self.btn_dendo_remove_sel.config(state=NORMAL)
+                self.btn_dendo_save_img.config(state=NORMAL)
+                self.btn_dendo_save_csv.config(state=NORMAL)
         self.notebook.select(self.dendo_tab)
 
     # ==================== DENDOGRAM TAB ====================
@@ -894,92 +999,117 @@ class NecLabApp:
         sidebar = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1, width=250)
         sidebar.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
         sidebar.grid_propagate(False)
+        sidebar.columnconfigure(0, weight=1)
 
-        tk.Label(sidebar, text="Data Columns", font=("Arial", 12, "bold")).pack(pady=(10, 5))
+        drow = 0
+        tk.Label(sidebar, text="Data Columns", font=("Arial", 12, "bold")).grid(
+            row=drow, column=0, pady=(10, 5), sticky='ew'
+        )
+        drow += 1
 
         lb_frame = tk.Frame(sidebar)
-        lb_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        lb_frame.grid(row=drow, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar.rowconfigure(drow, weight=2)
+        lb_frame.rowconfigure(0, weight=1)
+        lb_frame.columnconfigure(0, weight=1)
+        drow += 1
+
         lb_sb = tk.Scrollbar(lb_frame)
-        lb_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        lb_sb.grid(row=0, column=1, sticky='ns')
         self.dendo_column_listbox = tk.Listbox(
             lb_frame, yscrollcommand=lb_sb.set,
             selectmode=tk.EXTENDED, font=("Arial", 10)
         )
-        self.dendo_column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.dendo_column_listbox.grid(row=0, column=0, sticky='nsew')
         lb_sb.config(command=self.dendo_column_listbox.yview)
 
-        # ── Peak Finder ──
-        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
-        tk.Label(sidebar, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
-        self.dendo_peak_method_combo = ttk.Combobox(
-            sidebar, textvariable=self.dendo_peak_method_var,
-            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
-                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
-            state='readonly', width=20
-        )
-        self.dendo_peak_method_combo.pack(padx=5, pady=(0, 5))
-        self.dendo_peak_method_combo.bind(
-            '<<ComboboxSelected>>',
-            lambda e: self._dendo_set_peak_method()
-        )
-        self.dendo_peak_method_combo.config(state=DISABLED)
-
         # ── Selection ──
-        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
-        tk.Label(sidebar, text="Selection", font=("Arial", 12, "bold")).pack(pady=(0, 5))
+        ttk.Separator(sidebar, orient='horizontal').grid(
+            row=drow, column=0, sticky='ew', padx=5, pady=5
+        )
+        drow += 1
+
+        tk.Label(sidebar, text="Selection", font=("Arial", 12, "bold")).grid(
+            row=drow, column=0, pady=(0, 5), sticky='ew'
+        )
+        drow += 1
 
         sel_frame = tk.Frame(sidebar)
-        sel_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        sel_frame.grid(row=drow, column=0, sticky='nsew', padx=5, pady=5)
+        sidebar.rowconfigure(drow, weight=1)
+        sel_frame.rowconfigure(0, weight=1)
+        sel_frame.columnconfigure(0, weight=1)
+        drow += 1
+
         sel_sb = tk.Scrollbar(sel_frame)
-        sel_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        sel_sb.grid(row=0, column=1, sticky='ns')
         self.dendo_selection_listbox = tk.Listbox(
             sel_frame, yscrollcommand=sel_sb.set,
             selectmode=tk.SINGLE, font=("Arial", 10)
         )
-        self.dendo_selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.dendo_selection_listbox.grid(row=0, column=0, sticky='nsew')
         sel_sb.config(command=self.dendo_selection_listbox.yview)
 
         self.btn_dendo_add_sel = tk.Button(
             sidebar, text="Add to Selection",
             command=self._dendo_add_to_selection, state=DISABLED
         )
-        self.btn_dendo_add_sel.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_dendo_add_sel.grid(row=drow, column=0, sticky='ew', padx=5, pady=(2, 2))
+        drow += 1
 
         self.btn_dendo_remove_sel = tk.Button(
             sidebar, text="Remove from Selection",
             command=self._dendo_remove_from_selection, state=DISABLED
         )
-        self.btn_dendo_remove_sel.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_dendo_remove_sel.grid(row=drow, column=0, sticky='ew', padx=5, pady=(0, 5))
+        drow += 1
 
         # ── Save buttons ──
-        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
-
-        self.btn_dendo_save_peaks = tk.Button(
-            sidebar, text="Save Peaks CSV",
-            command=self._dendo_save_peaks_csv, state=DISABLED
+        ttk.Separator(sidebar, orient='horizontal').grid(
+            row=drow, column=0, sticky='ew', padx=5, pady=5
         )
-        self.btn_dendo_save_peaks.pack(fill=tk.X, padx=5, pady=(2, 2))
+        drow += 1
 
         self.btn_dendo_save_img = tk.Button(
             sidebar, text="Save Dendrogram Image",
             command=self._dendo_save_image, state=DISABLED
         )
-        self.btn_dendo_save_img.pack(fill=tk.X, padx=5, pady=(2, 2))
+        self.btn_dendo_save_img.grid(row=drow, column=0, sticky='ew', padx=5, pady=(2, 2))
+        drow += 1
 
         self.btn_dendo_save_csv = tk.Button(
             sidebar, text="Save Dendrogram CSV",
             command=self._dendo_save_csv, state=DISABLED
         )
-        self.btn_dendo_save_csv.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.btn_dendo_save_csv.grid(row=drow, column=0, sticky='ew', padx=5, pady=(0, 10))
 
-        # ── Plot area ──
+        # ── Plot area (top: signal preview, bottom: dendrogram) ──
         self.dendo_plot_frame = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1)
         self.dendo_plot_frame.grid(row=0, column=1, sticky='nsew')
+        self.dendo_plot_frame.rowconfigure(0, weight=1)
+        self.dendo_plot_frame.rowconfigure(1, weight=1)
+        self.dendo_plot_frame.columnconfigure(0, weight=1)
+
+        self.dendo_top_frame = tk.Frame(self.dendo_plot_frame)
+        self.dendo_top_frame.grid(row=0, column=0, sticky='nsew')
         tk.Label(
-            self.dendo_plot_frame,
-            text="Load a data file to start",
-            font=("Arial", 20), bg="#f0f0f0", fg="#666666"
+            self.dendo_top_frame,
+            text="Click a column to view its signal",
+            font=("Arial", 14), fg="#666666"
         ).pack(fill=tk.BOTH, expand=True)
+
+        self.dendo_bottom_frame = tk.Frame(
+            self.dendo_plot_frame, relief=tk.GROOVE, borderwidth=1
+        )
+        self.dendo_bottom_frame.grid(row=1, column=0, sticky='nsew')
+        tk.Label(
+            self.dendo_bottom_frame,
+            text="Add 2+ columns to Selection to see the dendrogram",
+            font=("Arial", 14), fg="#666666"
+        ).pack(fill=tk.BOTH, expand=True)
+
+        # Bind column click to signal preview
+        self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_show_signal)
 
     def _dendo_populate_columns(self):
         """Fill the Dendogram tab column listbox with the same names as the main tab."""
@@ -988,11 +1118,6 @@ class NecLabApp:
         self.dendo_column_listbox.delete(0, tk.END)
         for i in range(self.column_listbox.size()):
             self.dendo_column_listbox.insert(tk.END, self.column_listbox.get(i))
-        self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_on_col_select)
-
-    def _dendo_on_col_select(self, event=None):
-        """Re-render dendrogram when column selection changes."""
-        self._dendo_update_plot()
 
     def _dendo_add_to_selection(self):
         """Add all highlighted columns to the dendrogram selection list, sorted."""
@@ -1021,23 +1146,59 @@ class NecLabApp:
         self.dendo_selection_indices.pop(list_idx)
         self._dendo_update_plot()
 
-    def _dendo_update_plot(self):
-        """Re-render the dendrogram using the current selection (or all data if empty)."""
-        if self.loaded_data is None or self.dendo_plot_frame is None:
+    def _dendo_show_signal(self, event=None):
+        """Draw the clicked column's signal into the top frame."""
+        if self.loaded_data is None or self.dendo_top_frame is None:
             return
-        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+        sel = self.dendo_column_listbox.curselection()
+        if not sel:
+            return
+        try:
+            col_idx = self.dendo_column_listbox.index(tk.ACTIVE)
+        except Exception:
+            col_idx = sel[0]
+        self.dendo_current_column = col_idx
 
-        if len(self.dendo_selection_indices) >= 2:
-            plot_data = self.loaded_data[:, self.dendo_selection_indices]
-        else:
-            plot_data = self.loaded_data
+        if self.dendo_signal_fig is not None:
+            plt.close(self.dendo_signal_fig)
+            self.dendo_signal_fig = None
+        for w in list(self.dendo_top_frame.winfo_children()):
+            w.destroy()
+
+        col_label = self.dendo_column_listbox.get(col_idx)
+        self.dendo_signal_fig, ax = plt.subplots()
+        ax.plot(np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
+                self.loaded_data[:, col_idx])
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        self.dendo_signal_fig.tight_layout()
+        c = FigureCanvasTkAgg(self.dendo_signal_fig, master=self.dendo_top_frame)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _dendo_update_plot(self):
+        """Render the dendrogram in the bottom frame once selection has 2+ columns."""
+        if self.loaded_data is None or self.dendo_bottom_frame is None:
+            return
 
         if self.dendo_fig is not None:
             plt.close(self.dendo_fig)
             self.dendo_fig = None
-        for w in list(self.dendo_plot_frame.winfo_children()):
+        for w in list(self.dendo_bottom_frame.winfo_children()):
             w.destroy()
 
+        if len(self.dendo_selection_indices) < 2:
+            tk.Label(
+                self.dendo_bottom_frame,
+                text="Add 2+ columns to Selection to see the dendrogram",
+                font=("Arial", 14), fg="#666666"
+            ).pack(fill=tk.BOTH, expand=True)
+            return
+
+        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+
+        plot_data = self.loaded_data[:, self.dendo_selection_indices]
         clustering = AgglomerativeClustering(
             distance_threshold=0, n_clusters=None
         ).fit(plot_data.T)
@@ -1046,68 +1207,14 @@ class NecLabApp:
         _plot_dendrogram_helper(
             clustering, truncate_mode="none", count_sort='none', show_contracted='true'
         )
-        n_shown = len(self.dendo_selection_indices) if self.dendo_selection_indices else plot_data.shape[1]
-        ax.set_title(f'Dendrogram ({n_shown} signals)')
+        ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
         self.dendo_fig.tight_layout()
 
-        canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_plot_frame)
+        canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_bottom_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    def _dendo_set_peak_method(self):
-        """Handle peak method combo change in Dendogram tab — sync params from shared cache."""
-        method = self.dendo_peak_method_var.get()
-        if method == 'None':
-            return
-        if method not in self.peak_method_params:
-            from peak_functions import show_parameter_dialog
-            spec = self._PEAK_PARAM_SPECS.get(method)
-            if spec:
-                title, param_list = spec
-                new_params = show_parameter_dialog(self.root, title, param_list)
-                if new_params is None:
-                    self.dendo_peak_method_var.set('None')
-                    return
-                self.peak_method_params[method] = new_params
 
-    def _dendo_save_peaks_csv(self):
-        """Save peak detection results for all selection columns to CSV."""
-        method = self.dendo_peak_method_var.get()
-        if method == 'None':
-            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
-            return
-        if not self.dendo_selection_indices:
-            messagebox.showwarning("No Selection", "Add columns to Selection first.")
-            return
-        params = self.peak_method_params.get(method)
-        if params is None:
-            messagebox.showwarning("No Parameters",
-                                   "Run the peak finder on a column first to set parameters.")
-            return
-
-        from tkinter.filedialog import asksaveasfilename
-        from peak_functions import compute_peaks
-        import pandas as pd
-
-        filename = asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
-            title="Save Peaks CSV"
-        )
-        if not filename:
-            return
-
-        n_time = self.loaded_data.shape[0]
-        data_dict = {'TIME': list(range(n_time))}
-        for col_idx in self.dendo_selection_indices:
-            col_name = self.dendo_column_listbox.get(col_idx)
-            peaks = compute_peaks(self.loaded_data, col_idx, method, params)
-            flags = np.zeros(n_time, dtype=int)
-            flags[peaks] = 1
-            data_dict[col_name] = flags
-
-        pd.DataFrame(data_dict).to_csv(filename, index=False)
-        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _dendo_save_image(self):
         """Save the current dendrogram figure to a file."""
@@ -1320,7 +1427,7 @@ class NecLabApp:
         self.menu_imagen.entryconfig("Histogram", state=NORMAL)
         self.menu_imagen.entryconfig("Binarize", state=NORMAL)
         self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
-        self.menu_imagen.entryconfig("Análisis de Variabilidad", state=NORMAL)
+        self.menu_bar.entryconfig("Análisis de Variabilidad", state=NORMAL)
 
         # Cambiar a la pestaña de imagen
         self.notebook.select(self.image_tab)
