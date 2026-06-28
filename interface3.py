@@ -71,6 +71,7 @@ class NecLabApp:
         self.show_corr_labels_var = tk.BooleanVar(value=True)
         self.btn_save_data = None
         self.btn_save_corr = None
+        self.btn_save_peaks = None
         self.peak_method_combo = None
         self.peak_method_params = {}  # saved params per method name
         
@@ -520,6 +521,12 @@ class NecLabApp:
         )
         self.btn_save_corr.pack(fill=tk.X, padx=5, pady=(0, 5))
 
+        self.btn_save_peaks = tk.Button(
+            sidebar_frame, text="Save Peaks CSV",
+            command=self._save_peaks_csv, state=DISABLED
+        )
+        self.btn_save_peaks.pack(fill=tk.X, padx=5, pady=(0, 5))
+
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, relief=tk.RAISED, borderwidth=1)
         self.main_plot_frame.grid(row=0, column=1, sticky='nsew')
@@ -796,8 +803,62 @@ class NecLabApp:
             self.btn_remove_sel.config(state=NORMAL)
             self.btn_save_data.config(state=NORMAL)
             self.btn_save_corr.config(state=NORMAL)
+            self.btn_save_peaks.config(state=NORMAL)
             self.peak_method_combo.config(state='readonly')
+            self.menu_visual.entryconfig(
+                "Dendograma",
+                command=self._run_dendogram_on_selection,
+                state=NORMAL
+            )
     
+    def _save_peaks_csv(self):
+        """Run peak detection on every selection column and save peak indices to CSV."""
+        method = self.peak_method_var.get()
+        if method == 'None':
+            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
+            return
+        if not self.selection_column_indices:
+            messagebox.showwarning("No Selection", "Add columns to Selection first.")
+            return
+        params = self.peak_method_params.get(method)
+        if params is None:
+            messagebox.showwarning("No Parameters",
+                                   "Run the peak finder on a column first to set parameters.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        from peak_functions import compute_peaks
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Peaks CSV"
+        )
+        if not filename:
+            return
+
+        n_time = self.loaded_data.shape[0]
+        data_dict = {'TIME': list(range(n_time))}
+        for col_idx in self.selection_column_indices:
+            col_name = self.column_listbox.get(col_idx)
+            peaks = compute_peaks(self.loaded_data, col_idx, method, params)
+            flags = np.zeros(n_time, dtype=int)
+            flags[peaks] = 1
+            data_dict[col_name] = flags
+
+        pd.DataFrame(data_dict).to_csv(filename, index=False)
+        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
+
+    def _run_dendogram_on_selection(self):
+        """Plot dendrogram using only the selected columns (falls back to all data if none selected)."""
+        from corr_dendo_functions import plot_dendogram
+        if len(self.selection_column_indices) >= 2:
+            sel_data = self.loaded_data[:, self.selection_column_indices]
+        else:
+            sel_data = self.loaded_data
+        plot_dendogram(sel_data, self.data_tab, None)
+
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
         load_correlation_matrix(self.data_tab, self.canvas)

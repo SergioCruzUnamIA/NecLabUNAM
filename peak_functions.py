@@ -379,6 +379,93 @@ def lasso_peak(data, roi_index, main_window=None, canvas=None, target_frame=None
     y_res = [i for i in y_res if new_data[i] > 0]
     return draw_canvas(data_sel, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
+def compute_peaks(data, col_idx, method_name, params):
+    """Run peak detection for a single column and return peak time indices, no drawing."""
+    data_sel = data[:, col_idx]
+
+    if method_name == 'Elliptic Envelope':
+        reg = ElasticNet().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+        res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
+        new_data = data_sel - res
+        clf = EllipticEnvelope(random_state=0, contamination=params['contamination']).fit(new_data.reshape(-1, 1))
+        y_pred = clf.predict(new_data.reshape(-1, 1))
+        return [i for i, x in enumerate(list(y_pred)) if x == -1]
+
+    elif method_name == 'Peak Caller':
+        n = len(data_sel)
+        peaks = []
+        rise_percent = params['rise_percent']
+        fall_percent = params['fall_percent']
+        max_lookback = params['max_lookback']
+        max_lookahead = params['max_lookahead']
+        for i in range(n):
+            lookback_start = max(0, i - max_lookback)
+            lookback_range = []
+            for j in range(i - 1, lookback_start - 1, -1):
+                if j in peaks:
+                    break
+                lookback_range.insert(0, data_sel[j])
+            lookahead_end = min(n, i + max_lookahead + 1)
+            lookahead_range = []
+            for j in range(i + 1, lookahead_end):
+                if data_sel[j] > data_sel[i]:
+                    break
+                lookahead_range.append(data_sel[j])
+            if lookback_range and lookahead_range:
+                rise = data_sel[i] * (rise_percent / 100.0)
+                fall = data_sel[i] * (fall_percent / 100.0)
+                if (data_sel[i] - np.min(lookback_range) >= rise and
+                        data_sel[i] - np.min(lookahead_range) >= fall):
+                    peaks.append(i)
+        return peaks
+
+    elif method_name == 'Local Outlier Factor':
+        reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+        res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
+        new_data = data_sel - res
+        clf = LocalOutlierFactor(n_neighbors=params['n_neighbors'])
+        y_pred = clf.fit_predict(new_data.reshape(-1, 1))
+        y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
+        return [i for i in y_res if new_data[i] > 0]
+
+    elif method_name == 'Peak Function 4':
+        reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+        res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
+        new_data = data_sel - res
+        clf = EllipticEnvelope(random_state=0, contamination=params['contamination']).fit(new_data.reshape(-1, 1))
+        y_pred = clf.predict(new_data.reshape(-1, 1))
+        y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
+        return [i for i in y_res if new_data[i] > 0]
+
+    elif method_name == 'Isolation Forest':
+        reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+        res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
+        new_data = data_sel - res
+        clf = IsolationForest(random_state=0, contamination=params['contamination']).fit(new_data.reshape(-1, 1))
+        y_pred = clf.predict(new_data.reshape(-1, 1))
+        y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
+        return [i for i in y_res if new_data[i] > 0]
+
+    elif method_name == 'Linear Model':
+        reg = svm.SVR().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+        res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
+        new_data = data_sel - res
+        clf = linear_model.SGDOneClassSVM(random_state=42, nu=params['nu']).fit(new_data.reshape(-1, 1))
+        y_pred = clf.predict(new_data.reshape(-1, 1))
+        y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
+        return [i for i in y_res if new_data[i] > 0]
+
+    elif method_name == 'Peak Function 7':
+        reg = Lasso().fit(np.array(range(len(data_sel))).reshape(-1, 1), data_sel)
+        res = reg.predict(np.array(range(len(data_sel))).reshape(-1, 1))
+        new_data = data_sel - res
+        clf = LocalOutlierFactor(n_neighbors=params['n_neighbors'])
+        y_pred = clf.fit_predict(new_data.reshape(-1, 1))
+        y_res = [i for i, x in enumerate(list(y_pred)) if x == -1]
+        return [i for i in y_res if new_data[i] > 0]
+
+    return []
+
 def create_visualization_window():
     visualization_window = tk.Toplevel()
     visualization_window.title("Visualization")
