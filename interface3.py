@@ -81,12 +81,15 @@ class NecLabApp:
         self.dendo_selection_listbox = None
         self.dendo_selection_indices = []
         self.dendo_plot_frame = None
+        self.dendo_top_frame = None
+        self.dendo_bottom_frame = None
         self.dendo_fig = None
+        self.dendo_signal_fig = None
+        self.dendo_current_column = 0
         self.dendo_peak_method_var = tk.StringVar(value='None')
         self.dendo_peak_method_combo = None
         self.btn_dendo_add_sel = None
         self.btn_dendo_remove_sel = None
-        self.btn_dendo_save_peaks = None
         self.btn_dendo_save_img = None
         self.btn_dendo_save_csv = None
 
@@ -876,12 +879,15 @@ class NecLabApp:
             self.dendo_selection_listbox = None
             self.dendo_selection_indices = []
             self.dendo_plot_frame = None
+            self.dendo_top_frame = None
+            self.dendo_bottom_frame = None
             self.dendo_fig = None
+            self.dendo_signal_fig = None
+            self.dendo_current_column = 0
             self.dendo_peak_method_var.set('None')
             self.dendo_peak_method_combo = None
             self.btn_dendo_add_sel = None
             self.btn_dendo_remove_sel = None
-            self.btn_dendo_save_peaks = None
             self.btn_dendo_save_img = None
             self.btn_dendo_save_csv = None
             self._create_dendogram_layout()
@@ -889,7 +895,6 @@ class NecLabApp:
             if self.loaded_data is not None:
                 self.btn_dendo_add_sel.config(state=NORMAL)
                 self.btn_dendo_remove_sel.config(state=NORMAL)
-                self.btn_dendo_save_peaks.config(state=NORMAL)
                 self.btn_dendo_save_img.config(state=NORMAL)
                 self.btn_dendo_save_csv.config(state=NORMAL)
                 self.dendo_peak_method_combo.config(state='readonly')
@@ -967,12 +972,6 @@ class NecLabApp:
         # ── Save buttons ──
         ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
 
-        self.btn_dendo_save_peaks = tk.Button(
-            sidebar, text="Save Peaks CSV",
-            command=self._dendo_save_peaks_csv, state=DISABLED
-        )
-        self.btn_dendo_save_peaks.pack(fill=tk.X, padx=5, pady=(2, 2))
-
         self.btn_dendo_save_img = tk.Button(
             sidebar, text="Save Dendrogram Image",
             command=self._dendo_save_image, state=DISABLED
@@ -985,14 +984,33 @@ class NecLabApp:
         )
         self.btn_dendo_save_csv.pack(fill=tk.X, padx=5, pady=(0, 5))
 
-        # ── Plot area ──
+        # ── Plot area (top: signal preview, bottom: dendrogram) ──
         self.dendo_plot_frame = tk.Frame(self.dendo_tab, relief=tk.RAISED, borderwidth=1)
         self.dendo_plot_frame.grid(row=0, column=1, sticky='nsew')
+        self.dendo_plot_frame.rowconfigure(0, weight=1)
+        self.dendo_plot_frame.rowconfigure(1, weight=1)
+        self.dendo_plot_frame.columnconfigure(0, weight=1)
+
+        self.dendo_top_frame = tk.Frame(self.dendo_plot_frame)
+        self.dendo_top_frame.grid(row=0, column=0, sticky='nsew')
         tk.Label(
-            self.dendo_plot_frame,
+            self.dendo_top_frame,
+            text="Click a column to view its signal",
+            font=("Arial", 14), fg="#666666"
+        ).pack(fill=tk.BOTH, expand=True)
+
+        self.dendo_bottom_frame = tk.Frame(
+            self.dendo_plot_frame, relief=tk.GROOVE, borderwidth=1
+        )
+        self.dendo_bottom_frame.grid(row=1, column=0, sticky='nsew')
+        tk.Label(
+            self.dendo_bottom_frame,
             text="Add 2+ columns to Selection to see the dendrogram",
             font=("Arial", 14), fg="#666666"
         ).pack(fill=tk.BOTH, expand=True)
+
+        # Bind column click to signal preview
+        self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_show_signal)
 
     def _dendo_populate_columns(self):
         """Fill the Dendogram tab column listbox with the same names as the main tab."""
@@ -1029,20 +1047,51 @@ class NecLabApp:
         self.dendo_selection_indices.pop(list_idx)
         self._dendo_update_plot()
 
+    def _dendo_show_signal(self, event=None):
+        """Draw the clicked column's signal into the top frame."""
+        if self.loaded_data is None or self.dendo_top_frame is None:
+            return
+        sel = self.dendo_column_listbox.curselection()
+        if not sel:
+            return
+        try:
+            col_idx = self.dendo_column_listbox.index(tk.ACTIVE)
+        except Exception:
+            col_idx = sel[0]
+        self.dendo_current_column = col_idx
+
+        if self.dendo_signal_fig is not None:
+            plt.close(self.dendo_signal_fig)
+            self.dendo_signal_fig = None
+        for w in list(self.dendo_top_frame.winfo_children()):
+            w.destroy()
+
+        col_label = self.dendo_column_listbox.get(col_idx)
+        self.dendo_signal_fig, ax = plt.subplots()
+        ax.plot(np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
+                self.loaded_data[:, col_idx])
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        self.dendo_signal_fig.tight_layout()
+        c = FigureCanvasTkAgg(self.dendo_signal_fig, master=self.dendo_top_frame)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
     def _dendo_update_plot(self):
-        """Render the dendrogram once the selection has 2+ columns; show placeholder otherwise."""
-        if self.loaded_data is None or self.dendo_plot_frame is None:
+        """Render the dendrogram in the bottom frame once selection has 2+ columns."""
+        if self.loaded_data is None or self.dendo_bottom_frame is None:
             return
 
         if self.dendo_fig is not None:
             plt.close(self.dendo_fig)
             self.dendo_fig = None
-        for w in list(self.dendo_plot_frame.winfo_children()):
+        for w in list(self.dendo_bottom_frame.winfo_children()):
             w.destroy()
 
         if len(self.dendo_selection_indices) < 2:
             tk.Label(
-                self.dendo_plot_frame,
+                self.dendo_bottom_frame,
                 text="Add 2+ columns to Selection to see the dendrogram",
                 font=("Arial", 14), fg="#666666"
             ).pack(fill=tk.BOTH, expand=True)
@@ -1062,7 +1111,7 @@ class NecLabApp:
         ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
         self.dendo_fig.tight_layout()
 
-        canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_plot_frame)
+        canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_bottom_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
