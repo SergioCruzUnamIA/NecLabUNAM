@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'        # triggers on tags like v1.0, v1.2.3, etc.
+  workflow_dispatch:  # allow manual runs from GitHub Actions UI
 
 jobs:
   build-mac:
@@ -23,7 +24,7 @@ jobs:
           pip install pyinstaller
           pip install numpy pandas matplotlib pillow scikit-learn scipy
           pip install pyometiff tifffile imagecodecs opencv-python
-          pip install roifile
+          pip install roifile customtkinter
 
       - name: Build .app
         run: pyinstaller NecLab.spec
@@ -33,7 +34,14 @@ jobs:
           cd dist
           zip -r NecLab-mac.zip NecLab.app
 
-      - name: Upload to Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NecLab-mac
+          path: dist/NecLab-mac.zip
+
+      - name: Attach to Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/NecLab-mac.zip
@@ -55,12 +63,19 @@ jobs:
           pip install pyinstaller
           pip install numpy pandas matplotlib pillow scikit-learn scipy
           pip install pyometiff tifffile imagecodecs opencv-python
-          pip install roifile
+          pip install roifile customtkinter
 
       - name: Build .exe
         run: pyinstaller NecLab.spec
 
-      - name: Upload to Release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NecLab-windows
+          path: dist\NecLab.exe
+
+      - name: Attach to Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist\NecLab.exe
