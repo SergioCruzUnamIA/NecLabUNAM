@@ -86,8 +86,6 @@ class NecLabApp:
         self.dendo_fig = None
         self.dendo_signal_fig = None
         self.dendo_current_column = 0
-        self.dendo_peak_method_var = tk.StringVar(value='None')
-        self.dendo_peak_method_combo = None
         self.btn_dendo_add_sel = None
         self.btn_dendo_remove_sel = None
         self.btn_dendo_save_img = None
@@ -884,8 +882,6 @@ class NecLabApp:
             self.dendo_fig = None
             self.dendo_signal_fig = None
             self.dendo_current_column = 0
-            self.dendo_peak_method_var.set('None')
-            self.dendo_peak_method_combo = None
             self.btn_dendo_add_sel = None
             self.btn_dendo_remove_sel = None
             self.btn_dendo_save_img = None
@@ -897,7 +893,6 @@ class NecLabApp:
                 self.btn_dendo_remove_sel.config(state=NORMAL)
                 self.btn_dendo_save_img.config(state=NORMAL)
                 self.btn_dendo_save_csv.config(state=NORMAL)
-                self.dendo_peak_method_combo.config(state='readonly')
         self.notebook.select(self.dendo_tab)
 
     # ==================== DENDOGRAM TAB ====================
@@ -925,22 +920,6 @@ class NecLabApp:
         )
         self.dendo_column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         lb_sb.config(command=self.dendo_column_listbox.yview)
-
-        # ── Peak Finder ──
-        ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
-        tk.Label(sidebar, text="Peak Finder", font=("Arial", 10, "bold")).pack(pady=(5, 2))
-        self.dendo_peak_method_combo = ttk.Combobox(
-            sidebar, textvariable=self.dendo_peak_method_var,
-            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
-                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
-            state='readonly', width=20
-        )
-        self.dendo_peak_method_combo.pack(padx=5, pady=(0, 5))
-        self.dendo_peak_method_combo.bind(
-            '<<ComboboxSelected>>',
-            lambda e: self._dendo_set_peak_method()
-        )
-        self.dendo_peak_method_combo.config(state=DISABLED)
 
         # ── Selection ──
         ttk.Separator(sidebar, orient='horizontal').pack(fill='x', padx=5, pady=5)
@@ -1115,60 +1094,7 @@ class NecLabApp:
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    def _dendo_set_peak_method(self):
-        """Handle peak method combo change in Dendogram tab — sync params from shared cache."""
-        method = self.dendo_peak_method_var.get()
-        if method == 'None':
-            return
-        if method not in self.peak_method_params:
-            from peak_functions import show_parameter_dialog
-            spec = self._PEAK_PARAM_SPECS.get(method)
-            if spec:
-                title, param_list = spec
-                new_params = show_parameter_dialog(self.root, title, param_list)
-                if new_params is None:
-                    self.dendo_peak_method_var.set('None')
-                    return
-                self.peak_method_params[method] = new_params
 
-    def _dendo_save_peaks_csv(self):
-        """Save peak detection results for all selection columns to CSV."""
-        method = self.dendo_peak_method_var.get()
-        if method == 'None':
-            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
-            return
-        if not self.dendo_selection_indices:
-            messagebox.showwarning("No Selection", "Add columns to Selection first.")
-            return
-        params = self.peak_method_params.get(method)
-        if params is None:
-            messagebox.showwarning("No Parameters",
-                                   "Run the peak finder on a column first to set parameters.")
-            return
-
-        from tkinter.filedialog import asksaveasfilename
-        from peak_functions import compute_peaks
-        import pandas as pd
-
-        filename = asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
-            title="Save Peaks CSV"
-        )
-        if not filename:
-            return
-
-        n_time = self.loaded_data.shape[0]
-        data_dict = {'TIME': list(range(n_time))}
-        for col_idx in self.dendo_selection_indices:
-            col_name = self.dendo_column_listbox.get(col_idx)
-            peaks = compute_peaks(self.loaded_data, col_idx, method, params)
-            flags = np.zeros(n_time, dtype=int)
-            flags[peaks] = 1
-            data_dict[col_name] = flags
-
-        pd.DataFrame(data_dict).to_csv(filename, index=False)
-        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _dendo_save_image(self):
         """Save the current dendrogram figure to a file."""
