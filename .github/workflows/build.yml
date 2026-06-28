@@ -22,7 +22,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install pyinstaller
-          pip install numpy pandas matplotlib pillow scikit-learn scipy
+          pip install numpy pandas matplotlib pillow scikit-learn scipy scikit-image
           pip install pyometiff tifffile imagecodecs opencv-python
           pip install roifile customtkinter
 
@@ -61,7 +61,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install pyinstaller
-          pip install numpy pandas matplotlib pillow scikit-learn scipy
+          pip install numpy pandas matplotlib pillow scikit-learn scipy scikit-image
           pip install pyometiff tifffile imagecodecs opencv-python
           pip install roifile customtkinter
 
