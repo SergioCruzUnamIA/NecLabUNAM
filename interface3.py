@@ -447,6 +447,7 @@ class NecLabApp:
         )
         self.column_listbox.grid(row=0, column=0, sticky='nsew')
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
+        self.column_listbox.bind('<ButtonRelease-1>', self._on_column_click)
         scrollbar.config(command=self.column_listbox.yview)
 
         # ── Peak Finder ──
@@ -595,7 +596,19 @@ class NecLabApp:
 
     
     # ==================== DATA VISUALIZATION METHODS ====================
-    
+
+    def _on_column_click(self, event):
+        """Set current_column from the exact row under the mouse, then redraw."""
+        idx = self.column_listbox.nearest(event.y)
+        if idx < 0 or self.loaded_data is None:
+            return
+        self.current_column = idx
+        if self.smoothing_method_var.get() == 'Per-Column':
+            saved = self._col_smooth_windows.get(idx)
+            if saved is not None:
+                self.smooth_window_var.set(saved)
+        self._run_peak_on_column()
+
     def update_column_display(self, event=None):
         """Update the data graph when a column is selected. Does not refresh correlation."""
         if self.loaded_data is None:
@@ -608,11 +621,10 @@ class NecLabApp:
         if not selection:
             return
 
-        # In EXTENDED mode use the last-clicked (ACTIVE) item for the display column
-        try:
-            self.current_column = self.column_listbox.index(tk.ACTIVE)
-        except Exception:
-            self.current_column = selection[0]
+        # For keyboard navigation (arrow keys) use the last item in the selection.
+        # Mouse clicks are handled by _on_column_click which sets current_column first.
+        if self.current_column not in selection:
+            self.current_column = selection[-1]
 
         # Restore per-column window when switching columns
         if self.smoothing_method_var.get() == 'Per-Column':
