@@ -617,9 +617,6 @@ class NecLabApp:
 
     def update_column_display(self, event=None):
         """Update the data graph when a column is selected. Does not refresh correlation."""
-        if self._mouse_click:
-            # Mouse clicks are handled entirely by _on_column_click (ButtonRelease-1)
-            return
         if self.loaded_data is None:
             if hasattr(self.root, 'loaded_data'):
                 self.loaded_data = self.root.loaded_data
@@ -658,6 +655,11 @@ class NecLabApp:
             self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
             self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
             self._update_correlation_display()
+
+        # Mouse clicks are handled by _on_column_click (ButtonRelease-1) — skip the
+        # redraw here so only one _run_peak_on_column call fires per mouse click.
+        if self._mouse_click:
+            return
 
         # Delegate drawing to peak runner (handles None → raw data, or a peak method)
         self._run_peak_on_column()
