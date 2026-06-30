@@ -617,9 +617,6 @@ class NecLabApp:
 
     def update_column_display(self, event=None):
         """Update the data graph when a column is selected. Does not refresh correlation."""
-        if self._mouse_click:
-            # Mouse clicks are handled entirely by _on_column_click (ButtonRelease-1)
-            return
         if self.loaded_data is None:
             if hasattr(self.root, 'loaded_data'):
                 self.loaded_data = self.root.loaded_data
