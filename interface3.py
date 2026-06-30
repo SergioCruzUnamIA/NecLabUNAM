@@ -450,7 +450,6 @@ class NecLabApp:
             relief='flat', bd=0, highlightthickness=0, activestyle='none'
         )
         self.column_listbox.grid(row=0, column=0, sticky='nsew')
-        self.column_listbox.bind('<ButtonPress-1>', lambda e: setattr(self, '_mouse_click', True))
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
         self.column_listbox.bind('<ButtonRelease-1>', self._on_column_click)
         scrollbar.config(command=self.column_listbox.yview)
@@ -604,7 +603,6 @@ class NecLabApp:
 
     def _on_column_click(self, event):
         """Set current_column from the exact row under the mouse, then redraw."""
-        self._mouse_click = False
         idx = self.column_listbox.nearest(event.y)
         if idx < 0 or self.loaded_data is None:
             return
@@ -655,11 +653,6 @@ class NecLabApp:
             self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
             self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
             self._update_correlation_display()
-
-        # Mouse clicks are handled by _on_column_click (ButtonRelease-1) — skip the
-        # redraw here so only one _run_peak_on_column call fires per mouse click.
-        if self._mouse_click:
-            return
 
         # Delegate drawing to peak runner (handles None → raw data, or a peak method)
         self._run_peak_on_column()
