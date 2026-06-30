@@ -83,9 +83,8 @@ class NecLabApp:
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
-        self.smoothing_method_var = tk.StringVar(value='None')
+        self.smoothing_var = tk.BooleanVar(value=False)
         self.smooth_window_var = tk.IntVar(value=10)
-        self._col_smooth_windows = {}   # per-column window memory
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
         self.btn_save_data = None
         self.btn_save_corr = None
@@ -474,21 +473,19 @@ class NecLabApp:
         smooth_frame.columnconfigure(0, weight=1)
         row += 1
 
-        self.smoothing_combo = ttk.Combobox(
-            smooth_frame, textvariable=self.smoothing_method_var,
-            values=['None', 'Rolling Average', 'Per-Column', 'Savitzky-Golay',
-                    'Polynomial', 'Linear', 'ΔF/F'],
-            state='readonly', width=16
+        self.smoothing_check = tk.Checkbutton(
+            smooth_frame, text="Smoothing", variable=self.smoothing_var,
+            command=self._on_smoothing_toggle,
+            bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
+            activebackground=_C['panel'], selectcolor=_C['panel'],
+            state=DISABLED
         )
-        self.smoothing_combo.grid(row=0, column=0, sticky='ew', pady=(0, 2))
-        self.smoothing_combo.bind('<<ComboboxSelected>>', lambda e: self._on_smoothing_toggle())
-        self.smoothing_combo.config(state=DISABLED)
+        self.smoothing_check.grid(row=0, column=0, sticky='w', pady=(0, 2))
 
         win_frame = tk.Frame(smooth_frame, bg=_C['panel'])
         win_frame.grid(row=1, column=0, sticky='w')
-        self._smooth_param_label = tk.Label(win_frame, text="Window:", bg=_C['panel'],
-                                            fg=_C['sub'], font=('Arial', 8))
-        self._smooth_param_label.pack(side='left', padx=(0, 2))
+        tk.Label(win_frame, text="Window:", bg=_C['panel'],
+                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
         self.smooth_window_spinbox = ttk.Spinbox(
             win_frame, from_=1, to=500, textvariable=self.smooth_window_var,
             width=5, command=self._on_smoothing_toggle
@@ -607,10 +604,6 @@ class NecLabApp:
         if idx < 0 or self.loaded_data is None:
             return
         self.current_column = idx
-        if self.smoothing_method_var.get() == 'Per-Column':
-            saved = self._col_smooth_windows.get(idx)
-            if saved is not None:
-                self.smooth_window_var.set(saved)
         self._run_peak_on_column()
 
     def update_column_display(self, event=None):
@@ -629,12 +622,6 @@ class NecLabApp:
         # Mouse clicks are handled by _on_column_click which sets current_column first.
         if self.current_column not in selection:
             self.current_column = selection[-1]
-
-        # Restore per-column window when switching columns
-        if self.smoothing_method_var.get() == 'Per-Column':
-            saved = self._col_smooth_windows.get(self.current_column)
-            if saved is not None:
-                self.smooth_window_var.set(saved)
 
         # Initialize the split layout on first call (or if frames were destroyed)
         if self.plot_top_frame is None or not self.plot_top_frame.winfo_exists():
@@ -758,71 +745,23 @@ class NecLabApp:
         ]),
     }
 
-    # Methods that use the window/param spinbox and what to label it
-    _SMOOTH_PARAM_LABEL = {
-        'Rolling Average': 'Window:',
-        'Per-Column':      'Window:',
-        'Savitzky-Golay':  'Window:',
-        'Polynomial':      'Degree:',
-        'ΔF/F':            'Baseline:',
-    }
-
     def _on_smoothing_toggle(self):
-        """Update spinbox state/label, save per-column window if needed, re-draw."""
-        method = self.smoothing_method_var.get()
-        no_param = method in ('None', 'Linear')
+        """Enable/disable spinbox and redraw."""
+        enabled = self.smoothing_var.get()
         if self.smooth_window_spinbox:
-            self.smooth_window_spinbox.config(state=DISABLED if no_param else 'normal')
-        if hasattr(self, '_smooth_param_label'):
-            self._smooth_param_label.config(
-                text=self._SMOOTH_PARAM_LABEL.get(method, 'Window:')
-            )
-        if method == 'Per-Column':
-            self._col_smooth_windows[self.current_column] = self.smooth_window_var.get()
+            self.smooth_window_spinbox.config(state='normal' if enabled else DISABLED)
         self._run_peak_on_column()
 
     def _smooth_signal(self, signal, col_idx):
-        """Detrend signal using the selected method."""
-        import numpy as np
-        method = self.smoothing_method_var.get()
-        if method == 'None':
+        """Apply rolling-average smoothing when the checkbox is on."""
+        if not self.smoothing_var.get():
             return signal
-        window = self.smooth_window_var.get()
-
-        if method in ('Rolling Average', 'Per-Column'):
-            w = self._col_smooth_windows.get(col_idx, window) if method == 'Per-Column' else window
-            from peak_functions import _detrend_signal
-            return _detrend_signal(signal, w)
-
-        if method == 'Savitzky-Golay':
-            from scipy.signal import savgol_filter
-            w = window if window % 2 == 1 else window + 1
-            w = max(w, 5)
-            return savgol_filter(signal, window_length=w, polyorder=3)
-
-        if method == 'Linear':
-            from scipy.signal import detrend
-            return detrend(signal, type='linear')
-
-        if method == 'Polynomial':
-            degree = max(1, min(window, 10))
-            x = np.arange(len(signal))
-            coeffs = np.polyfit(x, signal, degree)
-            trend = np.polyval(coeffs, x)
-            return signal - trend
-
-        if method == 'ΔF/F':
-            baseline_end = max(1, window)
-            f0 = np.mean(signal[:baseline_end])
-            if f0 == 0:
-                return signal
-            return (signal - f0) / f0
-
-        return signal
+        from peak_functions import _detrend_signal
+        return _detrend_signal(signal, self.smooth_window_var.get())
 
     def _get_data_for_peak(self, col_idx):
         """Return a data array with col_idx smoothed according to the current method."""
-        if self.smoothing_method_var.get() == 'None':
+        if not self.smoothing_var.get():
             return self.loaded_data
         data = self.loaded_data.copy()
         data[:, col_idx] = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
@@ -993,7 +932,7 @@ class NecLabApp:
             self.btn_save_corr.configure(state='normal')
             self.btn_save_peaks.configure(state='normal')
             self.peak_method_combo.config(state='readonly')
-            self.smoothing_combo.config(state='readonly')
+            self.smoothing_check.configure(state='normal')
             self.menu_visual.entryconfig(
                 "Dendograma",
                 command=self._run_dendogram_on_selection,
