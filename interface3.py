@@ -659,6 +659,11 @@ class NecLabApp:
             self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
             self._update_correlation_display()
 
+        # Mouse clicks are handled by _on_column_click (ButtonRelease-1) — skip the
+        # redraw here so only one _run_peak_on_column call fires per mouse click.
+        if self._mouse_click:
+            return
+
         # Delegate drawing to peak runner (handles None → raw data, or a peak method)
         self._run_peak_on_column()
 
