@@ -92,6 +92,8 @@ class NecLabApp:
         self.peak_method_combo = None
         self.smooth_window_spinbox = None
         self.peak_method_params = {}  # saved params per method name
+        self.plot_mid_frame = None
+        self._mid_fig = None
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -636,13 +638,18 @@ class NecLabApp:
         if self.plot_top_frame is None or not self.plot_top_frame.winfo_exists():
             for widget in list(self.main_plot_frame.winfo_children()):
                 widget.destroy()
-            self.main_plot_frame.rowconfigure(0, weight=3)
+            self.main_plot_frame.rowconfigure(0, weight=2)
             self.main_plot_frame.rowconfigure(1, weight=2)
+            self.main_plot_frame.rowconfigure(2, weight=2)
             self.main_plot_frame.columnconfigure(0, weight=1)
             self.plot_top_frame = tk.Frame(self.main_plot_frame)
             self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
+            self.plot_mid_frame = tk.Frame(self.main_plot_frame,
+                                           highlightbackground=_C['border'],
+                                           highlightthickness=1)
+            self.plot_mid_frame.grid(row=1, column=0, sticky='nsew')
             self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
-            self.plot_bottom_frame.grid(row=1, column=0, sticky='nsew')
+            self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
             self._update_correlation_display()
 
         # Delegate drawing to peak runner (handles None → raw data, or a peak method)
@@ -837,6 +844,14 @@ class NecLabApp:
         for w in list(self.plot_top_frame.winfo_children()):
             w.destroy()
 
+        # Clear mid frame figure on every redraw
+        if self._mid_fig is not None:
+            plt.close(self._mid_fig)
+            self._mid_fig = None
+        if self.plot_mid_frame and self.plot_mid_frame.winfo_exists():
+            for w in list(self.plot_mid_frame.winfo_children()):
+                w.destroy()
+
         if method == 'None':
             self._draw_raw_data(col_idx)
             return
@@ -878,6 +893,13 @@ class NecLabApp:
                           params=saved_params)
             if result is not None:
                 self.canvas, self._data_fig = result
+                # Override title with column name
+                col_label = self.column_listbox.get(col_idx)
+                if self._data_fig and self._data_fig.axes:
+                    self._data_fig.axes[0].set_title(col_label)
+                    self.canvas.draw()
+                # Show original signal with found peaks in mid frame
+                self._draw_original_with_peaks(col_idx, method, saved_params)
 
     def _draw_raw_data(self, col_idx):
         """Plot data for col_idx into plot_top_frame, applying smoothing if enabled."""
@@ -892,6 +914,32 @@ class NecLabApp:
         self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _draw_original_with_peaks(self, col_idx, method, params):
+        """Plot the original (unsmoothed) signal with peak markers in plot_mid_frame."""
+        if self.plot_mid_frame is None or not self.plot_mid_frame.winfo_exists():
+            return
+        from peak_functions import compute_peaks
+        data_for_peak = self._get_data_for_peak(col_idx)
+        peaks = compute_peaks(data_for_peak, col_idx, method, params)
+
+        col_label = self.column_listbox.get(col_idx)
+        original = self.loaded_data[:, col_idx]
+        t = np.arange(len(original))
+
+        self._mid_fig, ax = plt.subplots()
+        ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
+        if peaks is not None and len(peaks) > 0:
+            ax.scatter(peaks, original[peaks], color='crimson', s=25, zorder=5, label='Peaks')
+        ax.set_title(f'{col_label} — original')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        ax.legend(fontsize=8, loc='upper right')
+        self._mid_fig.tight_layout()
+
+        c = FigureCanvasTkAgg(self._mid_fig, master=self.plot_mid_frame)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _save_data_image(self):
         """Save the current data / peak-finder plot to a file."""
