@@ -107,6 +107,7 @@ class NecLabApp:
         self.dendo_fig = None
         self.dendo_signal_fig = None
         self.dendo_current_column = 0
+        self._dendo_mouse_click = False
         self.btn_dendo_add_sel = None
         self.btn_dendo_remove_sel = None
         self.btn_dendo_save_img = None
@@ -1208,7 +1209,9 @@ class NecLabApp:
         ).pack(fill=tk.BOTH, expand=True)
 
         # Bind column click to signal preview
+        self.dendo_column_listbox.bind('<ButtonPress-1>', lambda e: setattr(self, '_dendo_mouse_click', True))
         self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_show_signal)
+        self.dendo_column_listbox.bind('<ButtonRelease-1>', self._dendo_on_column_click)
 
     def _dendo_populate_columns(self):
         """Fill the Dendogram tab column listbox with the same names as the main tab."""
@@ -1245,18 +1248,32 @@ class NecLabApp:
         self.dendo_selection_indices.pop(list_idx)
         self._dendo_update_plot()
 
+    def _dendo_on_column_click(self, event):
+        """Set dendo_current_column from the exact row under the mouse, then redraw."""
+        self._dendo_mouse_click = False
+        idx = self.dendo_column_listbox.nearest(event.y)
+        if idx < 0 or self.loaded_data is None:
+            return
+        self.dendo_current_column = idx
+        self._dendo_draw_signal(idx)
+
     def _dendo_show_signal(self, event=None):
-        """Draw the clicked column's signal into the top frame."""
+        """Draw the clicked column's signal into the top frame (keyboard nav only)."""
+        if self._dendo_mouse_click:
+            return
         if self.loaded_data is None or self.dendo_top_frame is None:
             return
         sel = self.dendo_column_listbox.curselection()
         if not sel:
             return
-        try:
-            col_idx = self.dendo_column_listbox.index(tk.ACTIVE)
-        except Exception:
-            col_idx = sel[0]
+        col_idx = sel[-1]
         self.dendo_current_column = col_idx
+        self._dendo_draw_signal(col_idx)
+
+    def _dendo_draw_signal(self, col_idx):
+        """Render the signal for col_idx into dendo_top_frame."""
+        if self.loaded_data is None or self.dendo_top_frame is None:
+            return
 
         if self.dendo_signal_fig is not None:
             plt.close(self.dendo_signal_fig)
