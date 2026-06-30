@@ -434,6 +434,7 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
     # Mutable state
     selection_indices = []
     ts_figs = {'signal': None, 'multi': None}
+    mouse_click = {'active': False}
 
     def get_default_name(extension):
         try:
@@ -521,14 +522,7 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
     ).pack(anchor='w', padx=5, pady=(0, 5))
 
     # ── Plot helpers ──
-    def show_signal(event=None):
-        sel = col_listbox.curselection()
-        if not sel:
-            return
-        try:
-            idx = col_listbox.index(tk.ACTIVE)
-        except Exception:
-            idx = sel[0]
+    def draw_signal(idx):
         if ts_figs['signal'] is not None:
             plt.close(ts_figs['signal'])
             ts_figs['signal'] = None
@@ -545,6 +539,23 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         c = FigureCanvasTkAgg(fig, master=top_plot)
         c.draw()
         c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def on_column_click(event):
+        """Set the displayed signal from the exact row under the mouse."""
+        mouse_click['active'] = False
+        idx = col_listbox.nearest(event.y)
+        if idx < 0:
+            return
+        draw_signal(idx)
+
+    def show_signal(event=None):
+        """Keyboard navigation only; mouse clicks are handled by on_column_click."""
+        if mouse_click['active']:
+            return
+        sel = col_listbox.curselection()
+        if not sel:
+            return
+        draw_signal(sel[-1])
 
     def update_multi_series():
         if ts_figs['multi'] is not None:
@@ -599,7 +610,9 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         selection_indices.pop(list_idx)
         update_multi_series()
 
+    col_listbox.bind('<ButtonPress-1>', lambda e: mouse_click.__setitem__('active', True))
     col_listbox.bind('<<ListboxSelect>>', show_signal)
+    col_listbox.bind('<ButtonRelease-1>', on_column_click)
 
     # ── Initial placeholders ──
     tk.Label(top_plot, text="Click a column to view its signal",

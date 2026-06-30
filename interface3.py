@@ -449,6 +449,7 @@ class NecLabApp:
             relief='flat', bd=0, highlightthickness=0, activestyle='none'
         )
         self.column_listbox.grid(row=0, column=0, sticky='nsew')
+        self.column_listbox.bind('<ButtonPress-1>', lambda e: setattr(self, '_mouse_click', True))
         self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
         self.column_listbox.bind('<ButtonRelease-1>', self._on_column_click)
         scrollbar.config(command=self.column_listbox.yview)
@@ -600,6 +601,7 @@ class NecLabApp:
 
     def _on_column_click(self, event):
         """Set current_column from the exact row under the mouse, then redraw."""
+        self._mouse_click = False
         idx = self.column_listbox.nearest(event.y)
         if idx < 0 or self.loaded_data is None:
             return
@@ -608,6 +610,8 @@ class NecLabApp:
 
     def update_column_display(self, event=None):
         """Update the data graph when a column is selected. Does not refresh correlation."""
+        if self._mouse_click:
+            return
         if self.loaded_data is None:
             if hasattr(self.root, 'loaded_data'):
                 self.loaded_data = self.root.loaded_data
@@ -623,26 +627,29 @@ class NecLabApp:
         if self.current_column not in selection:
             self.current_column = selection[-1]
 
-        # Initialize the split layout on first call (or if frames were destroyed)
-        if self.plot_top_frame is None or not self.plot_top_frame.winfo_exists():
-            for widget in list(self.main_plot_frame.winfo_children()):
-                widget.destroy()
-            self.main_plot_frame.rowconfigure(0, weight=2)
-            self.main_plot_frame.rowconfigure(1, weight=2)
-            self.main_plot_frame.rowconfigure(2, weight=2)
-            self.main_plot_frame.columnconfigure(0, weight=1)
-            self.plot_top_frame = tk.Frame(self.main_plot_frame)
-            self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
-            self.plot_mid_frame = tk.Frame(self.main_plot_frame,
-                                           highlightbackground=_C['border'],
-                                           highlightthickness=1)
-            self.plot_mid_frame.grid(row=1, column=0, sticky='nsew')
-            self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
-            self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
-            self._update_correlation_display()
-
-        # Delegate drawing to peak runner (handles None → raw data, or a peak method)
+        # Delegate drawing to peak runner (handles None → raw data, or a peak method,
+        # and ensures the split layout frames exist before drawing).
         self._run_peak_on_column()
+
+    def _ensure_plot_frames(self):
+        """Create the split top/mid/bottom plot layout on first use (or if destroyed)."""
+        if self.plot_top_frame is not None and self.plot_top_frame.winfo_exists():
+            return
+        for widget in list(self.main_plot_frame.winfo_children()):
+            widget.destroy()
+        self.main_plot_frame.rowconfigure(0, weight=2)
+        self.main_plot_frame.rowconfigure(1, weight=2)
+        self.main_plot_frame.rowconfigure(2, weight=2)
+        self.main_plot_frame.columnconfigure(0, weight=1)
+        self.plot_top_frame = tk.Frame(self.main_plot_frame)
+        self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
+        self.plot_mid_frame = tk.Frame(self.main_plot_frame,
+                                       highlightbackground=_C['border'],
+                                       highlightthickness=1)
+        self.plot_mid_frame.grid(row=1, column=0, sticky='nsew')
+        self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
+        self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
+        self._update_correlation_display()
 
     def _update_correlation_display(self):
         """Refresh the Pearson correlation heatmap in the bottom frame."""
@@ -771,10 +778,9 @@ class NecLabApp:
         """Draw raw data or run the selected peak finder on the current column.
         show_dialog=True forces the parameter dialog (used when the method changes).
         show_dialog=False reuses cached params (used when the column changes)."""
-        if self.loaded_data is None or self.plot_top_frame is None:
+        if self.loaded_data is None:
             return
-        if not self.plot_top_frame.winfo_exists():
-            return
+        self._ensure_plot_frames()
 
         method = self.peak_method_var.get()
         col_idx = self.current_column
