@@ -14,3 +14,5 @@ dependencies:
   - numpy
   - scikit-image
   - scipy
+  - openpyxl
+  - xlrd
