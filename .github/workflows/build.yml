@@ -24,7 +24,7 @@ jobs:
           pip install pyinstaller
           pip install numpy pandas matplotlib pillow scikit-learn scipy scikit-image
           pip install pyometiff tifffile imagecodecs opencv-python
-          pip install roifile customtkinter
+          pip install roifile customtkinter openpyxl xlrd
 
       - name: Build .app
         run: pyinstaller NecLab.spec
@@ -63,7 +63,7 @@ jobs:
           pip install pyinstaller
           pip install numpy pandas matplotlib pillow scikit-learn scipy scikit-image
           pip install pyometiff tifffile imagecodecs opencv-python
-          pip install roifile customtkinter
+          pip install roifile customtkinter openpyxl xlrd
 
       - name: Build .exe
         run: pyinstaller NecLab.spec
