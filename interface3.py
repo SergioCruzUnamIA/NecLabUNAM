@@ -112,6 +112,7 @@ class NecLabApp:
         self._multi_xls_heatmap_resize_job = None
         self.btn_save_multi_xls_plot = None
         self.btn_save_multi_xls_heatmap = None
+        self.btn_save_multi_xls_classifications = None
         self.multi_xls_class_row = None
         self.multi_xls_plot_placeholder = None
         self.multi_xls_heatmap_placeholder = None
@@ -1509,7 +1510,15 @@ class NecLabApp:
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             command=self._open_multi_xls_class_editor
-        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 10))
+        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
+
+        self.btn_save_multi_xls_classifications = ctk.CTkButton(
+            sidebar, text="Save Classifications", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_multi_xls_classifications
+        )
+        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1579,6 +1588,7 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.btn_save_multi_xls_plot.configure(state='normal')
             self.btn_save_multi_xls_heatmap.configure(state='normal')
+            self.btn_save_multi_xls_classifications.configure(state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -2038,6 +2048,42 @@ class NecLabApp:
         )
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_multi_xls_classifications(self):
+        """Guarda en un archivo .xlsx/.csv la clasificación elegida para
+        cada combinación de columna de datos y hoja: una tabla con una fila
+        por columna ('Column N') y una columna por hoja cargada, usando el
+        nombre de la hoja como valor por defecto si esa combinación nunca
+        se clasificó explícitamente."""
+        if not self.multi_xls_datasets or not self.multi_xls_common_columns:
+            return
+
+        import pandas as pd
+        from tkinter.filedialog import asksaveasfilename
+
+        sheet_labels = [ds['label'] for ds in self.multi_xls_datasets]
+        rows = []
+        for i in range(len(self.multi_xls_common_columns)):
+            saved = self.multi_xls_classifications.get(i, {})
+            row = {'Column': f"Column {i + 1}"}
+            for label in sheet_labels:
+                row[label] = saved.get(label, label)
+            rows.append(row)
+        df = pd.DataFrame(rows).set_index('Column')
+
+        filename = asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Classifications"
+        )
+        if not filename:
+            return
+
+        if filename.lower().endswith('.csv'):
+            df.to_csv(filename)
+        else:
+            df.to_excel(filename)
+        messagebox.showinfo("Guardado", f"Clasificaciones guardadas en:\n{filename}")
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
