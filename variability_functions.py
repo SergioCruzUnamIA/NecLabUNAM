@@ -1290,7 +1290,9 @@ class VariabilityAnalysisWindow:
             filename = asksaveasfilename(
                 initialfile=f'{self.method_name.replace(" ", "_")}_3D.png',
                 defaultextension=".png",
-                filetypes=[("PNG files", "*.png"), ("All Files", "*.*")]
+                filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                           ("SVG files", "*.svg"), ("EPS files", "*.eps"),
+                           ("All Files", "*.*")]
             )
             if filename:
                 fig.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1305,7 +1307,9 @@ class VariabilityAnalysisWindow:
             filename = asksaveasfilename(
                 initialfile=f'{self.method_name.replace(" ", "_")}_analysis.png',
                 defaultextension=".png",
-                filetypes=[("PNG files", "*.png"), ("All Files", "*.*")]
+                filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                           ("SVG files", "*.svg"), ("EPS files", "*.eps"),
+                           ("All Files", "*.*")]
             )
             if filename:
                 self.current_fig.savefig(filename, dpi=300, bbox_inches='tight')
