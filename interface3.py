@@ -103,15 +103,13 @@ class NecLabApp:
         self.multi_xls_column_listbox = None
         self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
         self.multi_xls_plot_frame = None
-        self.multi_xls_plot_canvas = None
-        self.multi_xls_plot_inner = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
         self.multi_xls_current_index = None
         self.multi_xls_heatmap_frame = None
-        self.multi_xls_heatmap_canvas = None
-        self.multi_xls_heatmap_inner = None
         self.multi_xls_heatmap_fig = None
+        self._multi_xls_plot_resize_job = None
+        self._multi_xls_heatmap_resize_job = None
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -1469,8 +1467,10 @@ class NecLabApp:
                        activebackground=_C['panel'], font=('Arial', 9)).grid(
             row=3, column=0, sticky='w', padx=10, pady=(0, 10))
 
-        # Right side - stacked plot areas (line plot on top, heatmap below),
-        # each with its own horizontal scroll.
+        # Right side - stacked plot areas (line plot on top, heatmap below).
+        # Both are redrawn to exactly fill their frame on every resize, so
+        # the whole graph and every sheet image are always visible without
+        # needing to scroll.
         right_container = tk.Frame(self.multi_xls_tab, bg=_C['bg'])
         right_container.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
         right_container.rowconfigure(0, weight=3)
@@ -1481,23 +1481,9 @@ class NecLabApp:
                                               highlightbackground=_C['border'],
                                               highlightthickness=1)
         self.multi_xls_plot_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 4))
-        self.multi_xls_plot_frame.rowconfigure(0, weight=1)
-        self.multi_xls_plot_frame.columnconfigure(0, weight=1)
+        self.multi_xls_plot_frame.bind('<Configure>', self._on_multi_xls_plot_frame_resize)
 
-        self.multi_xls_plot_canvas = tk.Canvas(self.multi_xls_plot_frame, bg=_C['panel'],
-                                                highlightthickness=0)
-        self.multi_xls_plot_canvas.grid(row=0, column=0, sticky='nsew')
-
-        h_scrollbar = tk.Scrollbar(self.multi_xls_plot_frame, orient='horizontal',
-                                   command=self.multi_xls_plot_canvas.xview)
-        h_scrollbar.grid(row=1, column=0, sticky='ew')
-        self.multi_xls_plot_canvas.configure(xscrollcommand=h_scrollbar.set)
-
-        self.multi_xls_plot_inner = tk.Frame(self.multi_xls_plot_canvas, bg=_C['panel'])
-        self.multi_xls_plot_canvas.create_window((0, 0), window=self.multi_xls_plot_inner,
-                                                  anchor='nw')
-
-        tk.Label(self.multi_xls_plot_inner, text="Selecciona una columna para graficar",
+        tk.Label(self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
                  font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
             fill=tk.BOTH, expand=True, padx=20, pady=20)
 
@@ -1506,23 +1492,9 @@ class NecLabApp:
                                                  highlightbackground=_C['border'],
                                                  highlightthickness=1)
         self.multi_xls_heatmap_frame.grid(row=1, column=0, sticky='nsew', pady=(4, 0))
-        self.multi_xls_heatmap_frame.rowconfigure(0, weight=1)
-        self.multi_xls_heatmap_frame.columnconfigure(0, weight=1)
+        self.multi_xls_heatmap_frame.bind('<Configure>', self._on_multi_xls_heatmap_frame_resize)
 
-        self.multi_xls_heatmap_canvas = tk.Canvas(self.multi_xls_heatmap_frame, bg=_C['panel'],
-                                                   highlightthickness=0)
-        self.multi_xls_heatmap_canvas.grid(row=0, column=0, sticky='nsew')
-
-        h_scrollbar2 = tk.Scrollbar(self.multi_xls_heatmap_frame, orient='horizontal',
-                                    command=self.multi_xls_heatmap_canvas.xview)
-        h_scrollbar2.grid(row=1, column=0, sticky='ew')
-        self.multi_xls_heatmap_canvas.configure(xscrollcommand=h_scrollbar2.set)
-
-        self.multi_xls_heatmap_inner = tk.Frame(self.multi_xls_heatmap_canvas, bg=_C['panel'])
-        self.multi_xls_heatmap_canvas.create_window((0, 0), window=self.multi_xls_heatmap_inner,
-                                                     anchor='nw')
-
-        tk.Label(self.multi_xls_heatmap_inner, text="Las imágenes de las hojas aparecerán aquí",
+        tk.Label(self.multi_xls_heatmap_frame, text="Las imágenes de las hojas aparecerán aquí",
                  font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
             fill=tk.BOTH, expand=True, padx=20, pady=20)
 
@@ -1564,15 +1536,47 @@ class NecLabApp:
             return
         self._draw_multi_xls_plot(sel[0])
 
+    def _fit_figure_size(self, frame, min_w=4.0, min_h=2.5, dpi=100):
+        """Tamaño (ancho, alto) en pulgadas para que una figura llene
+        exactamente el área visible de 'frame', sin necesidad de scroll."""
+        frame.update_idletasks()
+        w_px = frame.winfo_width()
+        h_px = frame.winfo_height()
+        if w_px <= 1:
+            w_px = int(self.width * 0.55)
+        if h_px <= 1:
+            h_px = int(self.height * 0.3)
+        return max(w_px / dpi, min_w), max(h_px / dpi, min_h)
+
+    def _on_multi_xls_plot_frame_resize(self, event=None):
+        """Redibuja la gráfica de líneas (con un pequeño retraso, para no
+        redibujar en cada pixel mientras se arrastra la ventana) para que
+        siga llenando exactamente el panel tras cambiar de tamaño."""
+        if self._multi_xls_plot_resize_job is not None:
+            self.root.after_cancel(self._multi_xls_plot_resize_job)
+        self._multi_xls_plot_resize_job = self.root.after(200, self._redraw_multi_xls_plot_for_resize)
+
+    def _redraw_multi_xls_plot_for_resize(self):
+        self._multi_xls_plot_resize_job = None
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+    def _on_multi_xls_heatmap_frame_resize(self, event=None):
+        """Redibuja el panel de imágenes (con un pequeño retraso) para que
+        siga llenando exactamente el panel tras cambiar de tamaño."""
+        if self._multi_xls_heatmap_resize_job is not None:
+            self.root.after_cancel(self._multi_xls_heatmap_resize_job)
+        self._multi_xls_heatmap_resize_job = self.root.after(200, self._draw_multi_xls_heatmap)
+
     def _draw_multi_xls_plot(self, index):
         """Grafica la columna en la posición 'index' de cada hoja cargada,
         una junto a la otra en la misma figura, separadas por líneas
         verticales punteadas. El título de la gráfica usa la misma etiqueta
         que está seleccionada en la lista de datos, y las etiquetas de cada
         hoja se muestran u ocultan según el checkbox 'Mostrar Nombres de
-        Datos'. La figura se ensancha según el número de hojas y se ve con
-        scroll horizontal para no aplastar los datos."""
-        if not self.multi_xls_datasets or self.multi_xls_plot_inner is None:
+        Datos'. La figura se ajusta exactamente al tamaño del panel para que
+        se vea completa, sin necesidad de hacer scroll."""
+        if not self.multi_xls_datasets or self.multi_xls_plot_frame is None:
             return
         if index >= len(self.multi_xls_common_columns):
             return
@@ -1586,14 +1590,14 @@ class NecLabApp:
         if self.multi_xls_fig is not None:
             plt.close(self.multi_xls_fig)
             self.multi_xls_fig = None
-        for w in list(self.multi_xls_plot_inner.winfo_children()):
+        for w in list(self.multi_xls_plot_frame.winfo_children()):
             w.destroy()
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
 
-        fig_width = max(10, len(self.multi_xls_datasets) * 3)
-        self.multi_xls_fig, ax = plt.subplots(figsize=(fig_width, 5.5))
+        fig_width, fig_height = self._fit_figure_size(self.multi_xls_plot_frame)
+        self.multi_xls_fig, ax = plt.subplots(figsize=(fig_width, fig_height))
         offset = 0
         tick_positions = []
         tick_labels = []
@@ -1622,14 +1626,9 @@ class NecLabApp:
         ax.set_ylabel('Value')
         self.multi_xls_fig.tight_layout()
 
-        canvas = FigureCanvasTkAgg(self.multi_xls_fig, master=self.multi_xls_plot_inner)
+        canvas = FigureCanvasTkAgg(self.multi_xls_fig, master=self.multi_xls_plot_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.multi_xls_plot_inner.update_idletasks()
-        self.multi_xls_plot_canvas.configure(
-            scrollregion=self.multi_xls_plot_canvas.bbox('all')
-        )
 
     def _draw_multi_xls_heatmap(self):
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
@@ -1637,14 +1636,15 @@ class NecLabApp:
         muestras); el color de cada pixel representa su valor, normalizado
         con la misma escala en todas las hojas para que sean comparables.
         Las imágenes de cada hoja se colocan una junto a otra, igual que la
-        gráfica de líneas de arriba."""
-        if self.multi_xls_heatmap_inner is None:
+        gráfica de líneas de arriba, y la figura se ajusta exactamente al
+        tamaño del panel para que todas las imágenes se vean completas."""
+        if self.multi_xls_heatmap_frame is None:
             return
 
         if self.multi_xls_heatmap_fig is not None:
             plt.close(self.multi_xls_heatmap_fig)
             self.multi_xls_heatmap_fig = None
-        for w in list(self.multi_xls_heatmap_inner.winfo_children()):
+        for w in list(self.multi_xls_heatmap_frame.winfo_children()):
             w.destroy()
 
         if not self.multi_xls_datasets:
@@ -1657,8 +1657,8 @@ class NecLabApp:
         vmin, vmax = float(finite_vals.min()), float(finite_vals.max())
 
         show_labels = self.multi_xls_show_labels_var.get()
-        fig_width = max(10, len(self.multi_xls_datasets) * 3)
-        self.multi_xls_heatmap_fig, ax = plt.subplots(figsize=(fig_width, 5.5))
+        fig_width, fig_height = self._fit_figure_size(self.multi_xls_heatmap_frame)
+        self.multi_xls_heatmap_fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
         offset = 0
         tick_positions = []
@@ -1686,14 +1686,9 @@ class NecLabApp:
             self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
         self.multi_xls_heatmap_fig.tight_layout()
 
-        canvas = FigureCanvasTkAgg(self.multi_xls_heatmap_fig, master=self.multi_xls_heatmap_inner)
+        canvas = FigureCanvasTkAgg(self.multi_xls_heatmap_fig, master=self.multi_xls_heatmap_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.multi_xls_heatmap_inner.update_idletasks()
-        self.multi_xls_heatmap_canvas.configure(
-            scrollregion=self.multi_xls_heatmap_canvas.bbox('all')
-        )
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
