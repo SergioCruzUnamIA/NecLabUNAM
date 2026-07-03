@@ -92,14 +92,13 @@ def _select_sheets_dialog(parent, file_sheet_map):
 
 
 def _load_sheet_dataframe(filepath, sheet_name):
-    """Lee una hoja de Excel y devuelve un DataFrame solo con las columnas
-    numéricas de datos (elimina una columna 'TIME' si existe)."""
-    df = pd.read_excel(filepath, sheet_name=sheet_name)
-    time_col = next((c for c in df.columns if str(c).strip().upper() == 'TIME'), None)
-    if time_col is not None:
-        df = df.drop(columns=[time_col])
+    """Lee una hoja de Excel sin fila de encabezado: las hojas no tienen
+    nombres de columna, así que cada columna es una serie de datos
+    identificada únicamente por su posición (0, 1, 2, ...). Como todas las
+    hojas tienen el mismo número de columnas, esa posición es lo que hace
+    corresponder una columna de una hoja con la misma columna en otra."""
+    df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
     df = df.apply(pd.to_numeric, errors='coerce')
-    df = df.dropna(axis=1, how='all')
     df.columns = [str(c) for c in df.columns]
     return df
 
@@ -172,8 +171,10 @@ def load_selected_sheets(selection, progress_callback=None):
 
 
 def common_column_names(datasets):
-    """Devuelve los nombres de columna comunes a todos los datasets (las
-    'celdas' de datos), preservando el orden de aparición del primer dataset."""
+    """Devuelve las columnas (identificadas por posición) comunes a todos los
+    datasets, preservando el orden de aparición del primer dataset. Como las
+    hojas no tienen encabezado, esto normalmente es solo 0..n-1 para el menor
+    número de columnas compartido por todas las hojas cargadas."""
     if not datasets:
         return []
     common = set(datasets[0]['column_names'])
