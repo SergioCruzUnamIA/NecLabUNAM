@@ -1460,7 +1460,7 @@ class NecLabApp:
 
         tk.Checkbutton(sidebar, text="Mostrar Nombres de Datos",
                        variable=self.multi_xls_show_labels_var,
-                       command=self._refresh_multi_xls_column_labels,
+                       command=self._on_multi_xls_show_labels_toggle,
                        bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
                        activebackground=_C['panel'], font=('Arial', 9)).grid(
             row=3, column=0, sticky='w', padx=10, pady=(0, 10))
@@ -1491,13 +1491,17 @@ class NecLabApp:
             fill=tk.BOTH, expand=True, padx=20, pady=20)
 
     def _populate_multi_xls_columns(self):
-        """Llena la lista lateral con los nombres de columna comunes a todas
-        las hojas cargadas (mostrados como 'Column N' salvo que se pida ver
-        los nombres reales) y grafica la primera por defecto."""
+        """Llena la lista lateral con nombres genéricos 'Column N' (uno por
+        cada columna común a todas las hojas cargadas) y grafica la primera
+        por defecto. Estos nombres no cambian con el checkbox 'Mostrar
+        Nombres de Datos', que solo afecta a las etiquetas de la gráfica."""
         if self.multi_xls_column_listbox is None:
             return
         self.multi_xls_common_columns = common_column_names(self.multi_xls_datasets)
-        self._refresh_multi_xls_column_labels()
+
+        self.multi_xls_column_listbox.delete(0, tk.END)
+        for i in range(len(self.multi_xls_common_columns)):
+            self.multi_xls_column_listbox.insert(tk.END, f"Column {i + 1}")
 
         if self.multi_xls_common_columns:
             self.multi_xls_column_listbox.selection_set(0)
@@ -1508,24 +1512,9 @@ class NecLabApp:
                 "Las hojas seleccionadas no comparten ninguna columna de datos con el mismo nombre."
             )
 
-    def _refresh_multi_xls_column_labels(self):
-        """Redibuja la lista lateral con nombres genéricos ('Column N') o con
-        los nombres reales de los datos, según el checkbox 'Mostrar Nombres'.
-        También redibuja la gráfica para que el título y las etiquetas de las
-        hojas reflejen el mismo estado del checkbox."""
-        if self.multi_xls_column_listbox is None:
-            return
-        show_labels = self.multi_xls_show_labels_var.get()
-        prev_selection = self.multi_xls_column_listbox.curselection()
-
-        self.multi_xls_column_listbox.delete(0, tk.END)
-        for i, name in enumerate(self.multi_xls_common_columns):
-            label = name if show_labels else f"Column {i + 1}"
-            self.multi_xls_column_listbox.insert(tk.END, label)
-
-        if prev_selection:
-            self.multi_xls_column_listbox.selection_set(prev_selection[0])
-
+    def _on_multi_xls_show_labels_toggle(self):
+        """Redibuja la gráfica para mostrar u ocultar las etiquetas de cada
+        hoja bajo el eje X, sin tocar los nombres de la lista de datos."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
