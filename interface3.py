@@ -108,6 +108,10 @@ class NecLabApp:
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
         self.multi_xls_current_index = None
+        self.multi_xls_heatmap_frame = None
+        self.multi_xls_heatmap_canvas = None
+        self.multi_xls_heatmap_inner = None
+        self.multi_xls_heatmap_fig = None
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -1465,11 +1469,18 @@ class NecLabApp:
                        activebackground=_C['panel'], font=('Arial', 9)).grid(
             row=3, column=0, sticky='w', padx=10, pady=(0, 10))
 
-        # Right side - combined plot area with horizontal scroll
-        self.multi_xls_plot_frame = tk.Frame(self.multi_xls_tab, bg=_C['panel'],
+        # Right side - stacked plot areas (line plot on top, heatmap below),
+        # each with its own horizontal scroll.
+        right_container = tk.Frame(self.multi_xls_tab, bg=_C['bg'])
+        right_container.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+        right_container.rowconfigure(0, weight=3)
+        right_container.rowconfigure(1, weight=2)
+        right_container.columnconfigure(0, weight=1)
+
+        self.multi_xls_plot_frame = tk.Frame(right_container, bg=_C['panel'],
                                               highlightbackground=_C['border'],
                                               highlightthickness=1)
-        self.multi_xls_plot_frame.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+        self.multi_xls_plot_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 4))
         self.multi_xls_plot_frame.rowconfigure(0, weight=1)
         self.multi_xls_plot_frame.columnconfigure(0, weight=1)
 
@@ -1487,6 +1498,31 @@ class NecLabApp:
                                                   anchor='nw')
 
         tk.Label(self.multi_xls_plot_inner, text="Selecciona una columna para graficar",
+                 font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
+            fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Bottom: heatmap images (one per sheet, columns=datos, rows=muestras)
+        self.multi_xls_heatmap_frame = tk.Frame(right_container, bg=_C['panel'],
+                                                 highlightbackground=_C['border'],
+                                                 highlightthickness=1)
+        self.multi_xls_heatmap_frame.grid(row=1, column=0, sticky='nsew', pady=(4, 0))
+        self.multi_xls_heatmap_frame.rowconfigure(0, weight=1)
+        self.multi_xls_heatmap_frame.columnconfigure(0, weight=1)
+
+        self.multi_xls_heatmap_canvas = tk.Canvas(self.multi_xls_heatmap_frame, bg=_C['panel'],
+                                                   highlightthickness=0)
+        self.multi_xls_heatmap_canvas.grid(row=0, column=0, sticky='nsew')
+
+        h_scrollbar2 = tk.Scrollbar(self.multi_xls_heatmap_frame, orient='horizontal',
+                                    command=self.multi_xls_heatmap_canvas.xview)
+        h_scrollbar2.grid(row=1, column=0, sticky='ew')
+        self.multi_xls_heatmap_canvas.configure(xscrollcommand=h_scrollbar2.set)
+
+        self.multi_xls_heatmap_inner = tk.Frame(self.multi_xls_heatmap_canvas, bg=_C['panel'])
+        self.multi_xls_heatmap_canvas.create_window((0, 0), window=self.multi_xls_heatmap_inner,
+                                                     anchor='nw')
+
+        tk.Label(self.multi_xls_heatmap_inner, text="Las imágenes de las hojas aparecerán aquí",
                  font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
             fill=tk.BOTH, expand=True, padx=20, pady=20)
 
@@ -1512,11 +1548,14 @@ class NecLabApp:
                 "Las hojas seleccionadas no comparten ninguna columna de datos con el mismo nombre."
             )
 
+        self._draw_multi_xls_heatmap()
+
     def _on_multi_xls_show_labels_toggle(self):
-        """Redibuja la gráfica para mostrar u ocultar las etiquetas de cada
-        hoja bajo el eje X, sin tocar los nombres de la lista de datos."""
+        """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
+        cada hoja bajo el eje X, sin tocar los nombres de la lista de datos."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
+        self._draw_multi_xls_heatmap()
 
     def _on_multi_xls_column_select(self, event=None):
         """Callback cuando el usuario elige una columna en la lista lateral."""
@@ -1590,6 +1629,70 @@ class NecLabApp:
         self.multi_xls_plot_inner.update_idletasks()
         self.multi_xls_plot_canvas.configure(
             scrollregion=self.multi_xls_plot_canvas.bbox('all')
+        )
+
+    def _draw_multi_xls_heatmap(self):
+        """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
+        columnas (las series de datos) y el eje Y son las filas (las
+        muestras); el color de cada pixel representa su valor, normalizado
+        con la misma escala en todas las hojas para que sean comparables.
+        Las imágenes de cada hoja se colocan una junto a otra, igual que la
+        gráfica de líneas de arriba."""
+        if self.multi_xls_heatmap_inner is None:
+            return
+
+        if self.multi_xls_heatmap_fig is not None:
+            plt.close(self.multi_xls_heatmap_fig)
+            self.multi_xls_heatmap_fig = None
+        for w in list(self.multi_xls_heatmap_inner.winfo_children()):
+            w.destroy()
+
+        if not self.multi_xls_datasets:
+            return
+
+        matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
+        finite_vals = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+        if finite_vals.size == 0:
+            return
+        vmin, vmax = float(finite_vals.min()), float(finite_vals.max())
+
+        show_labels = self.multi_xls_show_labels_var.get()
+        fig_width = max(10, len(self.multi_xls_datasets) * 3)
+        self.multi_xls_heatmap_fig, ax = plt.subplots(figsize=(fig_width, 5.5))
+
+        offset = 0
+        tick_positions = []
+        tick_labels = []
+        im = None
+        for ds, matrix in zip(self.multi_xls_datasets, matrices):
+            n_samples, n_cols = matrix.shape
+            im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=vmin, vmax=vmax,
+                           extent=(offset, offset + n_cols, n_samples, 0))
+            if offset > 0:
+                ax.axvline(offset, color='white', linewidth=1.5)
+            tick_positions.append(offset + n_cols / 2)
+            tick_labels.append(ds['label'])
+            offset += n_cols
+
+        ax.set_xlim(0, offset)
+        ax.set_xticks(tick_positions)
+        if show_labels:
+            ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
+        else:
+            ax.set_xticklabels([])
+        ax.set_ylabel('Sample')
+        ax.set_title('Todas las hojas (columnas = datos, filas = muestras)')
+        if im is not None:
+            self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
+        self.multi_xls_heatmap_fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(self.multi_xls_heatmap_fig, master=self.multi_xls_heatmap_inner)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self.multi_xls_heatmap_inner.update_idletasks()
+        self.multi_xls_heatmap_canvas.configure(
+            scrollregion=self.multi_xls_heatmap_canvas.bbox('all')
         )
 
     # ==================== IMAGE PROCESSING METHODS ====================
