@@ -38,6 +38,7 @@ from pyometiff import OMETIFFReader
 from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
+from multi_xls_helpers import load_multiple_xls_datasets, common_column_names
 
 # Intentar importar módulos de procesamiento de imagen si existen
 try:
@@ -94,6 +95,14 @@ class NecLabApp:
         self.peak_method_params = {}  # saved params per method name
         self.plot_mid_frame = None
         self._mid_fig = None
+
+        # Variables de estado - Tab Datos Multiples (múltiples archivos .xls)
+        self.multi_xls_tab = None
+        self.multi_xls_datasets = []
+        self.multi_xls_column_listbox = None
+        self.multi_xls_plot_frame = None
+        self.multi_xls_fig = None
+        self.multi_xls_current_column = None
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -154,6 +163,12 @@ class NecLabApp:
         self.menu_archivo.add_command(
             label='Cargar Matriz de Correlacion',
             command=self.load_correlation_matrix_wrapper,
+            state=NORMAL
+        )
+        self.menu_archivo.add_separator()
+        self.menu_archivo.add_command(
+            label='Abrir Multiples Archivos (.xls)',
+            command=self.open_multiple_xls_files,
             state=NORMAL
         )
         self.menu_archivo.add_separator()
@@ -1335,7 +1350,148 @@ class NecLabApp:
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
         load_correlation_matrix(self.data_tab, self.canvas)
-    
+
+    # ==================== DATOS MULTIPLES (XLS) TAB ====================
+
+    def open_multiple_xls_files(self):
+        """Abre múltiples archivos .xls/.xlsx, deja elegir qué hojas cargar,
+        y muestra sus columnas de datos en la pestaña 'Datos Multiples'."""
+        datasets = load_multiple_xls_datasets(self.root)
+        if not datasets:
+            return
+
+        self.multi_xls_datasets = datasets
+
+        if self.multi_xls_tab is None or not self.multi_xls_tab.winfo_exists():
+            self.multi_xls_tab = tk.Frame(self.notebook, bg=_C['bg'])
+            self.notebook.add(self.multi_xls_tab, text="  Datos Multiples  ")
+            self._create_multi_xls_layout()
+
+        self._populate_multi_xls_columns()
+        self.notebook.select(self.multi_xls_tab)
+
+    def _create_multi_xls_layout(self):
+        """Construye la pestaña 'Datos Multiples': lista de columnas (celdas)
+        a la izquierda y la gráfica combinada a la derecha."""
+        Grid.rowconfigure(self.multi_xls_tab, 0, weight=1)
+        Grid.columnconfigure(self.multi_xls_tab, 0, weight=0)
+        Grid.columnconfigure(self.multi_xls_tab, 1, weight=1)
+
+        sidebar = tk.Frame(self.multi_xls_tab, bg=_C['panel'], width=250,
+                           highlightbackground=_C['border'], highlightthickness=1)
+        sidebar.grid(row=0, column=0, sticky='nsew', padx=(8, 0), pady=8)
+        sidebar.grid_propagate(False)
+        sidebar.columnconfigure(0, weight=1)
+
+        tk.Label(sidebar, text="DATOS (CELDAS)", font=('Arial', 8, 'bold'),
+                 bg=_C['panel'], fg=_C['sub']).grid(row=0, column=0, sticky='w',
+                                                     padx=12, pady=(12, 2))
+        tk.Frame(sidebar, bg=_C['border'], height=1).grid(row=1, column=0, sticky='ew', padx=10)
+
+        lb_frame = tk.Frame(sidebar, bg=_C['card'],
+                            highlightbackground=_C['border'], highlightthickness=1)
+        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 10))
+        sidebar.rowconfigure(2, weight=1)
+        lb_frame.rowconfigure(0, weight=1)
+        lb_frame.columnconfigure(0, weight=1)
+
+        scrollbar = tk.Scrollbar(lb_frame, relief='flat', width=10)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
+        self.multi_xls_column_listbox = tk.Listbox(
+            lb_frame, yscrollcommand=scrollbar.set,
+            selectmode=tk.SINGLE, font=('Arial', 10),
+            bg=_C['card'], fg=_C['text'],
+            selectbackground=_C['acc'], selectforeground='white',
+            relief='flat', bd=0, highlightthickness=0, activestyle='none'
+        )
+        self.multi_xls_column_listbox.grid(row=0, column=0, sticky='nsew')
+        scrollbar.config(command=self.multi_xls_column_listbox.yview)
+        self.multi_xls_column_listbox.bind('<<ListboxSelect>>', self._on_multi_xls_column_select)
+
+        # Right side - combined plot area
+        self.multi_xls_plot_frame = tk.Frame(self.multi_xls_tab, bg=_C['panel'],
+                                              highlightbackground=_C['border'],
+                                              highlightthickness=1)
+        self.multi_xls_plot_frame.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+
+        tk.Label(self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
+                 font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
+            fill=tk.BOTH, expand=True)
+
+    def _populate_multi_xls_columns(self):
+        """Llena la lista lateral con los nombres de columna comunes a todas
+        las hojas cargadas y grafica la primera por defecto."""
+        if self.multi_xls_column_listbox is None:
+            return
+        self.multi_xls_column_listbox.delete(0, tk.END)
+        columns = common_column_names(self.multi_xls_datasets)
+        for name in columns:
+            self.multi_xls_column_listbox.insert(tk.END, name)
+
+        if columns:
+            self.multi_xls_column_listbox.selection_set(0)
+            self._draw_multi_xls_plot(columns[0])
+        else:
+            messagebox.showwarning(
+                "Sin columnas comunes",
+                "Las hojas seleccionadas no comparten ninguna columna de datos con el mismo nombre."
+            )
+
+    def _on_multi_xls_column_select(self, event=None):
+        """Callback cuando el usuario elige una columna en la lista lateral."""
+        sel = self.multi_xls_column_listbox.curselection()
+        if not sel:
+            return
+        col_name = self.multi_xls_column_listbox.get(sel[0])
+        self._draw_multi_xls_plot(col_name)
+
+    def _draw_multi_xls_plot(self, col_name):
+        """Grafica la columna col_name de cada hoja cargada, una junto a la
+        otra en la misma figura, separadas por líneas verticales punteadas."""
+        if not self.multi_xls_datasets or self.multi_xls_plot_frame is None:
+            return
+
+        import pandas as pd
+
+        if self.multi_xls_fig is not None:
+            plt.close(self.multi_xls_fig)
+            self.multi_xls_fig = None
+        for w in list(self.multi_xls_plot_frame.winfo_children()):
+            w.destroy()
+
+        self.multi_xls_current_column = col_name
+
+        self.multi_xls_fig, ax = plt.subplots()
+        offset = 0
+        tick_positions = []
+        tick_labels = []
+        for ds in self.multi_xls_datasets:
+            if col_name not in ds['df'].columns:
+                continue
+            values = ds['df'][col_name].to_numpy(dtype=float)
+            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+            n = len(values)
+            if n == 0:
+                continue
+            x = np.arange(offset, offset + n)
+            ax.plot(x, values, linewidth=0.8)
+            if offset > 0:
+                ax.axvline(offset, color=_C['sub'], linestyle='--', linewidth=1, alpha=0.6)
+            tick_positions.append(offset + n / 2)
+            tick_labels.append(ds['label'])
+            offset += n
+
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
+        ax.set_title(col_name)
+        ax.set_ylabel('Value')
+        self.multi_xls_fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(self.multi_xls_fig, master=self.multi_xls_plot_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
     # ==================== IMAGE PROCESSING METHODS ====================
     
     def _load_default_image(self):
@@ -1615,6 +1771,7 @@ class NecLabApp:
         "variability_functions.py",
         "image_loader.py",
         "image_processing.py",
+        "multi_xls_helpers.py",
     ]
 
     def _get_local_sha(self):

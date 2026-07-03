@@ -36,6 +36,8 @@ hidden += [
     'pandas._libs.tslibs.np_datetime',
     'pandas._libs.tslibs.nattype',
     'pandas._libs.tslibs.timestamps',
+    'openpyxl',
+    'xlrd',
 ]
 
 # ── Data files bundled into the executable ───────────────────────────────────

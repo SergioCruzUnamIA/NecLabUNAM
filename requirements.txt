@@ -31,6 +31,7 @@ nest-asyncio==1.6.0
 networkx==3.4.2
 numpy==2.2.0
 opencv-python==4.10.0.84
+openpyxl==3.1.5
 packaging==24.2
 pandas==2.2.3
 parso==0.8.4
@@ -63,3 +64,4 @@ tornado==6.4.2
 traitlets==5.14.3
 tzdata==2024.2
 wcwidth==0.2.13
+xlrd==2.0.2
