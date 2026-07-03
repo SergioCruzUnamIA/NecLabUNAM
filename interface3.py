@@ -110,6 +110,8 @@ class NecLabApp:
         self.multi_xls_heatmap_fig = None
         self._multi_xls_plot_resize_job = None
         self._multi_xls_heatmap_resize_job = None
+        self.btn_save_multi_xls_plot = None
+        self.btn_save_multi_xls_heatmap = None
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -1465,7 +1467,23 @@ class NecLabApp:
                        command=self._on_multi_xls_show_labels_toggle,
                        bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
                        activebackground=_C['panel'], font=('Arial', 9)).grid(
-            row=3, column=0, sticky='w', padx=10, pady=(0, 10))
+            row=3, column=0, sticky='w', padx=10, pady=(0, 6))
+
+        self.btn_save_multi_xls_plot = ctk.CTkButton(
+            sidebar, text="Save Plot Image", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_multi_xls_plot_image
+        )
+        self.btn_save_multi_xls_plot.grid(row=4, column=0, sticky='ew', padx=10, pady=(0, 2))
+
+        self.btn_save_multi_xls_heatmap = ctk.CTkButton(
+            sidebar, text="Save Heatmap Image", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_multi_xls_heatmap_image
+        )
+        self.btn_save_multi_xls_heatmap.grid(row=5, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1521,6 +1539,10 @@ class NecLabApp:
             )
 
         self._draw_multi_xls_heatmap()
+
+        if self.multi_xls_datasets:
+            self.btn_save_multi_xls_plot.configure(state='normal')
+            self.btn_save_multi_xls_heatmap.configure(state='normal')
 
     def _on_multi_xls_show_labels_toggle(self):
         """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
@@ -1696,6 +1718,34 @@ class NecLabApp:
         canvas = FigureCanvasTkAgg(self.multi_xls_heatmap_fig, master=self.multi_xls_heatmap_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _save_multi_xls_plot_image(self):
+        """Guarda la gráfica de líneas combinada de 'Datos Multiples' en un archivo."""
+        if self.multi_xls_fig is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+            title="Save Plot Image"
+        )
+        if filename:
+            self.multi_xls_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_multi_xls_heatmap_image(self):
+        """Guarda la imagen del heatmap de 'Datos Multiples' en un archivo."""
+        if self.multi_xls_heatmap_fig is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+            title="Save Heatmap Image"
+        )
+        if filename:
+            self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
