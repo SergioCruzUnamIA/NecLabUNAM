@@ -38,7 +38,7 @@ from pyometiff import OMETIFFReader
 from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
-from multi_xls_helpers import load_multiple_xls_datasets, common_column_names
+from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
 
 # Intentar importar módulos de procesamiento de imagen si existen
 try:
@@ -99,8 +99,12 @@ class NecLabApp:
         # Variables de estado - Tab Datos Multiples (múltiples archivos .xls)
         self.multi_xls_tab = None
         self.multi_xls_datasets = []
+        self.multi_xls_common_columns = []
         self.multi_xls_column_listbox = None
+        self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
         self.multi_xls_plot_frame = None
+        self.multi_xls_plot_canvas = None
+        self.multi_xls_plot_inner = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
 
@@ -1356,8 +1360,13 @@ class NecLabApp:
     def open_multiple_xls_files(self):
         """Abre múltiples archivos .xls/.xlsx, deja elegir qué hojas cargar,
         y muestra sus columnas de datos en la pestaña 'Datos Multiples'."""
-        datasets = load_multiple_xls_datasets(self.root)
+        selection = pick_files_and_sheets(self.root)
+        if not selection:
+            return
+
+        datasets = self._load_xls_with_progress(selection)
         if not datasets:
+            messagebox.showwarning("Sin datos", "No se pudo cargar ninguna hoja seleccionada.")
             return
 
         self.multi_xls_datasets = datasets
@@ -1370,9 +1379,48 @@ class NecLabApp:
         self._populate_multi_xls_columns()
         self.notebook.select(self.multi_xls_tab)
 
+    def _load_xls_with_progress(self, selection):
+        """Carga las hojas seleccionadas mostrando una barra de progreso
+        determinada por el número de hojas ya cargadas."""
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("Cargando Archivos")
+        progress_win.geometry("420x120")
+        progress_win.transient(self.root)
+        progress_win.grab_set()
+        progress_win.resizable(False, False)
+        progress_win.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        tk.Label(progress_win, text="Cargando hojas de Excel...",
+                 font=('Arial', 11, 'bold')).pack(pady=(15, 4), padx=15, anchor='w')
+
+        status_label = tk.Label(progress_win, text="Preparando...", font=('Arial', 9),
+                                 fg=_C['sub'], anchor='w')
+        status_label.pack(fill='x', padx=15, anchor='w')
+
+        progress_bar = ttk.Progressbar(progress_win, orient='horizontal',
+                                        length=390, mode='determinate',
+                                        maximum=max(len(selection), 1))
+        progress_bar.pack(pady=(8, 15), padx=15)
+
+        progress_win.update_idletasks()
+
+        def _on_progress(done, total, filepath, sheet):
+            progress_bar['value'] = done
+            status_label.config(
+                text=f"{os.path.basename(filepath)} — {sheet}  ({done}/{total})"
+            )
+            progress_win.update_idletasks()
+
+        try:
+            datasets = load_selected_sheets(selection, progress_callback=_on_progress)
+        finally:
+            progress_win.destroy()
+
+        return datasets
+
     def _create_multi_xls_layout(self):
         """Construye la pestaña 'Datos Multiples': lista de columnas (celdas)
-        a la izquierda y la gráfica combinada a la derecha."""
+        a la izquierda y la gráfica combinada, con scroll horizontal, a la derecha."""
         Grid.rowconfigure(self.multi_xls_tab, 0, weight=1)
         Grid.columnconfigure(self.multi_xls_tab, 0, weight=0)
         Grid.columnconfigure(self.multi_xls_tab, 1, weight=1)
@@ -1390,7 +1438,7 @@ class NecLabApp:
 
         lb_frame = tk.Frame(sidebar, bg=_C['card'],
                             highlightbackground=_C['border'], highlightthickness=1)
-        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 10))
+        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 4))
         sidebar.rowconfigure(2, weight=1)
         lb_frame.rowconfigure(0, weight=1)
         lb_frame.columnconfigure(0, weight=1)
@@ -1409,47 +1457,86 @@ class NecLabApp:
         scrollbar.config(command=self.multi_xls_column_listbox.yview)
         self.multi_xls_column_listbox.bind('<<ListboxSelect>>', self._on_multi_xls_column_select)
 
-        # Right side - combined plot area
+        tk.Checkbutton(sidebar, text="Mostrar Nombres de Datos",
+                       variable=self.multi_xls_show_labels_var,
+                       command=self._refresh_multi_xls_column_labels,
+                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
+                       activebackground=_C['panel'], font=('Arial', 9)).grid(
+            row=3, column=0, sticky='w', padx=10, pady=(0, 10))
+
+        # Right side - combined plot area with horizontal scroll
         self.multi_xls_plot_frame = tk.Frame(self.multi_xls_tab, bg=_C['panel'],
                                               highlightbackground=_C['border'],
                                               highlightthickness=1)
         self.multi_xls_plot_frame.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+        self.multi_xls_plot_frame.rowconfigure(0, weight=1)
+        self.multi_xls_plot_frame.columnconfigure(0, weight=1)
 
-        tk.Label(self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
+        self.multi_xls_plot_canvas = tk.Canvas(self.multi_xls_plot_frame, bg=_C['panel'],
+                                                highlightthickness=0)
+        self.multi_xls_plot_canvas.grid(row=0, column=0, sticky='nsew')
+
+        h_scrollbar = tk.Scrollbar(self.multi_xls_plot_frame, orient='horizontal',
+                                   command=self.multi_xls_plot_canvas.xview)
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        self.multi_xls_plot_canvas.configure(xscrollcommand=h_scrollbar.set)
+
+        self.multi_xls_plot_inner = tk.Frame(self.multi_xls_plot_canvas, bg=_C['panel'])
+        self.multi_xls_plot_canvas.create_window((0, 0), window=self.multi_xls_plot_inner,
+                                                  anchor='nw')
+
+        tk.Label(self.multi_xls_plot_inner, text="Selecciona una columna para graficar",
                  font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
-            fill=tk.BOTH, expand=True)
+            fill=tk.BOTH, expand=True, padx=20, pady=20)
 
     def _populate_multi_xls_columns(self):
         """Llena la lista lateral con los nombres de columna comunes a todas
-        las hojas cargadas y grafica la primera por defecto."""
+        las hojas cargadas (mostrados como 'Column N' salvo que se pida ver
+        los nombres reales) y grafica la primera por defecto."""
         if self.multi_xls_column_listbox is None:
             return
-        self.multi_xls_column_listbox.delete(0, tk.END)
-        columns = common_column_names(self.multi_xls_datasets)
-        for name in columns:
-            self.multi_xls_column_listbox.insert(tk.END, name)
+        self.multi_xls_common_columns = common_column_names(self.multi_xls_datasets)
+        self._refresh_multi_xls_column_labels()
 
-        if columns:
+        if self.multi_xls_common_columns:
             self.multi_xls_column_listbox.selection_set(0)
-            self._draw_multi_xls_plot(columns[0])
+            self._draw_multi_xls_plot(self.multi_xls_common_columns[0])
         else:
             messagebox.showwarning(
                 "Sin columnas comunes",
                 "Las hojas seleccionadas no comparten ninguna columna de datos con el mismo nombre."
             )
 
+    def _refresh_multi_xls_column_labels(self):
+        """Redibuja la lista lateral con nombres genéricos ('Column N') o con
+        los nombres reales de los datos, según el checkbox 'Mostrar Nombres'."""
+        if self.multi_xls_column_listbox is None:
+            return
+        show_labels = self.multi_xls_show_labels_var.get()
+        prev_selection = self.multi_xls_column_listbox.curselection()
+
+        self.multi_xls_column_listbox.delete(0, tk.END)
+        for i, name in enumerate(self.multi_xls_common_columns):
+            label = name if show_labels else f"Column {i + 1}"
+            self.multi_xls_column_listbox.insert(tk.END, label)
+
+        if prev_selection:
+            self.multi_xls_column_listbox.selection_set(prev_selection[0])
+
     def _on_multi_xls_column_select(self, event=None):
         """Callback cuando el usuario elige una columna en la lista lateral."""
         sel = self.multi_xls_column_listbox.curselection()
-        if not sel:
+        if not sel or sel[0] >= len(self.multi_xls_common_columns):
             return
-        col_name = self.multi_xls_column_listbox.get(sel[0])
+        col_name = self.multi_xls_common_columns[sel[0]]
         self._draw_multi_xls_plot(col_name)
 
     def _draw_multi_xls_plot(self, col_name):
         """Grafica la columna col_name de cada hoja cargada, una junto a la
-        otra en la misma figura, separadas por líneas verticales punteadas."""
-        if not self.multi_xls_datasets or self.multi_xls_plot_frame is None:
+        otra en la misma figura, separadas por líneas verticales punteadas.
+        La figura se ensancha según el número de hojas y se ve con scroll
+        horizontal para no aplastar los datos."""
+        if not self.multi_xls_datasets or self.multi_xls_plot_inner is None:
             return
 
         import pandas as pd
@@ -1457,12 +1544,13 @@ class NecLabApp:
         if self.multi_xls_fig is not None:
             plt.close(self.multi_xls_fig)
             self.multi_xls_fig = None
-        for w in list(self.multi_xls_plot_frame.winfo_children()):
+        for w in list(self.multi_xls_plot_inner.winfo_children()):
             w.destroy()
 
         self.multi_xls_current_column = col_name
 
-        self.multi_xls_fig, ax = plt.subplots()
+        fig_width = max(10, len(self.multi_xls_datasets) * 3)
+        self.multi_xls_fig, ax = plt.subplots(figsize=(fig_width, 5.5))
         offset = 0
         tick_positions = []
         tick_labels = []
@@ -1488,9 +1576,14 @@ class NecLabApp:
         ax.set_ylabel('Value')
         self.multi_xls_fig.tight_layout()
 
-        canvas = FigureCanvasTkAgg(self.multi_xls_fig, master=self.multi_xls_plot_frame)
+        canvas = FigureCanvasTkAgg(self.multi_xls_fig, master=self.multi_xls_plot_inner)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self.multi_xls_plot_inner.update_idletasks()
+        self.multi_xls_plot_canvas.configure(
+            scrollregion=self.multi_xls_plot_canvas.bbox('all')
+        )
 
     # ==================== IMAGE PROCESSING METHODS ====================
     

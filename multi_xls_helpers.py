@@ -104,13 +104,13 @@ def _load_sheet_dataframe(filepath, sheet_name):
     return df
 
 
-def load_multiple_xls_datasets(parent):
+def pick_files_and_sheets(parent):
     """
-    Punto de entrada: pide al usuario múltiples archivos .xls/.xlsx, permite elegir
-    qué hojas cargar, y devuelve una lista de datasets:
-        {'file': filepath, 'sheet': sheet_name, 'label': 'archivo - hoja',
-         'df': DataFrame, 'column_names': [...]}
-    Devuelve None si el usuario cancela o no hay datos que cargar.
+    Pide al usuario múltiples archivos .xls/.xlsx y qué hojas de cada uno
+    quiere cargar.
+
+    Devuelve: lista de tuplas (filepath, sheet_name) seleccionadas, o None
+    si el usuario cancela o no hay hojas para elegir.
     """
     filenames = filedialog.askopenfilenames(
         parent=parent,
@@ -132,12 +132,21 @@ def load_multiple_xls_datasets(parent):
     if not file_sheet_map:
         return None
 
-    selection = _select_sheets_dialog(parent, file_sheet_map)
-    if not selection:
-        return None
+    return _select_sheets_dialog(parent, file_sheet_map)
 
+
+def load_selected_sheets(selection, progress_callback=None):
+    """
+    Carga cada hoja (filepath, sheet_name) de 'selection' en un dataset:
+        {'file': filepath, 'sheet': sheet_name, 'label': 'archivo - hoja',
+         'df': DataFrame, 'column_names': [...]}
+
+    progress_callback(done, total, filepath, sheet_name), si se da, se llama
+    después de cargar cada hoja para poder actualizar una barra de progreso.
+    """
     datasets = []
-    for filepath, sheet in selection:
+    total = len(selection)
+    for i, (filepath, sheet) in enumerate(selection, start=1):
         try:
             df = _load_sheet_dataframe(filepath, sheet)
         except Exception as e:
@@ -145,20 +154,19 @@ def load_multiple_xls_datasets(parent):
                 "Error",
                 f"No se pudo cargar la hoja '{sheet}' de '{os.path.basename(filepath)}':\n{e}"
             )
-            continue
-        if df.empty:
-            continue
-        datasets.append({
-            'file': filepath,
-            'sheet': sheet,
-            'label': f"{os.path.splitext(os.path.basename(filepath))[0]} - {sheet}",
-            'df': df,
-            'column_names': df.columns.tolist(),
-        })
+            df = None
 
-    if not datasets:
-        messagebox.showwarning("Sin datos", "No se pudo cargar ninguna hoja seleccionada.")
-        return None
+        if df is not None and not df.empty:
+            datasets.append({
+                'file': filepath,
+                'sheet': sheet,
+                'label': f"{os.path.splitext(os.path.basename(filepath))[0]} - {sheet}",
+                'df': df,
+                'column_names': df.columns.tolist(),
+            })
+
+        if progress_callback:
+            progress_callback(i, total, filepath, sheet)
 
     return datasets
 
