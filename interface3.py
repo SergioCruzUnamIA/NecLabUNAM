@@ -107,6 +107,7 @@ class NecLabApp:
         self.multi_xls_plot_inner = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
+        self.multi_xls_current_index = None
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -1500,7 +1501,7 @@ class NecLabApp:
 
         if self.multi_xls_common_columns:
             self.multi_xls_column_listbox.selection_set(0)
-            self._draw_multi_xls_plot(self.multi_xls_common_columns[0])
+            self._draw_multi_xls_plot(0)
         else:
             messagebox.showwarning(
                 "Sin columnas comunes",
@@ -1509,7 +1510,9 @@ class NecLabApp:
 
     def _refresh_multi_xls_column_labels(self):
         """Redibuja la lista lateral con nombres genéricos ('Column N') o con
-        los nombres reales de los datos, según el checkbox 'Mostrar Nombres'."""
+        los nombres reales de los datos, según el checkbox 'Mostrar Nombres'.
+        También redibuja la gráfica para que el título y las etiquetas de las
+        hojas reflejen el mismo estado del checkbox."""
         if self.multi_xls_column_listbox is None:
             return
         show_labels = self.multi_xls_show_labels_var.get()
@@ -1523,23 +1526,34 @@ class NecLabApp:
         if prev_selection:
             self.multi_xls_column_listbox.selection_set(prev_selection[0])
 
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+
     def _on_multi_xls_column_select(self, event=None):
         """Callback cuando el usuario elige una columna en la lista lateral."""
         sel = self.multi_xls_column_listbox.curselection()
         if not sel or sel[0] >= len(self.multi_xls_common_columns):
             return
-        col_name = self.multi_xls_common_columns[sel[0]]
-        self._draw_multi_xls_plot(col_name)
+        self._draw_multi_xls_plot(sel[0])
 
-    def _draw_multi_xls_plot(self, col_name):
-        """Grafica la columna col_name de cada hoja cargada, una junto a la
-        otra en la misma figura, separadas por líneas verticales punteadas.
-        La figura se ensancha según el número de hojas y se ve con scroll
-        horizontal para no aplastar los datos."""
+    def _draw_multi_xls_plot(self, index):
+        """Grafica la columna en la posición 'index' de cada hoja cargada,
+        una junto a la otra en la misma figura, separadas por líneas
+        verticales punteadas. El título de la gráfica usa la misma etiqueta
+        que está seleccionada en la lista de datos, y las etiquetas de cada
+        hoja se muestran u ocultan según el checkbox 'Mostrar Nombres de
+        Datos'. La figura se ensancha según el número de hojas y se ve con
+        scroll horizontal para no aplastar los datos."""
         if not self.multi_xls_datasets or self.multi_xls_plot_inner is None:
+            return
+        if index >= len(self.multi_xls_common_columns):
             return
 
         import pandas as pd
+
+        col_name = self.multi_xls_common_columns[index]
+        display_label = self.multi_xls_column_listbox.get(index)
+        show_labels = self.multi_xls_show_labels_var.get()
 
         if self.multi_xls_fig is not None:
             plt.close(self.multi_xls_fig)
@@ -1548,6 +1562,7 @@ class NecLabApp:
             w.destroy()
 
         self.multi_xls_current_column = col_name
+        self.multi_xls_current_index = index
 
         fig_width = max(10, len(self.multi_xls_datasets) * 3)
         self.multi_xls_fig, ax = plt.subplots(figsize=(fig_width, 5.5))
@@ -1571,8 +1586,11 @@ class NecLabApp:
             offset += n
 
         ax.set_xticks(tick_positions)
-        ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
-        ax.set_title(col_name)
+        if show_labels:
+            ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
+        else:
+            ax.set_xticklabels([])
+        ax.set_title(display_label)
         ax.set_ylabel('Value')
         self.multi_xls_fig.tight_layout()
 
