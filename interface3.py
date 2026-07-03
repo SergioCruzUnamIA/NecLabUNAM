@@ -112,6 +112,12 @@ class NecLabApp:
         self._multi_xls_heatmap_resize_job = None
         self.btn_save_multi_xls_plot = None
         self.btn_save_multi_xls_heatmap = None
+        self.multi_xls_class_row = None
+        self.multi_xls_plot_placeholder = None
+        self._multi_xls_canvas_widget = None
+        self.multi_xls_classes = []           # nombres disponibles para clasificar hojas (cosmético)
+        self.multi_xls_sheet_class_var = {}    # sheet label -> tk.StringVar con la clasificación elegida
+        self.multi_xls_class_combos = {}       # sheet label -> ttk.Combobox (posicionado sobre su segmento)
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -1483,7 +1489,14 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_heatmap_image
         )
-        self.btn_save_multi_xls_heatmap.grid(row=5, column=0, sticky='ew', padx=10, pady=(0, 10))
+        self.btn_save_multi_xls_heatmap.grid(row=5, column=0, sticky='ew', padx=10, pady=(0, 2))
+
+        ctk.CTkButton(
+            sidebar, text="Editar Clasificaciones", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            command=self._open_multi_xls_class_editor
+        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1501,9 +1514,16 @@ class NecLabApp:
         self.multi_xls_plot_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 4))
         self.multi_xls_plot_frame.bind('<Configure>', self._on_multi_xls_plot_frame_resize)
 
-        tk.Label(self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
-                 font=('Arial', 14), bg=_C['panel'], fg=_C['sub']).pack(
-            fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # Row of per-sheet classification dropdowns, pixel-aligned above the
+        # segment each sheet occupies in the plot below (cosmetic only).
+        self.multi_xls_class_row = tk.Frame(self.multi_xls_plot_frame, bg=_C['panel'], height=30)
+        self.multi_xls_class_row.pack(side=tk.TOP, fill=tk.X)
+        self.multi_xls_class_row.pack_propagate(False)
+
+        self.multi_xls_plot_placeholder = tk.Label(
+            self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
+            font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
+        self.multi_xls_plot_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Bottom: heatmap images (one per sheet, columns=datos, rows=muestras)
         self.multi_xls_heatmap_frame = tk.Frame(right_container, bg=_C['panel'],
@@ -1529,6 +1549,8 @@ class NecLabApp:
         for i in range(len(self.multi_xls_common_columns)):
             self.multi_xls_column_listbox.insert(tk.END, f"Column {i + 1}")
 
+        self._rebuild_multi_xls_class_row()
+
         if self.multi_xls_common_columns:
             self.multi_xls_column_listbox.selection_set(0)
             self._draw_multi_xls_plot(0)
@@ -1543,6 +1565,186 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.btn_save_multi_xls_plot.configure(state='normal')
             self.btn_save_multi_xls_heatmap.configure(state='normal')
+
+    def _rebuild_multi_xls_class_row(self):
+        """Recrea el combobox de clasificación de cada hoja cargada (uno por
+        hoja). Las opciones por defecto son los nombres de todas las hojas
+        cargadas; cada hoja empieza clasificada con su propio nombre. Se
+        posicionan en el siguiente redibujado de la gráfica de líneas."""
+        if self.multi_xls_class_row is None:
+            return
+
+        for w in list(self.multi_xls_class_row.winfo_children()):
+            w.destroy()
+        self.multi_xls_class_combos = {}
+
+        self.multi_xls_classes = [ds['label'] for ds in self.multi_xls_datasets]
+        self.multi_xls_sheet_class_var = {
+            ds['label']: tk.StringVar(value=ds['label']) for ds in self.multi_xls_datasets
+        }
+
+        for ds in self.multi_xls_datasets:
+            label = ds['label']
+            combo = ttk.Combobox(
+                self.multi_xls_class_row, textvariable=self.multi_xls_sheet_class_var[label],
+                values=self.multi_xls_classes, state='readonly', font=('Arial', 8)
+            )
+            self.multi_xls_class_combos[label] = combo
+
+    def _position_multi_xls_class_row(self, ax, bounds):
+        """Coloca cada combobox de clasificación alineado en pixeles con el
+        segmento (offset_inicio, offset_fin) de su hoja en la gráfica 'ax'
+        recién dibujada."""
+        if self.multi_xls_class_row is None:
+            return
+        placed = set()
+        for ds, (x0_data, x1_data) in zip(self.multi_xls_datasets, bounds):
+            label = ds['label']
+            combo = self.multi_xls_class_combos.get(label)
+            if combo is None:
+                continue
+            x0_px = ax.transData.transform((x0_data, 0))[0]
+            x1_px = ax.transData.transform((x1_data, 0))[0]
+            width_px = max(x1_px - x0_px, 30)
+            combo.place(x=x0_px, y=2, width=width_px - 2, height=26)
+            placed.add(label)
+
+        for label, combo in self.multi_xls_class_combos.items():
+            if label not in placed:
+                combo.place_forget()
+
+    def _open_multi_xls_class_editor(self):
+        """Diálogo para renombrar, eliminar o agregar opciones de
+        clasificación. Al aplicar, actualiza todos los combobox y conserva
+        (o reasigna) la clasificación ya elegida en cada hoja."""
+        if not self.multi_xls_classes:
+            messagebox.showinfo("Sin datos", "Carga archivos .xls primero.")
+            return
+
+        import uuid as _uuid
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Editar Clasificaciones")
+        dialog.geometry("360x440")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Opciones de clasificación:", font=('Arial', 11, 'bold')).pack(
+            pady=(10, 4), padx=10, anchor='w')
+
+        list_frame = tk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set,
+                              selectmode=tk.SINGLE, font=('Arial', 10))
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        original_entries = [{'id': str(_uuid.uuid4()), 'name': c} for c in self.multi_xls_classes]
+        entries = [dict(e) for e in original_entries]
+        for e in entries:
+            listbox.insert(tk.END, e['name'])
+
+        edit_var = tk.StringVar()
+        edit_frame = tk.Frame(dialog)
+        edit_frame.pack(fill=tk.X, padx=10, pady=(4, 2))
+        tk.Entry(edit_frame, textvariable=edit_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def on_select(event=None):
+            sel = listbox.curselection()
+            if sel:
+                edit_var.set(entries[sel[0]]['name'])
+        listbox.bind('<<ListboxSelect>>', on_select)
+
+        def add_option():
+            name = edit_var.get().strip()
+            if not name:
+                return
+            if any(e['name'] == name for e in entries):
+                messagebox.showwarning("Duplicado", "Esa opción ya existe.", parent=dialog)
+                return
+            entries.append({'id': str(_uuid.uuid4()), 'name': name})
+            listbox.insert(tk.END, name)
+
+        def rename_option():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showinfo("Sin selección", "Selecciona una opción para renombrar.", parent=dialog)
+                return
+            name = edit_var.get().strip()
+            if not name:
+                return
+            idx = sel[0]
+            if any(i != idx and e['name'] == name for i, e in enumerate(entries)):
+                messagebox.showwarning("Duplicado", "Esa opción ya existe.", parent=dialog)
+                return
+            entries[idx]['name'] = name
+            listbox.delete(idx)
+            listbox.insert(idx, name)
+            listbox.selection_set(idx)
+
+        def delete_option():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showinfo("Sin selección", "Selecciona una opción para eliminar.", parent=dialog)
+                return
+            if len(entries) <= 1:
+                messagebox.showwarning("No permitido", "Debe quedar al menos una opción.", parent=dialog)
+                return
+            idx = sel[0]
+            del entries[idx]
+            listbox.delete(idx)
+            edit_var.set('')
+
+        btn_row = tk.Frame(dialog)
+        btn_row.pack(fill=tk.X, padx=10, pady=(0, 6))
+        tk.Button(btn_row, text="Agregar", command=add_option).pack(side=tk.LEFT)
+        tk.Button(btn_row, text="Renombrar", command=rename_option).pack(side=tk.LEFT, padx=(6, 0))
+        tk.Button(btn_row, text="Eliminar", command=delete_option).pack(side=tk.LEFT, padx=(6, 0))
+
+        def on_apply():
+            self._apply_multi_xls_class_changes(original_entries, entries)
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
+
+        ok_row = tk.Frame(dialog)
+        ok_row.pack(pady=10)
+        tk.Button(ok_row, text="Aplicar", command=on_apply, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(ok_row, text="Cancelar", command=on_cancel, width=10).pack(side=tk.LEFT, padx=5)
+
+    def _apply_multi_xls_class_changes(self, original_entries, final_entries):
+        """Aplica los cambios del editor de clasificaciones: propaga
+        renombrados a las hojas que tenían esa opción elegida, reasigna las
+        hojas que tenían una opción eliminada, y refresca las opciones
+        disponibles en todos los combobox."""
+        original_by_id = {e['id']: e['name'] for e in original_entries}
+        final_by_id = {e['id']: e['name'] for e in final_entries}
+
+        rename_map = {}
+        deleted_names = set()
+        for id_, old_name in original_by_id.items():
+            if id_ in final_by_id:
+                new_name = final_by_id[id_]
+                if new_name != old_name:
+                    rename_map[old_name] = new_name
+            else:
+                deleted_names.add(old_name)
+
+        self.multi_xls_classes = [e['name'] for e in final_entries]
+        fallback = self.multi_xls_classes[0] if self.multi_xls_classes else ''
+
+        for label, var in self.multi_xls_sheet_class_var.items():
+            current = var.get()
+            if current in rename_map:
+                var.set(rename_map[current])
+            elif current in deleted_names:
+                var.set(fallback)
+
+        for combo in self.multi_xls_class_combos.values():
+            combo.configure(values=self.multi_xls_classes)
 
     def _on_multi_xls_show_labels_toggle(self):
         """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
@@ -1612,17 +1814,24 @@ class NecLabApp:
         if self.multi_xls_fig is not None:
             plt.close(self.multi_xls_fig)
             self.multi_xls_fig = None
-        for w in list(self.multi_xls_plot_frame.winfo_children()):
-            w.destroy()
+        if self._multi_xls_canvas_widget is not None:
+            self._multi_xls_canvas_widget.destroy()
+            self._multi_xls_canvas_widget = None
+        if self.multi_xls_plot_placeholder is not None and self.multi_xls_plot_placeholder.winfo_exists():
+            self.multi_xls_plot_placeholder.destroy()
+            self.multi_xls_plot_placeholder = None
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
 
         fig_width, fig_height = self._fit_figure_size(self.multi_xls_plot_frame)
+        class_row_h_in = (self.multi_xls_class_row.winfo_height() or 30) / 100
+        fig_height = max(fig_height - class_row_h_in, 2.0)
         self.multi_xls_fig, ax = plt.subplots(figsize=(fig_width, fig_height))
         offset = 0
         tick_positions = []
         tick_labels = []
+        bounds = []
         for ds in self.multi_xls_datasets:
             if col_name not in ds['df'].columns:
                 continue
@@ -1637,6 +1846,7 @@ class NecLabApp:
                 ax.axvline(offset, color=_C['sub'], linestyle='--', linewidth=1, alpha=0.6)
             tick_positions.append(offset + n / 2)
             tick_labels.append(ds['label'])
+            bounds.append((offset, offset + n))
             offset += n
 
         ax.set_xticks(tick_positions)
@@ -1650,7 +1860,10 @@ class NecLabApp:
 
         canvas = FigureCanvasTkAgg(self.multi_xls_fig, master=self.multi_xls_plot_frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._multi_xls_canvas_widget = canvas.get_tk_widget()
+        self._multi_xls_canvas_widget.pack(fill=tk.BOTH, expand=True)
+
+        self._position_multi_xls_class_row(ax, bounds)
 
     def _draw_multi_xls_heatmap(self):
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
