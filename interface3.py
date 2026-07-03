@@ -1632,12 +1632,13 @@ class NecLabApp:
 
     def _draw_multi_xls_heatmap(self):
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
-        columnas (las series de datos) y el eje Y son las filas (las
-        muestras); el color de cada pixel representa su valor, normalizado
-        con la misma escala en todas las hojas para que sean comparables.
-        Las imágenes de cada hoja se colocan una junto a otra, igual que la
-        gráfica de líneas de arriba, y la figura se ajusta exactamente al
-        tamaño del panel para que todas las imágenes se vean completas."""
+        muestras (el mismo eje que la gráfica de líneas de arriba) y el eje Y
+        son las columnas (las series de datos); el color de cada pixel
+        representa su valor dividido entre el mínimo global de todas las
+        hojas, para que todas queden en la misma escala relativa. Las
+        imágenes de cada hoja se colocan una junto a otra, y la figura se
+        ajusta exactamente al tamaño del panel para que todas se vean
+        completas."""
         if self.multi_xls_heatmap_frame is None:
             return
 
@@ -1650,11 +1651,17 @@ class NecLabApp:
         if not self.multi_xls_datasets:
             return
 
-        matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
-        finite_vals = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+        raw_matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
+        finite_vals = np.concatenate([m[np.isfinite(m)].ravel() for m in raw_matrices])
         if finite_vals.size == 0:
             return
-        vmin, vmax = float(finite_vals.min()), float(finite_vals.max())
+        global_min = float(finite_vals.min())
+
+        # Normalize every sheet's values against the global minimum, then
+        # transpose so rows = data columns and columns = samples.
+        matrices = [(m / global_min).T for m in raw_matrices]
+        norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+        vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
 
         show_labels = self.multi_xls_show_labels_var.get()
         fig_width, fig_height = self._fit_figure_size(self.multi_xls_heatmap_frame)
@@ -1665,14 +1672,14 @@ class NecLabApp:
         tick_labels = []
         im = None
         for ds, matrix in zip(self.multi_xls_datasets, matrices):
-            n_samples, n_cols = matrix.shape
+            n_cols, n_samples = matrix.shape
             im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=vmin, vmax=vmax,
-                           extent=(offset, offset + n_cols, n_samples, 0))
+                           extent=(offset, offset + n_samples, n_cols, 0))
             if offset > 0:
                 ax.axvline(offset, color='white', linewidth=1.5)
-            tick_positions.append(offset + n_cols / 2)
+            tick_positions.append(offset + n_samples / 2)
             tick_labels.append(ds['label'])
-            offset += n_cols
+            offset += n_samples
 
         ax.set_xlim(0, offset)
         ax.set_xticks(tick_positions)
@@ -1680,8 +1687,8 @@ class NecLabApp:
             ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
         else:
             ax.set_xticklabels([])
-        ax.set_ylabel('Sample')
-        ax.set_title('Todas las hojas (columnas = datos, filas = muestras)')
+        ax.set_ylabel('Column')
+        ax.set_title('Todas las hojas (valor / mínimo global)')
         if im is not None:
             self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
         self.multi_xls_heatmap_fig.tight_layout()
