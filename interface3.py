@@ -129,6 +129,8 @@ class NecLabApp:
         self.multi_xls_classes = []           # nombres disponibles para clasificar hojas (cosmético)
         self.multi_xls_sheet_class_var = {}    # sheet label -> tk.StringVar con la clasificación elegida
         self.multi_xls_class_combos = {}       # sheet label -> ttk.Combobox (posicionado sobre su segmento)
+        self.multi_xls_classifications = {}    # col_index -> {sheet label -> clasificación guardada}
+        self._multi_xls_syncing_class_row = False
 
         # Variables de estado - Tab Dendograma
         self.dendo_tab = None
@@ -1582,18 +1584,25 @@ class NecLabApp:
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
         hoja). Las opciones por defecto son los nombres de todas las hojas
         cargadas; cada hoja empieza clasificada con su propio nombre. Se
-        posicionan en el siguiente redibujado de la gráfica de líneas."""
+        posicionan en el siguiente redibujado de la gráfica de líneas. La
+        clasificación elegida se guarda por separado para cada columna de
+        datos (self.multi_xls_classifications), así que cambiar de columna
+        en la lista actualiza los combobox con lo que se eligió para esa
+        columna en particular."""
         if self.multi_xls_class_row is None:
             return
 
         for w in list(self.multi_xls_class_row.winfo_children()):
             w.destroy()
         self.multi_xls_class_combos = {}
+        self.multi_xls_classifications = {}
 
         self.multi_xls_classes = [ds['label'] for ds in self.multi_xls_datasets]
         self.multi_xls_sheet_class_var = {
             ds['label']: tk.StringVar(value=ds['label']) for ds in self.multi_xls_datasets
         }
+        for label, var in self.multi_xls_sheet_class_var.items():
+            var.trace_add('write', lambda *_a, sheet_label=label: self._on_multi_xls_sheet_class_changed(sheet_label))
 
         for ds in self.multi_xls_datasets:
             label = ds['label']
@@ -1602,6 +1611,27 @@ class NecLabApp:
                 values=self.multi_xls_classes, state='readonly', font=('Arial', 8)
             )
             self.multi_xls_class_combos[label] = combo
+
+    def _on_multi_xls_sheet_class_changed(self, sheet_label):
+        """Guarda la clasificación elegida para 'sheet_label' bajo la
+        columna actualmente seleccionada."""
+        if self._multi_xls_syncing_class_row or self.multi_xls_current_index is None:
+            return
+        value = self.multi_xls_sheet_class_var[sheet_label].get()
+        self.multi_xls_classifications.setdefault(self.multi_xls_current_index, {})[sheet_label] = value
+
+    def _sync_multi_xls_class_row_values(self, index):
+        """Actualiza los combobox para mostrar la clasificación guardada de
+        cada hoja para la columna 'index' (o el nombre de la hoja como
+        valor por defecto si esa combinación columna+hoja aún no se ha
+        clasificado)."""
+        saved = self.multi_xls_classifications.get(index, {})
+        self._multi_xls_syncing_class_row = True
+        try:
+            for label, var in self.multi_xls_sheet_class_var.items():
+                var.set(saved.get(label, label))
+        finally:
+            self._multi_xls_syncing_class_row = False
 
     def _position_multi_xls_class_row(self, ax, bounds):
         """Coloca cada combobox de clasificación alineado en pixeles con el
@@ -1748,15 +1778,20 @@ class NecLabApp:
         self.multi_xls_classes = [e['name'] for e in final_entries]
         fallback = self.multi_xls_classes[0] if self.multi_xls_classes else ''
 
-        for label, var in self.multi_xls_sheet_class_var.items():
-            current = var.get()
-            if current in rename_map:
-                var.set(rename_map[current])
-            elif current in deleted_names:
-                var.set(fallback)
+        # Propagate the rename/delete to every column's saved classification,
+        # not just the one currently shown in the combobox.
+        for col_classifications in self.multi_xls_classifications.values():
+            for sheet_label, current in list(col_classifications.items()):
+                if current in rename_map:
+                    col_classifications[sheet_label] = rename_map[current]
+                elif current in deleted_names:
+                    col_classifications[sheet_label] = fallback
 
         for combo in self.multi_xls_class_combos.values():
             combo.configure(values=self.multi_xls_classes)
+
+        if self.multi_xls_current_index is not None:
+            self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
 
     def _on_multi_xls_show_labels_toggle(self):
         """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
@@ -1825,6 +1860,7 @@ class NecLabApp:
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
+        self._sync_multi_xls_class_row_values(index)
 
         class_row_h_in = (self.multi_xls_class_row.winfo_height() or 30) / 100
         fig_width = w_px / 100
