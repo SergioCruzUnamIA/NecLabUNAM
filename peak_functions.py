@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn import svm
-from sklearn.linear_model import Lasso, ElasticNet, Ridge, LinearRegression
+from sklearn.linear_model import Lasso, ElasticNet
 from sklearn.covariance import EllipticEnvelope
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.ensemble import IsolationForest
@@ -211,56 +211,6 @@ def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, 
 
     return draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def _linear_regression_detrend_signal(data_sel):
-    """Remove baseline drift by subtracting an OLS LinearRegression fit on the time index."""
-    x = np.arange(len(data_sel)).reshape(-1, 1)
-    reg = LinearRegression().fit(x, data_sel)
-    baseline = reg.predict(x)
-    return data_sel - baseline
-
-
-def _ridge_detrend_signal(data_sel):
-    """Remove baseline drift by subtracting a Ridge fit on the time index."""
-    x = np.arange(len(data_sel)).reshape(-1, 1)
-    reg = Ridge().fit(x, data_sel)
-    baseline = reg.predict(x)
-    return data_sel - baseline
-
-
-def _lasso_detrend_signal(data_sel):
-    """Remove baseline drift by subtracting a Lasso fit on the time index."""
-    x = np.arange(len(data_sel)).reshape(-1, 1)
-    reg = Lasso().fit(x, data_sel)
-    baseline = reg.predict(x)
-    return data_sel - baseline
-
-
-def _elasticnet_detrend_signal(data_sel):
-    """Remove baseline drift by subtracting an ElasticNet fit on the time index."""
-    x = np.arange(len(data_sel)).reshape(-1, 1)
-    reg = ElasticNet().fit(x, data_sel)
-    baseline = reg.predict(x)
-    return data_sel - baseline
-
-
-def _als_detrend_signal(data_sel, lam=1e5, p=0.01, niter=10):
-    """Asymmetric Least Squares baseline correction (Eilers & Boelens)."""
-    from scipy import sparse
-    from scipy.sparse.linalg import spsolve
-    y = np.asarray(data_sel, dtype=float)
-    L = len(y)
-    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
-    D = lam * D.dot(D.transpose())
-    w = np.ones(L)
-    W = sparse.spdiags(w, 0, L, L)
-    z = y.copy()
-    for _ in range(niter):
-        W.setdiag(w)
-        z = spsolve((W + D).tocsc(), w * y)
-        w = p * (y > z) + (1 - p) * (y < z)
-    return y - z
-
-
 def _lower_convex_hull(x, y):
     """Vertices of the lower convex hull of points (x, y) via a monotone chain."""
     def cross(o, a, b):
@@ -274,35 +224,82 @@ def _lower_convex_hull(x, y):
     return np.array([p[0] for p in hull]), np.array([p[1] for p in hull])
 
 
-def _convex_envelope_detrend_signal(data_sel, window_frac=0.25, overlap=0.5):
-    """PeakCaller's convex-envelope smoothing, computed in overlapping windows.
+def _collect_genuine_lowest_points(y, window_frac=0.25, overlap=0.5):
+    """Pool the lower-convex-hull vertices found in overlapping windows.
 
-    A single hull over the whole trace is forced onto a straight line whenever
-    the recording doesn't return to its starting level (e.g. a slow decay that
-    settles above the pre-response baseline), which tilts the flat, non-peak
-    segments instead of leaving them near 1.0. Computing the lower convex hull
-    within overlapping windows and stitching by the pointwise max lets each
-    flat segment settle at its own local level while still leaving peaks
-    untouched.
+    A hull vertex is only ever a point that is not exceeded by the line
+    between its neighbors, so a point from inside a peak can never qualify --
+    this is what makes the pooled set trustworthy "lowest points" to build a
+    baseline from.
     """
-    y = np.asarray(data_sel, dtype=float)
     n = len(y)
     x = np.arange(n)
     window = max(20, int(n * window_frac))
     stride = max(1, int(window * (1 - overlap)))
 
-    envelope = np.full(n, -np.inf)
+    pts = {}
     start = 0
     while start < n:
         end = min(start + window, n)
         hull_x, hull_y = _lower_convex_hull(x[start:end], y[start:end])
-        envelope[start:end] = np.maximum(envelope[start:end], np.interp(x[start:end], hull_x, hull_y))
+        for xi, yi in zip(hull_x, hull_y):
+            if xi not in pts or yi < pts[xi]:
+                pts[xi] = yi
         if end == n:
             break
         start += stride
 
-    envelope = np.where(np.abs(envelope) < 1e-10, 1e-10, envelope)
-    return y / envelope
+    xs = np.array(sorted(pts.keys()))
+    ys = np.array([pts[k] for k in xs])
+    return xs, ys
+
+
+def _pick_k_lowest_points(cand_x, cand_y, n, k):
+    """Keep the lowest candidate point in each of k equal time-bins (the
+    nearest candidate if a bin is empty), so the chosen points stay spread
+    across the whole recording instead of clustering in one region."""
+    edges = np.linspace(0, n, k + 1)
+    chosen_x, chosen_y = [], []
+    for i in range(k):
+        lo, hi = edges[i], edges[i + 1]
+        mask = (cand_x >= lo) & (cand_x < hi if i < k - 1 else cand_x <= hi)
+        if mask.any():
+            sub_x, sub_y = cand_x[mask], cand_y[mask]
+            j = np.argmin(sub_y)
+            chosen_x.append(sub_x[j])
+            chosen_y.append(sub_y[j])
+        else:
+            center = (lo + hi) / 2
+            j = np.argmin(np.abs(cand_x - center))
+            chosen_x.append(cand_x[j])
+            chosen_y.append(cand_y[j])
+    order = np.argsort(chosen_x)
+    cx = np.array(chosen_x)[order]
+    cy = np.array(chosen_y)[order]
+    cx, uniq_idx = np.unique(cx, return_index=True)
+    return cx, cy[uniq_idx]
+
+
+def _convex_envelope_detrend_signal(data_sel, n_points=6):
+    """De-trend by dividing by a baseline built from a handful of the
+    signal's genuine lowest points (found via local convexity, so none of
+    them can fall inside a peak), connected piecewise-linearly.
+
+    Using few, well-spread key points -- rather than one straight line --
+    lets each flat, non-peak segment settle near its own level instead of
+    being bridged by a single tilted line, while leaving peaks untouched.
+    """
+    y = np.asarray(data_sel, dtype=float)
+    n = len(y)
+    x = np.arange(n)
+
+    cand_x, cand_y = _collect_genuine_lowest_points(y)
+    k = max(2, min(n_points, len(cand_x)))
+    px, py = _pick_k_lowest_points(cand_x, cand_y, n, k)
+
+    baseline = np.interp(x, px, py)
+    baseline = np.where(np.abs(baseline) < 1e-10, 1e-10, baseline)
+    return y / baseline
 
 
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,

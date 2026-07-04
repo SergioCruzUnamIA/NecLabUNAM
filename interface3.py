@@ -84,13 +84,15 @@ class NecLabApp:
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
-        self.smoothing_method_var = tk.StringVar(value='None')
+        self.smoothing_var = tk.BooleanVar(value=False)
+        self.smoothing_points_var = tk.IntVar(value=6)
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
         self.btn_save_data = None
         self.btn_save_corr = None
         self.btn_save_peaks = None
         self.peak_method_combo = None
-        self.smoothing_method_combo = None
+        self.smoothing_check = None
+        self.smoothing_points_spinbox = None
         self.peak_method_params = {}  # saved params per method name
         self.plot_mid_frame = None
         self._mid_fig = None
@@ -516,17 +518,25 @@ class NecLabApp:
         smooth_frame.columnconfigure(0, weight=1)
         row += 1
 
-        tk.Label(smooth_frame, text="Smoothing:", bg=_C['panel'],
-                 fg=_C['sub'], font=('Arial', 8)).grid(row=0, column=0, sticky='w')
-
-        self.smoothing_method_combo = ttk.Combobox(
-            smooth_frame, textvariable=self.smoothing_method_var,
-            values=['None', 'Linear Regression', 'Ridge', 'Lasso', 'ElasticNet',
-                    'ALS (Asymmetric Least Squares)', 'Convex Envelope'],
-            state=DISABLED, width=22
+        self.smoothing_check = tk.Checkbutton(
+            smooth_frame, text="Smoothing (Convex Envelope)", variable=self.smoothing_var,
+            command=self._on_smoothing_toggle,
+            bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
+            activebackground=_C['panel'], selectcolor=_C['panel'],
+            state=DISABLED
         )
-        self.smoothing_method_combo.grid(row=1, column=0, sticky='ew', pady=(0, 2))
-        self.smoothing_method_combo.bind('<<ComboboxSelected>>', lambda e: self._on_smoothing_toggle())
+        self.smoothing_check.grid(row=0, column=0, sticky='w')
+
+        points_frame = tk.Frame(smooth_frame, bg=_C['panel'])
+        points_frame.grid(row=0, column=1, sticky='e')
+        tk.Label(points_frame, text="Points:", bg=_C['panel'],
+                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(4, 2))
+        self.smoothing_points_spinbox = ttk.Spinbox(
+            points_frame, from_=2, to=50, textvariable=self.smoothing_points_var,
+            width=4, command=self._on_smoothing_toggle
+        )
+        self.smoothing_points_spinbox.pack(side='left')
+        self.smoothing_points_spinbox.config(state=DISABLED)
 
         # ── Correlation ──
         row = _sec(sidebar_frame, "CORRELACIÓN", row)
@@ -787,32 +797,22 @@ class NecLabApp:
     }
 
     def _on_smoothing_toggle(self):
-        """Redraw when the smoothing method changes."""
+        """Enable/disable the points spinbox and redraw."""
+        enabled = self.smoothing_var.get()
+        if self.smoothing_points_spinbox:
+            self.smoothing_points_spinbox.config(state='normal' if enabled else DISABLED)
         self._run_peak_on_column()
 
     def _smooth_signal(self, signal, col_idx):
-        """Apply the selected baseline-removal/smoothing method to a 1-D signal."""
-        method = self.smoothing_method_var.get()
-        if method == 'None':
+        """Apply Convex Envelope smoothing when the checkbox is on."""
+        if not self.smoothing_var.get():
             return signal
-        from peak_functions import (
-            _linear_regression_detrend_signal, _ridge_detrend_signal, _lasso_detrend_signal,
-            _elasticnet_detrend_signal, _als_detrend_signal, _convex_envelope_detrend_signal,
-        )
-        method_map = {
-            'Linear Regression': lambda: _linear_regression_detrend_signal(signal),
-            'Ridge': lambda: _ridge_detrend_signal(signal),
-            'Lasso': lambda: _lasso_detrend_signal(signal),
-            'ElasticNet': lambda: _elasticnet_detrend_signal(signal),
-            'ALS (Asymmetric Least Squares)': lambda: _als_detrend_signal(signal),
-            'Convex Envelope': lambda: _convex_envelope_detrend_signal(signal),
-        }
-        func = method_map.get(method)
-        return func() if func else signal
+        from peak_functions import _convex_envelope_detrend_signal
+        return _convex_envelope_detrend_signal(signal, n_points=self.smoothing_points_var.get())
 
     def _get_data_for_peak(self, col_idx):
         """Return a data array with col_idx smoothed according to the current method."""
-        if self.smoothing_method_var.get() == 'None':
+        if not self.smoothing_var.get():
             return self.loaded_data
         data = self.loaded_data.copy()
         data[:, col_idx] = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
@@ -984,7 +984,7 @@ class NecLabApp:
             self.btn_save_corr.configure(state='normal')
             self.btn_save_peaks.configure(state='normal')
             self.peak_method_combo.config(state='readonly')
-            self.smoothing_method_combo.configure(state='readonly')
+            self.smoothing_check.configure(state='normal')
             self.menu_visual.entryconfig(
                 "Dendograma",
                 command=self._run_dendogram_on_selection,
