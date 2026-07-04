@@ -880,10 +880,12 @@ def save():
         filetypes=[
             ("PNG files", "*.png"),
             ("JPEG files", "*.jpg"),
-            ("JPEG files", "*.jpeg"), 
+            ("JPEG files", "*.jpeg"),
             ("TIFF files", "*.tiff"),
             ("TIFF files", "*.tif"),
             ("PDF files", "*.pdf"),
+            ("SVG files", "*.svg"),
+            ("EPS files", "*.eps"),
             ("All Files", "*.*")
         ]
     )

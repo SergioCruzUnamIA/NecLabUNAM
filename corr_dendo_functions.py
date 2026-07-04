@@ -629,7 +629,8 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
             initialfile=get_default_name('.png'),
             defaultextension=".png",
             filetypes=[("PNG Image", "*.png"), ("PDF Document", "*.pdf"),
-                       ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"), ("All Files", "*.*")]
+                       ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"),
+                       ("EPS Vector", "*.eps"), ("All Files", "*.*")]
         )
         if filename:
             ts_figs['multi'].savefig(filename)

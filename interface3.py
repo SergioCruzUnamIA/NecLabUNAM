@@ -939,7 +939,8 @@ class NecLabApp:
         filename = asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
-                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
+                       ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Data Image"
         )
         if filename:
@@ -953,7 +954,8 @@ class NecLabApp:
         filename = asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
-                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
+                       ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Correlation Image"
         )
         if filename:
@@ -1325,7 +1327,7 @@ class NecLabApp:
             defaultextension=".png",
             filetypes=[("PNG Image", "*.png"), ("PDF Document", "*.pdf"),
                        ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"),
-                       ("All Files", "*.*")],
+                       ("EPS Vector", "*.eps"), ("All Files", "*.*")],
             title="Save Dendrogram Image"
         )
         if filename:
@@ -2019,7 +2021,8 @@ class NecLabApp:
         filename = asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
-                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
+                       ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Plot Image"
         )
         if filename:
@@ -2033,7 +2036,8 @@ class NecLabApp:
         filename = asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
-                       ("TIFF files", "*.tiff"), ("All Files", "*.*")],
+                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
+                       ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Heatmap Image"
         )
         if filename:
