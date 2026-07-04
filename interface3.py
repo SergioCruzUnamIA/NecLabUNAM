@@ -976,19 +976,24 @@ class NecLabApp:
             ax = self._mid_fig.axes[0]
             ax.set_title(col_label)
 
-            # Only "Elliptic Envelope" applies its own further internal
-            # detrend on top of the data we hand it, so its own plot shows a
-            # genuinely different (vertically shifted) curve than `reference`
-            # -- draw our reference line there so peak/lowest-point markers
-            # land on a visible curve. Every other method's own plot already
-            # draws `reference` verbatim, so adding it again would just be
-            # the same line drawn twice.
             reference = data_for_peak[:, col_idx]
-            t = np.arange(len(reference))
             smoothing_on = self.smoothing_var.get()
+
+            # "Elliptic Envelope" applies its own further internal detrend on
+            # top of the data we hand it, so its own plot's line and outlier
+            # markers are a vertically-shifted version of `reference`. Correct
+            # them in place (rather than drawing a second, separate line)
+            # so its plot matches every other method's plot consistently.
             if method == 'Elliptic Envelope':
-                ref_label = 'Smoothed' if smoothing_on else 'Original (raw)'
-                ax.plot(t, reference, color='gray', linewidth=0.7, alpha=0.6, label=ref_label)
+                lines = ax.get_lines()
+                if lines:
+                    lines[0].set_ydata(reference)
+                if len(lines) > 1:
+                    marker_x = lines[1].get_xdata().astype(int)
+                    lines[1].set_ydata(reference[marker_x])
+                ax.relim()
+                ax.autoscale_view()
+
             if peaks is not None and len(peaks) > 0:
                 ax.scatter(peaks, reference[peaks], color='crimson', s=25, zorder=5, label='Peaks')
             if smoothing_on:
