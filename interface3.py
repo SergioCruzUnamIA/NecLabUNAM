@@ -85,7 +85,7 @@ class NecLabApp:
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
         self.smoothing_var = tk.BooleanVar(value=False)
-        self.smoothing_points_var = tk.IntVar(value=6)
+        self.smoothing_points_var = tk.IntVar(value=2)
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
         self.btn_save_data = None
         self.btn_save_corr = None
@@ -533,10 +533,11 @@ class NecLabApp:
                  fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(4, 2))
         self.smoothing_points_spinbox = ttk.Spinbox(
             points_frame, from_=2, to=50, textvariable=self.smoothing_points_var,
-            width=4, command=self._on_smoothing_toggle
+            width=4
         )
         self.smoothing_points_spinbox.pack(side='left')
         self.smoothing_points_spinbox.config(state=DISABLED)
+        self.smoothing_points_var.trace_add('write', lambda *args: self._on_smoothing_toggle())
 
         # ── Correlation ──
         row = _sec(sidebar_frame, "CORRELACIÓN", row)
@@ -807,8 +808,12 @@ class NecLabApp:
         """Apply Convex Envelope smoothing when the checkbox is on."""
         if not self.smoothing_var.get():
             return signal
+        try:
+            n_points = self.smoothing_points_var.get()
+        except tk.TclError:
+            return signal
         from peak_functions import _convex_envelope_detrend_signal
-        return _convex_envelope_detrend_signal(signal, n_points=self.smoothing_points_var.get())
+        return _convex_envelope_detrend_signal(signal, n_points=n_points)
 
     def _get_data_for_peak(self, col_idx):
         """Return a data array with col_idx smoothed according to the current method."""
