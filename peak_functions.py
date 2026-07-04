@@ -273,6 +273,27 @@ def _pick_k_lowest_points(cand_x, cand_y, n, k):
             j = np.argmin(np.abs(cand_x - center))
             chosen_x.append(cand_x[j])
             chosen_y.append(cand_y[j])
+
+    # Without an anchor near the very start/end, np.interp flat-extrapolates
+    # the baseline from the nearest chosen point, silently absorbing any real
+    # trend at the edges into the "after" signal instead of the baseline.
+    # Anchor each edge with the lowest genuine candidate within a small
+    # boundary window -- not simply the raw edge sample -- so a single noisy
+    # point at x=0 or x=n-1 can't single-handedly set the baseline.
+    boundary = max(1, n // 10)
+    if min(chosen_x) > boundary:
+        left_mask = cand_x < boundary
+        if left_mask.any():
+            j = np.argmin(cand_y[left_mask])
+            chosen_x.append(cand_x[left_mask][j])
+            chosen_y.append(cand_y[left_mask][j])
+    if max(chosen_x) < (n - 1) - boundary:
+        right_mask = cand_x > (n - 1) - boundary
+        if right_mask.any():
+            j = np.argmin(cand_y[right_mask])
+            chosen_x.append(cand_x[right_mask][j])
+            chosen_y.append(cand_y[right_mask][j])
+
     order = np.argsort(chosen_x)
     cx = np.array(chosen_x)[order]
     cy = np.array(chosen_y)[order]

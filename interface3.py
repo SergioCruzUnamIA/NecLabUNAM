@@ -912,9 +912,12 @@ class NecLabApp:
                         points = self._get_smoothing_points(col_idx)
                         if points is not None:
                             px, _ = points
+                            px_int = px.astype(int)
                             after_signal = data_for_peak[:, col_idx]
-                            ax.scatter(px, after_signal[px.astype(int)], color='darkorange',
-                                       s=25, zorder=5, label='Lowest points used (after smoothing)')
+                            after_vals = after_signal[px_int]
+                            ax.plot(px, after_vals, color='purple', linewidth=1.3, linestyle='--',
+                                    label='Smoothed lowest points')
+                            ax.scatter(px, after_vals, color='purple', s=25, zorder=5)
                             ax.legend(fontsize=8, loc='upper right')
                     self.canvas.draw()
                 # Show original signal with found peaks in mid frame
