@@ -228,6 +228,54 @@ def _detrend_signal(data_sel, smooth_window):
     return data_sel / smooth
 
 
+def _linear_detrend_signal(data_sel):
+    """Remove a linear drift by subtracting the best-fit line (scipy.signal.detrend)."""
+    from scipy.signal import detrend
+    return detrend(data_sel, type='linear')
+
+
+def _savgol_detrend_signal(data_sel, smooth_window):
+    """Remove a smooth, possibly curved baseline estimated with a Savitzky-Golay filter."""
+    from scipy.signal import savgol_filter
+    window = min(smooth_window, len(data_sel) - 1 + (len(data_sel) % 2))
+    window = max(window | 1, 5)  # force odd, at least 5
+    polyorder = min(2, window - 1)
+    baseline = savgol_filter(data_sel, window_length=window, polyorder=polyorder)
+    return data_sel - baseline
+
+
+def _rolling_mean_detrend_signal(data_sel, smooth_window):
+    """Remove a rolling-mean baseline (subtractive, unlike _detrend_signal's ratio)."""
+    window = max(1, smooth_window)
+    baseline = pd.Series(data_sel).rolling(window=window, center=True, min_periods=1).mean().values
+    return data_sel - baseline
+
+
+def _butterworth_detrend_signal(data_sel, cutoff=0.01, order=3):
+    """High-pass Butterworth filter: removes slow drift, keeps fast transients (peaks)."""
+    from scipy.signal import butter, filtfilt
+    b, a = butter(order, cutoff, btype='high', fs=1.0)
+    return filtfilt(b, a, data_sel)
+
+
+def _als_detrend_signal(data_sel, lam=1e5, p=0.01, niter=10):
+    """Asymmetric Least Squares baseline correction (Eilers & Boelens)."""
+    from scipy import sparse
+    from scipy.sparse.linalg import spsolve
+    y = np.asarray(data_sel, dtype=float)
+    L = len(y)
+    D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
+    D = lam * D.dot(D.transpose())
+    w = np.ones(L)
+    W = sparse.spdiags(w, 0, L, L)
+    z = y.copy()
+    for _ in range(niter):
+        W.setdiag(w)
+        z = spsolve((W + D).tocsc(), w * y)
+        w = p * (y > z) + (1 - p) * (y < z)
+    return y - z
+
+
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,
                 main_window=None, canvas=None, target_frame=None):
     """Detect peaks in data[:, roi_index] using look-back/look-ahead rise/fall criteria.

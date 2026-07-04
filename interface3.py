@@ -84,7 +84,7 @@ class NecLabApp:
         self.corr_method_var = tk.StringVar(value='pearson')
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
-        self.smoothing_var = tk.BooleanVar(value=False)
+        self.smoothing_method_var = tk.StringVar(value='None')
         self.smooth_window_var = tk.IntVar(value=10)
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
         self.btn_save_data = None
@@ -92,6 +92,7 @@ class NecLabApp:
         self.btn_save_peaks = None
         self.peak_method_combo = None
         self.smooth_window_spinbox = None
+        self.smoothing_method_combo = None
         self.peak_method_params = {}  # saved params per method name
         self.plot_mid_frame = None
         self._mid_fig = None
@@ -517,17 +518,20 @@ class NecLabApp:
         smooth_frame.columnconfigure(0, weight=1)
         row += 1
 
-        self.smoothing_check = tk.Checkbutton(
-            smooth_frame, text="Smoothing", variable=self.smoothing_var,
-            command=self._on_smoothing_toggle,
-            bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
-            activebackground=_C['panel'], selectcolor=_C['panel'],
-            state=DISABLED
+        tk.Label(smooth_frame, text="Smoothing:", bg=_C['panel'],
+                 fg=_C['sub'], font=('Arial', 8)).grid(row=0, column=0, sticky='w')
+
+        self.smoothing_method_combo = ttk.Combobox(
+            smooth_frame, textvariable=self.smoothing_method_var,
+            values=['None', 'Moving Average', 'Linear Detrend', 'Savitzky-Golay',
+                    'Rolling Mean', 'Butterworth High-pass', 'ALS (Asymmetric Least Squares)'],
+            state=DISABLED, width=22
         )
-        self.smoothing_check.grid(row=0, column=0, sticky='w', pady=(0, 2))
+        self.smoothing_method_combo.grid(row=1, column=0, sticky='ew', pady=(0, 2))
+        self.smoothing_method_combo.bind('<<ComboboxSelected>>', lambda e: self._on_smoothing_toggle())
 
         win_frame = tk.Frame(smooth_frame, bg=_C['panel'])
-        win_frame.grid(row=1, column=0, sticky='w')
+        win_frame.grid(row=2, column=0, sticky='w')
         tk.Label(win_frame, text="Window:", bg=_C['panel'],
                  fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
         self.smooth_window_spinbox = ttk.Spinbox(
@@ -795,23 +799,40 @@ class NecLabApp:
         ]),
     }
 
+    _WINDOW_SMOOTHING_METHODS = ('Moving Average', 'Savitzky-Golay', 'Rolling Mean')
+
     def _on_smoothing_toggle(self):
-        """Enable/disable spinbox and redraw."""
-        enabled = self.smoothing_var.get()
+        """Enable/disable the window spinbox for methods that use it, and redraw."""
+        method = self.smoothing_method_var.get()
         if self.smooth_window_spinbox:
-            self.smooth_window_spinbox.config(state='normal' if enabled else DISABLED)
+            uses_window = method in self._WINDOW_SMOOTHING_METHODS
+            self.smooth_window_spinbox.config(state='normal' if uses_window else DISABLED)
         self._run_peak_on_column()
 
     def _smooth_signal(self, signal, col_idx):
-        """Apply rolling-average smoothing when the checkbox is on."""
-        if not self.smoothing_var.get():
+        """Apply the selected baseline-removal/smoothing method to a 1-D signal."""
+        method = self.smoothing_method_var.get()
+        if method == 'None':
             return signal
-        from peak_functions import _detrend_signal
-        return _detrend_signal(signal, self.smooth_window_var.get())
+        from peak_functions import (
+            _detrend_signal, _linear_detrend_signal, _savgol_detrend_signal,
+            _rolling_mean_detrend_signal, _butterworth_detrend_signal, _als_detrend_signal,
+        )
+        window = self.smooth_window_var.get()
+        method_map = {
+            'Moving Average': lambda: _detrend_signal(signal, window),
+            'Linear Detrend': lambda: _linear_detrend_signal(signal),
+            'Savitzky-Golay': lambda: _savgol_detrend_signal(signal, window),
+            'Rolling Mean': lambda: _rolling_mean_detrend_signal(signal, window),
+            'Butterworth High-pass': lambda: _butterworth_detrend_signal(signal),
+            'ALS (Asymmetric Least Squares)': lambda: _als_detrend_signal(signal),
+        }
+        func = method_map.get(method)
+        return func() if func else signal
 
     def _get_data_for_peak(self, col_idx):
         """Return a data array with col_idx smoothed according to the current method."""
-        if not self.smoothing_var.get():
+        if self.smoothing_method_var.get() == 'None':
             return self.loaded_data
         data = self.loaded_data.copy()
         data[:, col_idx] = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
@@ -983,7 +1004,7 @@ class NecLabApp:
             self.btn_save_corr.configure(state='normal')
             self.btn_save_peaks.configure(state='normal')
             self.peak_method_combo.config(state='readonly')
-            self.smoothing_check.configure(state='normal')
+            self.smoothing_method_combo.configure(state='readonly')
             self.menu_visual.entryconfig(
                 "Dendograma",
                 command=self._run_dendogram_on_selection,
