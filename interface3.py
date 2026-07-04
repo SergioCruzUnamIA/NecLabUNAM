@@ -1022,6 +1022,8 @@ class NecLabApp:
         if points is not None:
             px, _ = points
             px_int = px.astype(int)
+            ax.plot(px, smoothed[px_int], color='darkorange', linewidth=1.3, linestyle='--',
+                    label='Baseline')
             ax.scatter(px, smoothed[px_int], color='darkorange', s=25, zorder=5,
                        label='Lowest points used (after smoothing)')
         ax.set_title(f'{col_label} — smoothed')
