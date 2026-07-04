@@ -86,6 +86,7 @@ class NecLabApp:
         self.show_corr_labels_var = tk.BooleanVar(value=True)
         self.smoothing_var = tk.BooleanVar(value=False)
         self.smoothing_points_var = tk.IntVar(value=2)
+        self.show_smoothing_points_var = tk.BooleanVar(value=True)
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
         self.btn_save_data = None
         self.btn_save_corr = None
@@ -93,6 +94,7 @@ class NecLabApp:
         self.peak_method_combo = None
         self.smoothing_check = None
         self.smoothing_points_spinbox = None
+        self.show_smoothing_points_check = None
         self.peak_method_params = {}  # saved params per method name
         self.plot_mid_frame = None
         self._mid_fig = None
@@ -527,6 +529,15 @@ class NecLabApp:
         )
         self.smoothing_check.grid(row=0, column=0, sticky='w')
 
+        self.show_smoothing_points_check = tk.Checkbutton(
+            smooth_frame, text="Show points", variable=self.show_smoothing_points_var,
+            command=self._on_smoothing_toggle,
+            bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
+            activebackground=_C['panel'], selectcolor=_C['panel'],
+            state=DISABLED
+        )
+        self.show_smoothing_points_check.grid(row=0, column=1, sticky='e')
+
         points_frame = tk.Frame(smooth_frame, bg=_C['panel'])
         points_frame.grid(row=1, column=0, sticky='w')
         tk.Label(points_frame, text="Points:", bg=_C['panel'],
@@ -825,8 +836,9 @@ class NecLabApp:
 
     def _get_smoothing_points(self, col_idx):
         """Return the (x, y) lowest points used by Convex Envelope smoothing,
-        in the original signal's scale, or None when smoothing is off."""
-        if not self.smoothing_var.get():
+        in the original signal's scale, or None when smoothing is off or the
+        "Show points" checkbox is unchecked."""
+        if not self.smoothing_var.get() or not self.show_smoothing_points_var.get():
             return None
         try:
             n_points = self.smoothing_points_var.get()
@@ -1058,11 +1070,19 @@ class NecLabApp:
             self.btn_save_peaks.configure(state='normal')
             self.peak_method_combo.config(state='readonly')
             self.smoothing_check.configure(state='normal')
+            self.show_smoothing_points_check.configure(state='normal')
             self.menu_visual.entryconfig(
                 "Dendograma",
                 command=self._run_dendogram_on_selection,
                 state=NORMAL
             )
+            # The initial column is drawn by the legacy single-plot helper in
+            # visualization_helpers.py, which knows nothing about the
+            # smoothing/peak-finder split layout. Re-render through the same
+            # pipeline column clicks use, so the first column respects
+            # whichever Smoothing/peak-finder options are already selected.
+            self.current_column = 0
+            self._run_peak_on_column()
     
     def _save_peaks_csv(self):
         """Run peak detection on every selection column and save peak indices to CSV."""
