@@ -85,13 +85,11 @@ class NecLabApp:
         self.peak_method_var = tk.StringVar(value='None')
         self.show_corr_labels_var = tk.BooleanVar(value=True)
         self.smoothing_method_var = tk.StringVar(value='None')
-        self.smooth_window_var = tk.IntVar(value=10)
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
         self.btn_save_data = None
         self.btn_save_corr = None
         self.btn_save_peaks = None
         self.peak_method_combo = None
-        self.smooth_window_spinbox = None
         self.smoothing_method_combo = None
         self.peak_method_params = {}  # saved params per method name
         self.plot_mid_frame = None
@@ -523,23 +521,12 @@ class NecLabApp:
 
         self.smoothing_method_combo = ttk.Combobox(
             smooth_frame, textvariable=self.smoothing_method_var,
-            values=['None', 'Moving Average', 'ElasticNet', 'Savitzky-Golay',
-                    'Rolling Mean', 'Butterworth High-pass', 'ALS (Asymmetric Least Squares)'],
+            values=['None', 'Linear Regression', 'Ridge', 'Lasso', 'ElasticNet',
+                    'ALS (Asymmetric Least Squares)'],
             state=DISABLED, width=22
         )
         self.smoothing_method_combo.grid(row=1, column=0, sticky='ew', pady=(0, 2))
         self.smoothing_method_combo.bind('<<ComboboxSelected>>', lambda e: self._on_smoothing_toggle())
-
-        win_frame = tk.Frame(smooth_frame, bg=_C['panel'])
-        win_frame.grid(row=2, column=0, sticky='w')
-        tk.Label(win_frame, text="Window:", bg=_C['panel'],
-                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
-        self.smooth_window_spinbox = ttk.Spinbox(
-            win_frame, from_=1, to=500, textvariable=self.smooth_window_var,
-            width=5, command=self._on_smoothing_toggle
-        )
-        self.smooth_window_spinbox.pack(side='left')
-        self.smooth_window_spinbox.config(state=DISABLED)
 
         # ── Correlation ──
         row = _sec(sidebar_frame, "CORRELACIÓN", row)
@@ -799,14 +786,8 @@ class NecLabApp:
         ]),
     }
 
-    _WINDOW_SMOOTHING_METHODS = ('Moving Average', 'Savitzky-Golay', 'Rolling Mean')
-
     def _on_smoothing_toggle(self):
-        """Enable/disable the window spinbox for methods that use it, and redraw."""
-        method = self.smoothing_method_var.get()
-        if self.smooth_window_spinbox:
-            uses_window = method in self._WINDOW_SMOOTHING_METHODS
-            self.smooth_window_spinbox.config(state='normal' if uses_window else DISABLED)
+        """Redraw when the smoothing method changes."""
         self._run_peak_on_column()
 
     def _smooth_signal(self, signal, col_idx):
@@ -815,16 +796,14 @@ class NecLabApp:
         if method == 'None':
             return signal
         from peak_functions import (
-            _detrend_signal, _elasticnet_detrend_signal, _savgol_detrend_signal,
-            _rolling_mean_detrend_signal, _butterworth_detrend_signal, _als_detrend_signal,
+            _linear_regression_detrend_signal, _ridge_detrend_signal, _lasso_detrend_signal,
+            _elasticnet_detrend_signal, _als_detrend_signal,
         )
-        window = self.smooth_window_var.get()
         method_map = {
-            'Moving Average': lambda: _detrend_signal(signal, window),
+            'Linear Regression': lambda: _linear_regression_detrend_signal(signal),
+            'Ridge': lambda: _ridge_detrend_signal(signal),
+            'Lasso': lambda: _lasso_detrend_signal(signal),
             'ElasticNet': lambda: _elasticnet_detrend_signal(signal),
-            'Savitzky-Golay': lambda: _savgol_detrend_signal(signal, window),
-            'Rolling Mean': lambda: _rolling_mean_detrend_signal(signal, window),
-            'Butterworth High-pass': lambda: _butterworth_detrend_signal(signal),
             'ALS (Asymmetric Least Squares)': lambda: _als_detrend_signal(signal),
         }
         func = method_map.get(method)

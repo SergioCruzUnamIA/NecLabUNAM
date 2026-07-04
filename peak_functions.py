@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn import svm
-from sklearn.linear_model import Lasso, ElasticNet
+from sklearn.linear_model import Lasso, ElasticNet, Ridge, LinearRegression
 from sklearn.covariance import EllipticEnvelope
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.ensemble import IsolationForest
@@ -211,21 +211,28 @@ def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, 
 
     return draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def _detrend_signal(data_sel, smooth_window):
-    """Detrend a 1-D signal by dividing by a smoothed background trend.
+def _linear_regression_detrend_signal(data_sel):
+    """Remove baseline drift by subtracting an OLS LinearRegression fit on the time index."""
+    x = np.arange(len(data_sel)).reshape(-1, 1)
+    reg = LinearRegression().fit(x, data_sel)
+    baseline = reg.predict(x)
+    return data_sel - baseline
 
-    Mirrors PeakCaller's approach: generate a smoothed version of the time
-    series, then divide the original by it.  When smooth_window <= 1 the
-    signal is divided by its mean (PeakCaller's "no trend" option, which
-    scales the profile so the mean equals 1).
-    """
-    if smooth_window > 1:
-        kernel = np.ones(smooth_window) / smooth_window
-        smooth = np.convolve(data_sel, kernel, mode='same')
-    else:
-        smooth = np.full_like(data_sel, np.mean(data_sel))
-    smooth = np.where(np.abs(smooth) < 1e-10, 1e-10, smooth)
-    return data_sel / smooth
+
+def _ridge_detrend_signal(data_sel):
+    """Remove baseline drift by subtracting a Ridge fit on the time index."""
+    x = np.arange(len(data_sel)).reshape(-1, 1)
+    reg = Ridge().fit(x, data_sel)
+    baseline = reg.predict(x)
+    return data_sel - baseline
+
+
+def _lasso_detrend_signal(data_sel):
+    """Remove baseline drift by subtracting a Lasso fit on the time index."""
+    x = np.arange(len(data_sel)).reshape(-1, 1)
+    reg = Lasso().fit(x, data_sel)
+    baseline = reg.predict(x)
+    return data_sel - baseline
 
 
 def _elasticnet_detrend_signal(data_sel):
@@ -234,30 +241,6 @@ def _elasticnet_detrend_signal(data_sel):
     reg = ElasticNet().fit(x, data_sel)
     baseline = reg.predict(x)
     return data_sel - baseline
-
-
-def _savgol_detrend_signal(data_sel, smooth_window):
-    """Remove a smooth, possibly curved baseline estimated with a Savitzky-Golay filter."""
-    from scipy.signal import savgol_filter
-    window = min(smooth_window, len(data_sel) - 1 + (len(data_sel) % 2))
-    window = max(window | 1, 5)  # force odd, at least 5
-    polyorder = min(2, window - 1)
-    baseline = savgol_filter(data_sel, window_length=window, polyorder=polyorder)
-    return data_sel - baseline
-
-
-def _rolling_mean_detrend_signal(data_sel, smooth_window):
-    """Remove a rolling-mean baseline (subtractive, unlike _detrend_signal's ratio)."""
-    window = max(1, smooth_window)
-    baseline = pd.Series(data_sel).rolling(window=window, center=True, min_periods=1).mean().values
-    return data_sel - baseline
-
-
-def _butterworth_detrend_signal(data_sel, cutoff=0.01, order=3):
-    """High-pass Butterworth filter: removes slow drift, keeps fast transients (peaks)."""
-    from scipy.signal import butter, filtfilt
-    b, a = butter(order, cutoff, btype='high', fs=1.0)
-    return filtfilt(b, a, data_sel)
 
 
 def _als_detrend_signal(data_sel, lam=1e5, p=0.01, niter=10):
