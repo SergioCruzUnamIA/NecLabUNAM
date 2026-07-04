@@ -862,6 +862,8 @@ class NecLabApp:
 
         if method == 'None':
             self._draw_raw_data(col_idx)
+            if self.smoothing_var.get():
+                self._draw_smoothed_preview(col_idx)
             return
 
         # Show dialog only when method changes or no params saved yet
@@ -907,11 +909,13 @@ class NecLabApp:
                     ax = self._data_fig.axes[0]
                     ax.set_title(col_label)
                     if self.smoothing_var.get():
-                        original = self.loaded_data[:, col_idx]
-                        t = np.arange(len(original))
-                        ax.plot(t, original, color='gray', linewidth=0.7, alpha=0.6, label='Original (raw)')
-                        self._plot_smoothing_overlay(ax, col_idx, t)
-                        ax.legend(fontsize=8, loc='upper right')
+                        points = self._get_smoothing_points(col_idx)
+                        if points is not None:
+                            px, _ = points
+                            after_signal = data_for_peak[:, col_idx]
+                            ax.scatter(px, after_signal[px.astype(int)], color='darkorange',
+                                       s=25, zorder=5, label='Lowest points used (after smoothing)')
+                            ax.legend(fontsize=8, loc='upper right')
                     self.canvas.draw()
                 # Show original signal with found peaks in mid frame
                 self._draw_original_with_peaks(col_idx, method, saved_params)
@@ -943,6 +947,33 @@ class NecLabApp:
         self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _draw_smoothed_preview(self, col_idx):
+        """Plot the smoothed (after) signal for col_idx in plot_mid_frame, so it's
+        visible even when no peak-finder method is selected."""
+        if self.plot_mid_frame is None or not self.plot_mid_frame.winfo_exists():
+            return
+        col_label = self.column_listbox.get(col_idx)
+        smoothed = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
+        t = np.arange(len(smoothed))
+
+        self._mid_fig, ax = plt.subplots()
+        ax.plot(t, smoothed, color='seagreen', linewidth=0.8, label='Smoothed')
+        points = self._get_smoothing_points(col_idx)
+        if points is not None:
+            px, _ = points
+            px_int = px.astype(int)
+            ax.scatter(px, smoothed[px_int], color='darkorange', s=25, zorder=5,
+                       label='Lowest points used (after smoothing)')
+        ax.set_title(f'{col_label} — smoothed')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        ax.legend(fontsize=8, loc='upper right')
+        self._mid_fig.tight_layout()
+
+        c = FigureCanvasTkAgg(self._mid_fig, master=self.plot_mid_frame)
+        c.draw()
+        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def _draw_original_with_peaks(self, col_idx, method, params):
         """Plot the original (unsmoothed) signal with peak markers in plot_mid_frame."""
