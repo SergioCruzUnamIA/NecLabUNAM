@@ -848,7 +848,10 @@ class NecLabApp:
         return convex_envelope_lowest_points(self.loaded_data[:, col_idx], n_points=n_points)
 
     def _run_peak_on_column(self, show_dialog=False, event=None):
-        """Draw raw data or run the selected peak finder on the current column.
+        """Redraw the current column: plot_top_frame always shows the original
+        signal, plot_mid_frame always shows the processed signal (smoothed,
+        and/or the peak-finder method's own output). Smoothing is applied to
+        the column before the peak-finder method runs on it.
         show_dialog=True forces the parameter dialog (used when the method changes).
         show_dialog=False reuses cached params (used when the column changes)."""
         if self.loaded_data is None:
@@ -864,7 +867,6 @@ class NecLabApp:
         for w in list(self.plot_top_frame.winfo_children()):
             w.destroy()
 
-        # Clear mid frame figure on every redraw
         if self._mid_fig is not None:
             plt.close(self._mid_fig)
             self._mid_fig = None
@@ -872,27 +874,76 @@ class NecLabApp:
             for w in list(self.plot_mid_frame.winfo_children()):
                 w.destroy()
 
-        if method == 'None':
-            self._draw_raw_data(col_idx)
-            if self.smoothing_var.get():
-                self._draw_smoothed_preview(col_idx)
+        saved_params = None
+        if method != 'None':
+            # Show dialog only when method changes or no params saved yet
+            if show_dialog or method not in self.peak_method_params:
+                from peak_functions import show_parameter_dialog
+                spec = self._PEAK_PARAM_SPECS.get(method)
+                if spec:
+                    title, param_list = spec
+                    new_params = show_parameter_dialog(self.root, title, param_list)
+                    if new_params is None:
+                        # User cancelled — revert to no peak-finder method
+                        self.peak_method_var.set('None')
+                        method = 'None'
+                    else:
+                        self.peak_method_params[method] = new_params
+            if method != 'None':
+                saved_params = self.peak_method_params.get(method)
+
+        self._draw_original_view(col_idx, method, saved_params)
+        self._draw_processed_view(col_idx, method, saved_params)
+
+    def _plot_smoothing_overlay(self, ax, col_idx, t):
+        """Overlay the Convex Envelope baseline line and its lowest points onto ax."""
+        points = self._get_smoothing_points(col_idx)
+        if points is None:
+            return
+        px, py = points
+        baseline = np.interp(t, px, py)
+        ax.plot(t, baseline, color='darkorange', linewidth=1.3, linestyle='--', label='Baseline')
+        ax.scatter(px, py, color='darkorange', s=25, zorder=5, label='Lowest points used')
+
+    def _draw_original_view(self, col_idx, method, params):
+        """Always plot the original signal in plot_top_frame, overlaying peak
+        markers (if a peak-finder method is active) and the smoothing
+        baseline/points (if Smoothing is enabled)."""
+        col_label = self.column_listbox.get(col_idx)
+        original = self.loaded_data[:, col_idx]
+        t = np.arange(len(original))
+
+        peaks = None
+        if method != 'None' and params is not None:
+            from peak_functions import compute_peaks
+            data_for_peak = self._get_data_for_peak(col_idx)
+            peaks = compute_peaks(data_for_peak, col_idx, method, params)
+
+        self._data_fig, ax = plt.subplots()
+        ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
+        if peaks is not None and len(peaks) > 0:
+            ax.scatter(peaks, original[peaks], color='crimson', s=25, zorder=5, label='Peaks')
+        self._plot_smoothing_overlay(ax, col_idx, t)
+        ax.set_title(col_label)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        if self.smoothing_var.get() or (peaks is not None and len(peaks) > 0):
+            ax.legend(fontsize=8, loc='upper right')
+        self._data_fig.tight_layout()
+        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _draw_processed_view(self, col_idx, method, params):
+        """Always plot the processed signal in plot_mid_frame: the smoothed
+        signal alone, or the peak-finder method's own output run on the
+        already-smoothed column when one is active."""
+        if self.plot_mid_frame is None or not self.plot_mid_frame.winfo_exists():
             return
 
-        # Show dialog only when method changes or no params saved yet
-        if show_dialog or method not in self.peak_method_params:
-            from peak_functions import show_parameter_dialog
-            spec = self._PEAK_PARAM_SPECS.get(method)
-            if spec:
-                title, param_list = spec
-                new_params = show_parameter_dialog(self.root, title, param_list)
-                if new_params is None:
-                    # User cancelled — revert to raw data view
-                    self.peak_method_var.set('None')
-                    self._draw_raw_data(col_idx)
-                    return
-                self.peak_method_params[method] = new_params
-
-        saved_params = self.peak_method_params.get(method)
+        if method == 'None':
+            self._draw_smoothed_preview(col_idx)
+            return
 
         from peak_functions import (elliptic_envelope_peak, actual_peak_caller,
                                     local_outlier_factor_peak, clf_peak,
@@ -907,61 +958,34 @@ class NecLabApp:
             'Peak Function 7': lasso_peak,
         }
         func = method_map.get(method)
-        if func:
-            data_for_peak = self._get_data_for_peak(col_idx)
-            result = func(data_for_peak, col_idx,
-                          main_window=None, canvas=None,
-                          target_frame=self.plot_top_frame,
-                          params=saved_params)
-            if result is not None:
-                self.canvas, self._data_fig = result
-                # Override title with column name
-                col_label = self.column_listbox.get(col_idx)
-                if self._data_fig and self._data_fig.axes:
-                    ax = self._data_fig.axes[0]
-                    ax.set_title(col_label)
-                    if self.smoothing_var.get():
-                        points = self._get_smoothing_points(col_idx)
-                        if points is not None:
-                            px, _ = points
-                            px_int = px.astype(int)
-                            after_signal = data_for_peak[:, col_idx]
-                            after_vals = after_signal[px_int]
-                            ax.plot(px, after_vals, color='purple', linewidth=1.3, linestyle='--',
-                                    label='Smoothed lowest points')
-                            ax.scatter(px, after_vals, color='purple', s=25, zorder=5)
-                            ax.legend(fontsize=8, loc='upper right')
-                    self.canvas.draw()
-                # Show original signal with found peaks in mid frame
-                self._draw_original_with_peaks(col_idx, method, saved_params)
-
-    def _plot_smoothing_overlay(self, ax, col_idx, t):
-        """Overlay the Convex Envelope baseline line and its lowest points onto ax."""
-        points = self._get_smoothing_points(col_idx)
-        if points is None:
+        if not func:
             return
-        px, py = points
-        baseline = np.interp(t, px, py)
-        ax.plot(t, baseline, color='darkorange', linewidth=1.3, linestyle='--', label='Baseline')
-        ax.scatter(px, py, color='darkorange', s=25, zorder=5, label='Lowest points used')
 
-    def _draw_raw_data(self, col_idx):
-        """Plot the original signal for col_idx, overlaying the smoothing baseline if enabled."""
+        # Smoothing (if enabled) is applied here, before the peak-finder method runs.
+        data_for_peak = self._get_data_for_peak(col_idx)
+        result = func(data_for_peak, col_idx,
+                      main_window=None, canvas=None,
+                      target_frame=self.plot_mid_frame,
+                      params=params)
+        if result is None:
+            return
+        mid_canvas, self._mid_fig = result
         col_label = self.column_listbox.get(col_idx)
-        original = self.loaded_data[:, col_idx]
-        t = np.arange(len(original))
-        self._data_fig, ax = plt.subplots()
-        ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
-        self._plot_smoothing_overlay(ax, col_idx, t)
-        if self.smoothing_var.get():
-            ax.legend(fontsize=8, loc='upper right')
-        ax.set_title(col_label)
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        self._data_fig.tight_layout()
-        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        if self._mid_fig and self._mid_fig.axes:
+            ax = self._mid_fig.axes[0]
+            ax.set_title(col_label)
+            if self.smoothing_var.get():
+                points = self._get_smoothing_points(col_idx)
+                if points is not None:
+                    px, _ = points
+                    px_int = px.astype(int)
+                    after_signal = data_for_peak[:, col_idx]
+                    after_vals = after_signal[px_int]
+                    ax.plot(px, after_vals, color='purple', linewidth=1.3, linestyle='--',
+                            label='Smoothed lowest points')
+                    ax.scatter(px, after_vals, color='purple', s=25, zorder=5)
+                    ax.legend(fontsize=8, loc='upper right')
+            mid_canvas.draw()
 
     def _draw_smoothed_preview(self, col_idx):
         """Plot the smoothed (after) signal for col_idx in plot_mid_frame, so it's
@@ -981,33 +1005,6 @@ class NecLabApp:
             ax.scatter(px, smoothed[px_int], color='darkorange', s=25, zorder=5,
                        label='Lowest points used (after smoothing)')
         ax.set_title(f'{col_label} — smoothed')
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        ax.legend(fontsize=8, loc='upper right')
-        self._mid_fig.tight_layout()
-
-        c = FigureCanvasTkAgg(self._mid_fig, master=self.plot_mid_frame)
-        c.draw()
-        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    def _draw_original_with_peaks(self, col_idx, method, params):
-        """Plot the original (unsmoothed) signal with peak markers in plot_mid_frame."""
-        if self.plot_mid_frame is None or not self.plot_mid_frame.winfo_exists():
-            return
-        from peak_functions import compute_peaks
-        data_for_peak = self._get_data_for_peak(col_idx)
-        peaks = compute_peaks(data_for_peak, col_idx, method, params)
-
-        col_label = self.column_listbox.get(col_idx)
-        original = self.loaded_data[:, col_idx]
-        t = np.arange(len(original))
-
-        self._mid_fig, ax = plt.subplots()
-        ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
-        if peaks is not None and len(peaks) > 0:
-            ax.scatter(peaks, original[peaks], color='crimson', s=25, zorder=5, label='Peaks')
-        self._plot_smoothing_overlay(ax, col_idx, t)
-        ax.set_title(f'{col_label} — original')
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
         ax.legend(fontsize=8, loc='upper right')
