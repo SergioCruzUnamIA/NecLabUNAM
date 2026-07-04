@@ -280,6 +280,17 @@ def _pick_k_lowest_points(cand_x, cand_y, n, k):
     return cx, cy[uniq_idx]
 
 
+def convex_envelope_lowest_points(data_sel, n_points=6):
+    """Return the (x, y) genuine lowest points used to build the Convex
+    Envelope baseline for a 1-D signal -- exposed separately so callers can
+    plot them alongside the signal."""
+    y = np.asarray(data_sel, dtype=float)
+    n = len(y)
+    cand_x, cand_y = _collect_genuine_lowest_points(y)
+    k = max(2, min(n_points, len(cand_x)))
+    return _pick_k_lowest_points(cand_x, cand_y, n, k)
+
+
 def _convex_envelope_detrend_signal(data_sel, n_points=6):
     """De-trend by dividing by a baseline built from a handful of the
     signal's genuine lowest points (found via local convexity, so none of
@@ -290,12 +301,9 @@ def _convex_envelope_detrend_signal(data_sel, n_points=6):
     being bridged by a single tilted line, while leaving peaks untouched.
     """
     y = np.asarray(data_sel, dtype=float)
-    n = len(y)
-    x = np.arange(n)
+    x = np.arange(len(y))
 
-    cand_x, cand_y = _collect_genuine_lowest_points(y)
-    k = max(2, min(n_points, len(cand_x)))
-    px, py = _pick_k_lowest_points(cand_x, cand_y, n, k)
+    px, py = convex_envelope_lowest_points(y, n_points=n_points)
 
     baseline = np.interp(x, px, py)
     baseline = np.where(np.abs(baseline) < 1e-10, 1e-10, baseline)

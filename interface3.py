@@ -519,7 +519,7 @@ class NecLabApp:
         row += 1
 
         self.smoothing_check = tk.Checkbutton(
-            smooth_frame, text="Smoothing (Convex Envelope)", variable=self.smoothing_var,
+            smooth_frame, text="Smoothing", variable=self.smoothing_var,
             command=self._on_smoothing_toggle,
             bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
             activebackground=_C['panel'], selectcolor=_C['panel'],
@@ -528,9 +528,9 @@ class NecLabApp:
         self.smoothing_check.grid(row=0, column=0, sticky='w')
 
         points_frame = tk.Frame(smooth_frame, bg=_C['panel'])
-        points_frame.grid(row=0, column=1, sticky='e')
+        points_frame.grid(row=1, column=0, sticky='w')
         tk.Label(points_frame, text="Points:", bg=_C['panel'],
-                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(4, 2))
+                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
         self.smoothing_points_spinbox = ttk.Spinbox(
             points_frame, from_=2, to=50, textvariable=self.smoothing_points_var,
             width=4
@@ -823,6 +823,18 @@ class NecLabApp:
         data[:, col_idx] = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
         return data
 
+    def _get_smoothing_points(self, col_idx):
+        """Return the (x, y) lowest points used by Convex Envelope smoothing,
+        in the original signal's scale, or None when smoothing is off."""
+        if not self.smoothing_var.get():
+            return None
+        try:
+            n_points = self.smoothing_points_var.get()
+        except tk.TclError:
+            return None
+        from peak_functions import convex_envelope_lowest_points
+        return convex_envelope_lowest_points(self.loaded_data[:, col_idx], n_points=n_points)
+
     def _run_peak_on_column(self, show_dialog=False, event=None):
         """Draw raw data or run the selected peak finder on the current column.
         show_dialog=True forces the parameter dialog (used when the method changes).
@@ -903,6 +915,12 @@ class NecLabApp:
         signal = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
         self._data_fig, ax = plt.subplots()
         ax.plot(np.array(range(len(signal))).reshape(-1, 1), signal)
+        points = self._get_smoothing_points(col_idx)
+        if points is not None:
+            px, py = points
+            px_int = px.astype(int)
+            ax.scatter(px, signal[px_int], color='red', s=25, zorder=5, label='Lowest points used')
+            ax.legend(fontsize=8, loc='upper right')
         ax.set_title(col_label)
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
@@ -927,6 +945,10 @@ class NecLabApp:
         ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
         if peaks is not None and len(peaks) > 0:
             ax.scatter(peaks, original[peaks], color='crimson', s=25, zorder=5, label='Peaks')
+        points = self._get_smoothing_points(col_idx)
+        if points is not None:
+            px, py = points
+            ax.scatter(px, py, color='red', s=25, zorder=5, label='Lowest points used')
         ax.set_title(f'{col_label} — original')
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
