@@ -261,13 +261,8 @@ def _als_detrend_signal(data_sel, lam=1e5, p=0.01, niter=10):
     return y - z
 
 
-def _convex_envelope_detrend_signal(data_sel):
-    """PeakCaller's convex-envelope smoothing: divide by the lower convex hull
-    of the (time, value) points, interpolated between hull vertices (an
-    elastic band pulled taut under the curve)."""
-    y = np.asarray(data_sel, dtype=float)
-    x = np.arange(len(y))
-
+def _lower_convex_hull(x, y):
+    """Vertices of the lower convex hull of points (x, y) via a monotone chain."""
     def cross(o, a, b):
         return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
 
@@ -276,10 +271,36 @@ def _convex_envelope_detrend_signal(data_sel):
         while len(hull) >= 2 and cross(hull[-2], hull[-1], p) <= 0:
             hull.pop()
         hull.append(p)
-    hull_x = np.array([p[0] for p in hull])
-    hull_y = np.array([p[1] for p in hull])
+    return np.array([p[0] for p in hull]), np.array([p[1] for p in hull])
 
-    envelope = np.interp(x, hull_x, hull_y)
+
+def _convex_envelope_detrend_signal(data_sel, window_frac=0.25, overlap=0.5):
+    """PeakCaller's convex-envelope smoothing, computed in overlapping windows.
+
+    A single hull over the whole trace is forced onto a straight line whenever
+    the recording doesn't return to its starting level (e.g. a slow decay that
+    settles above the pre-response baseline), which tilts the flat, non-peak
+    segments instead of leaving them near 1.0. Computing the lower convex hull
+    within overlapping windows and stitching by the pointwise max lets each
+    flat segment settle at its own local level while still leaving peaks
+    untouched.
+    """
+    y = np.asarray(data_sel, dtype=float)
+    n = len(y)
+    x = np.arange(n)
+    window = max(20, int(n * window_frac))
+    stride = max(1, int(window * (1 - overlap)))
+
+    envelope = np.full(n, -np.inf)
+    start = 0
+    while start < n:
+        end = min(start + window, n)
+        hull_x, hull_y = _lower_convex_hull(x[start:end], y[start:end])
+        envelope[start:end] = np.maximum(envelope[start:end], np.interp(x[start:end], hull_x, hull_y))
+        if end == n:
+            break
+        start += stride
+
     envelope = np.where(np.abs(envelope) < 1e-10, 1e-10, envelope)
     return y / envelope
 
