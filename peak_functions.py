@@ -292,13 +292,15 @@ def convex_envelope_lowest_points(data_sel, n_points=6):
 
 
 def _convex_envelope_detrend_signal(data_sel, n_points=6):
-    """De-trend by dividing by a baseline built from a handful of the
+    """De-trend by subtracting a baseline built from a handful of the
     signal's genuine lowest points (found via local convexity, so none of
     them can fall inside a peak), connected piecewise-linearly.
 
     Using few, well-spread key points -- rather than one straight line --
     lets each flat, non-peak segment settle near its own level instead of
     being bridged by a single tilted line, while leaving peaks untouched.
+    Subtraction (rather than dividing by the baseline) keeps this numerically
+    stable even when the signal's lowest points are close to zero.
     """
     y = np.asarray(data_sel, dtype=float)
     x = np.arange(len(y))
@@ -306,8 +308,7 @@ def _convex_envelope_detrend_signal(data_sel, n_points=6):
     px, py = convex_envelope_lowest_points(y, n_points=n_points)
 
     baseline = np.interp(x, px, py)
-    baseline = np.where(np.abs(baseline) < 1e-10, 1e-10, baseline)
-    return y / baseline
+    return y - baseline
 
 
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,

@@ -904,22 +904,37 @@ class NecLabApp:
                 # Override title with column name
                 col_label = self.column_listbox.get(col_idx)
                 if self._data_fig and self._data_fig.axes:
-                    self._data_fig.axes[0].set_title(col_label)
+                    ax = self._data_fig.axes[0]
+                    ax.set_title(col_label)
+                    if self.smoothing_var.get():
+                        original = self.loaded_data[:, col_idx]
+                        t = np.arange(len(original))
+                        ax.plot(t, original, color='gray', linewidth=0.7, alpha=0.6, label='Original (raw)')
+                        self._plot_smoothing_overlay(ax, col_idx, t)
+                        ax.legend(fontsize=8, loc='upper right')
                     self.canvas.draw()
                 # Show original signal with found peaks in mid frame
                 self._draw_original_with_peaks(col_idx, method, saved_params)
 
-    def _draw_raw_data(self, col_idx):
-        """Plot data for col_idx into plot_top_frame, applying smoothing if enabled."""
-        col_label = self.column_listbox.get(col_idx)
-        signal = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
-        self._data_fig, ax = plt.subplots()
-        ax.plot(np.array(range(len(signal))).reshape(-1, 1), signal)
+    def _plot_smoothing_overlay(self, ax, col_idx, t):
+        """Overlay the Convex Envelope baseline line and its lowest points onto ax."""
         points = self._get_smoothing_points(col_idx)
-        if points is not None:
-            px, py = points
-            px_int = px.astype(int)
-            ax.scatter(px, signal[px_int], color='red', s=25, zorder=5, label='Lowest points used')
+        if points is None:
+            return
+        px, py = points
+        baseline = np.interp(t, px, py)
+        ax.plot(t, baseline, color='darkorange', linewidth=1.3, linestyle='--', label='Baseline')
+        ax.scatter(px, py, color='darkorange', s=25, zorder=5, label='Lowest points used')
+
+    def _draw_raw_data(self, col_idx):
+        """Plot the original signal for col_idx, overlaying the smoothing baseline if enabled."""
+        col_label = self.column_listbox.get(col_idx)
+        original = self.loaded_data[:, col_idx]
+        t = np.arange(len(original))
+        self._data_fig, ax = plt.subplots()
+        ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
+        self._plot_smoothing_overlay(ax, col_idx, t)
+        if self.smoothing_var.get():
             ax.legend(fontsize=8, loc='upper right')
         ax.set_title(col_label)
         ax.set_xlabel('Time')
@@ -945,10 +960,7 @@ class NecLabApp:
         ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
         if peaks is not None and len(peaks) > 0:
             ax.scatter(peaks, original[peaks], color='crimson', s=25, zorder=5, label='Peaks')
-        points = self._get_smoothing_points(col_idx)
-        if points is not None:
-            px, py = points
-            ax.scatter(px, py, color='red', s=25, zorder=5, label='Lowest points used')
+        self._plot_smoothing_overlay(ax, col_idx, t)
         ax.set_title(f'{col_label} — original')
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
