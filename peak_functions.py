@@ -228,10 +228,12 @@ def _detrend_signal(data_sel, smooth_window):
     return data_sel / smooth
 
 
-def _linear_detrend_signal(data_sel):
-    """Remove a linear drift by subtracting the best-fit line (scipy.signal.detrend)."""
-    from scipy.signal import detrend
-    return detrend(data_sel, type='linear')
+def _elasticnet_detrend_signal(data_sel):
+    """Remove baseline drift by subtracting an ElasticNet fit on the time index."""
+    x = np.arange(len(data_sel)).reshape(-1, 1)
+    reg = ElasticNet().fit(x, data_sel)
+    baseline = reg.predict(x)
+    return data_sel - baseline
 
 
 def _savgol_detrend_signal(data_sel, smooth_window):

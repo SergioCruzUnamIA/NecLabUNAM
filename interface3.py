@@ -523,7 +523,7 @@ class NecLabApp:
 
         self.smoothing_method_combo = ttk.Combobox(
             smooth_frame, textvariable=self.smoothing_method_var,
-            values=['None', 'Moving Average', 'Linear Detrend', 'Savitzky-Golay',
+            values=['None', 'Moving Average', 'ElasticNet', 'Savitzky-Golay',
                     'Rolling Mean', 'Butterworth High-pass', 'ALS (Asymmetric Least Squares)'],
             state=DISABLED, width=22
         )
@@ -815,13 +815,13 @@ class NecLabApp:
         if method == 'None':
             return signal
         from peak_functions import (
-            _detrend_signal, _linear_detrend_signal, _savgol_detrend_signal,
+            _detrend_signal, _elasticnet_detrend_signal, _savgol_detrend_signal,
             _rolling_mean_detrend_signal, _butterworth_detrend_signal, _als_detrend_signal,
         )
         window = self.smooth_window_var.get()
         method_map = {
             'Moving Average': lambda: _detrend_signal(signal, window),
-            'Linear Detrend': lambda: _linear_detrend_signal(signal),
+            'ElasticNet': lambda: _elasticnet_detrend_signal(signal),
             'Savitzky-Golay': lambda: _savgol_detrend_signal(signal, window),
             'Rolling Mean': lambda: _rolling_mean_detrend_signal(signal, window),
             'Butterworth High-pass': lambda: _butterworth_detrend_signal(signal),
