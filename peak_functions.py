@@ -261,6 +261,29 @@ def _als_detrend_signal(data_sel, lam=1e5, p=0.01, niter=10):
     return y - z
 
 
+def _convex_envelope_detrend_signal(data_sel):
+    """PeakCaller's convex-envelope smoothing: divide by the lower convex hull
+    of the (time, value) points, interpolated between hull vertices (an
+    elastic band pulled taut under the curve)."""
+    y = np.asarray(data_sel, dtype=float)
+    x = np.arange(len(y))
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    hull = []
+    for p in zip(x, y):
+        while len(hull) >= 2 and cross(hull[-2], hull[-1], p) <= 0:
+            hull.pop()
+        hull.append(p)
+    hull_x = np.array([p[0] for p in hull])
+    hull_y = np.array([p[1] for p in hull])
+
+    envelope = np.interp(x, hull_x, hull_y)
+    envelope = np.where(np.abs(envelope) < 1e-10, 1e-10, envelope)
+    return y / envelope
+
+
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,
                 main_window=None, canvas=None, target_frame=None):
     """Detect peaks in data[:, roi_index] using look-back/look-ahead rise/fall criteria.

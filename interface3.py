@@ -522,7 +522,7 @@ class NecLabApp:
         self.smoothing_method_combo = ttk.Combobox(
             smooth_frame, textvariable=self.smoothing_method_var,
             values=['None', 'Linear Regression', 'Ridge', 'Lasso', 'ElasticNet',
-                    'ALS (Asymmetric Least Squares)'],
+                    'ALS (Asymmetric Least Squares)', 'Convex Envelope'],
             state=DISABLED, width=22
         )
         self.smoothing_method_combo.grid(row=1, column=0, sticky='ew', pady=(0, 2))
@@ -797,7 +797,7 @@ class NecLabApp:
             return signal
         from peak_functions import (
             _linear_regression_detrend_signal, _ridge_detrend_signal, _lasso_detrend_signal,
-            _elasticnet_detrend_signal, _als_detrend_signal,
+            _elasticnet_detrend_signal, _als_detrend_signal, _convex_envelope_detrend_signal,
         )
         method_map = {
             'Linear Regression': lambda: _linear_regression_detrend_signal(signal),
@@ -805,6 +805,7 @@ class NecLabApp:
             'Lasso': lambda: _lasso_detrend_signal(signal),
             'ElasticNet': lambda: _elasticnet_detrend_signal(signal),
             'ALS (Asymmetric Least Squares)': lambda: _als_detrend_signal(signal),
+            'Convex Envelope': lambda: _convex_envelope_detrend_signal(signal),
         }
         func = method_map.get(method)
         return func() if func else signal
