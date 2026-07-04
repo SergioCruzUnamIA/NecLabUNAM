@@ -892,8 +892,17 @@ class NecLabApp:
             if method != 'None':
                 saved_params = self.peak_method_params.get(method)
 
-        self._draw_original_view(col_idx, method, saved_params)
-        self._draw_processed_view(col_idx, method, saved_params)
+        # Peaks are found on the already-smoothed column (if Smoothing is on),
+        # computed once so both plots mark the exact same peaks.
+        data_for_peak = None
+        peaks = None
+        if method != 'None' and saved_params is not None:
+            from peak_functions import compute_peaks
+            data_for_peak = self._get_data_for_peak(col_idx)
+            peaks = compute_peaks(data_for_peak, col_idx, method, saved_params)
+
+        self._draw_original_view(col_idx, peaks)
+        self._draw_processed_view(col_idx, method, saved_params, data_for_peak, peaks)
 
     def _plot_smoothing_overlay(self, ax, col_idx, t):
         """Overlay the Convex Envelope baseline line and its lowest points onto ax."""
@@ -905,19 +914,13 @@ class NecLabApp:
         ax.plot(t, baseline, color='darkorange', linewidth=1.3, linestyle='--', label='Baseline')
         ax.scatter(px, py, color='darkorange', s=25, zorder=5, label='Lowest points used')
 
-    def _draw_original_view(self, col_idx, method, params):
+    def _draw_original_view(self, col_idx, peaks):
         """Always plot the original signal in plot_top_frame, overlaying peak
         markers (if a peak-finder method is active) and the smoothing
         baseline/points (if Smoothing is enabled)."""
         col_label = self.column_listbox.get(col_idx)
         original = self.loaded_data[:, col_idx]
         t = np.arange(len(original))
-
-        peaks = None
-        if method != 'None' and params is not None:
-            from peak_functions import compute_peaks
-            data_for_peak = self._get_data_for_peak(col_idx)
-            peaks = compute_peaks(data_for_peak, col_idx, method, params)
 
         self._data_fig, ax = plt.subplots()
         ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
@@ -934,7 +937,7 @@ class NecLabApp:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    def _draw_processed_view(self, col_idx, method, params):
+    def _draw_processed_view(self, col_idx, method, params, data_for_peak, peaks):
         """Always plot the processed signal in plot_mid_frame: the smoothed
         signal alone, or the peak-finder method's own output run on the
         already-smoothed column when one is active."""
@@ -961,8 +964,6 @@ class NecLabApp:
         if not func:
             return
 
-        # Smoothing (if enabled) is applied here, before the peak-finder method runs.
-        data_for_peak = self._get_data_for_peak(col_idx)
         result = func(data_for_peak, col_idx,
                       main_window=None, canvas=None,
                       target_frame=self.plot_mid_frame,
@@ -974,17 +975,27 @@ class NecLabApp:
         if self._mid_fig and self._mid_fig.axes:
             ax = self._mid_fig.axes[0]
             ax.set_title(col_label)
-            if self.smoothing_var.get():
+
+            # Draw the exact data fed into the peak-finder (smoothed, if
+            # Smoothing is on) as a visible reference, so peak/lowest-point
+            # markers land on a curve that's actually plotted here, instead
+            # of the peak-finder's own further-transformed curve.
+            reference = data_for_peak[:, col_idx]
+            t = np.arange(len(reference))
+            smoothing_on = self.smoothing_var.get()
+            ref_label = 'Smoothed' if smoothing_on else 'Original (raw)'
+            ax.plot(t, reference, color='gray', linewidth=0.7, alpha=0.6, label=ref_label)
+            if peaks is not None and len(peaks) > 0:
+                ax.scatter(peaks, reference[peaks], color='crimson', s=25, zorder=5, label='Peaks')
+            if smoothing_on:
                 points = self._get_smoothing_points(col_idx)
                 if points is not None:
                     px, _ = points
                     px_int = px.astype(int)
-                    after_signal = data_for_peak[:, col_idx]
-                    after_vals = after_signal[px_int]
-                    ax.plot(px, after_vals, color='purple', linewidth=1.3, linestyle='--',
+                    ax.plot(px, reference[px_int], color='purple', linewidth=1.3, linestyle='--',
                             label='Smoothed lowest points')
-                    ax.scatter(px, after_vals, color='purple', s=25, zorder=5)
-                    ax.legend(fontsize=8, loc='upper right')
+                    ax.scatter(px, reference[px_int], color='purple', s=25, zorder=5)
+            ax.legend(fontsize=8, loc='upper right')
             mid_canvas.draw()
 
     def _draw_smoothed_preview(self, col_idx):
