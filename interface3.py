@@ -1632,7 +1632,15 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_classifications
         )
-        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 10))
+        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
+
+        self.btn_load_multi_xls_classifications = ctk.CTkButton(
+            sidebar, text="Load Classifications", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._load_multi_xls_classifications
+        )
+        self.btn_load_multi_xls_classifications.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1715,6 +1723,7 @@ class NecLabApp:
             self.btn_save_multi_xls_heatmap.configure(state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.btn_save_multi_xls_classifications.configure(state='normal')
+            self.btn_load_multi_xls_classifications.configure(state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -2228,6 +2237,68 @@ class NecLabApp:
             df.to_excel(filename)
 
         messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
+
+    def _load_multi_xls_classifications(self):
+        """Carga clasificaciones previamente guardadas (mismo formato que
+        "Save Classifications": una fila por columna de datos, una columna
+        por hoja) y las aplica a las columnas/hojas que coincidan por
+        nombre con lo actualmente cargado. Cualquier valor de clasificación
+        nuevo se agrega a las opciones disponibles en los combobox."""
+        if not self.multi_xls_datasets or not self.multi_xls_common_columns:
+            messagebox.showwarning("Sin Datos", "Carga datos primero.")
+            return
+
+        from tkinter.filedialog import askopenfilename
+        import pandas as pd
+
+        filename = askopenfilename(
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Load Classifications"
+        )
+        if not filename:
+            return
+
+        if filename.lower().endswith('.csv'):
+            df = pd.read_csv(filename, index_col=0)
+        else:
+            df = pd.read_excel(filename, index_col=0)
+
+        column_to_index = {name: i for i, name in enumerate(self.multi_xls_common_columns)}
+        sheet_labels = {ds['label'] for ds in self.multi_xls_datasets}
+        matched_sheets = [label for label in df.columns if label in sheet_labels]
+
+        applied = 0
+        new_classes = []
+        for col_name, row in df.iterrows():
+            col_idx = column_to_index.get(str(col_name))
+            if col_idx is None:
+                continue
+            for label in matched_sheets:
+                value = row[label]
+                if pd.isna(value):
+                    continue
+                value = str(value)
+                self.multi_xls_classifications.setdefault(col_idx, {})[label] = value
+                applied += 1
+                if value not in self.multi_xls_classes and value not in new_classes:
+                    new_classes.append(value)
+
+        if not matched_sheets:
+            messagebox.showwarning(
+                "Sin Coincidencias",
+                "Ninguna columna u hoja del archivo coincide con los datos cargados."
+            )
+            return
+
+        if new_classes:
+            self.multi_xls_classes.extend(new_classes)
+            for combo in self.multi_xls_class_combos.values():
+                combo.configure(values=self.multi_xls_classes)
+
+        if self.multi_xls_current_index is not None:
+            self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
+
+        messagebox.showinfo("Loaded", f"Applied {applied} classifications from:\n{filename}")
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
