@@ -1648,6 +1648,17 @@ class NecLabApp:
         self.multi_xls_class_row.pack(side=tk.TOP, fill=tk.X)
         self.multi_xls_class_row.pack_propagate(False)
 
+        # Small "next column" button docked to the top-right corner, above
+        # the classification row. Created after (and kept raised over) that
+        # row so it stays a fixed, stable control regardless of how many
+        # per-sheet dropdowns get rebuilt into the row below it.
+        self.btn_multi_xls_next_column = tk.Button(
+            self.multi_xls_plot_frame, text="▶", font=('Arial', 10, 'bold'),
+            command=self._on_multi_xls_next_column, state=DISABLED
+        )
+        self.btn_multi_xls_next_column.place(relx=1.0, rely=0, anchor='ne', width=26, height=26)
+        self.btn_multi_xls_next_column.lift()
+
         self.multi_xls_plot_placeholder = tk.Label(
             self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
@@ -1694,6 +1705,7 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.btn_save_multi_xls_plot.configure(state='normal')
             self.btn_save_multi_xls_heatmap.configure(state='normal')
+            self.btn_multi_xls_next_column.configure(state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -1922,6 +1934,19 @@ class NecLabApp:
             return
         self._draw_multi_xls_plot(sel[0])
 
+    def _on_multi_xls_next_column(self):
+        """Advance to the next column (e.g. Column 6 -> Column 7), wrapping
+        back to the first after the last, and redraw both plots for it."""
+        count = self.multi_xls_column_listbox.size()
+        if count == 0:
+            return
+        current = self.multi_xls_current_index if self.multi_xls_current_index is not None else -1
+        next_index = (current + 1) % count
+        self.multi_xls_column_listbox.selection_clear(0, tk.END)
+        self.multi_xls_column_listbox.selection_set(next_index)
+        self.multi_xls_column_listbox.see(next_index)
+        self._draw_multi_xls_plot(next_index)
+
     def _on_multi_xls_plot_frame_resize(self, event=None):
         """Redibuja la gráfica de líneas (con un pequeño retraso, para no
         redibujar en cada pixel mientras se arrastra la ventana) para que
@@ -2027,6 +2052,7 @@ class NecLabApp:
         self._multi_xls_plot_canvas.draw()
 
         self._position_multi_xls_class_row(ax, bounds)
+        self.btn_multi_xls_next_column.lift()
 
     def _draw_multi_xls_heatmap(self):
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
