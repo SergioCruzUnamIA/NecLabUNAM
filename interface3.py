@@ -1624,7 +1624,15 @@ class NecLabApp:
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             command=self._open_multi_xls_class_editor
-        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 10))
+        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
+
+        self.btn_save_multi_xls_classifications = ctk.CTkButton(
+            sidebar, text="Save Classifications", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_multi_xls_classifications
+        )
+        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1706,6 +1714,7 @@ class NecLabApp:
             self.btn_save_multi_xls_plot.configure(state='normal')
             self.btn_save_multi_xls_heatmap.configure(state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
+            self.btn_save_multi_xls_classifications.configure(state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -2181,6 +2190,44 @@ class NecLabApp:
         )
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_multi_xls_classifications(self):
+        """Guarda, para cada columna de datos y cada hoja cargada, la
+        clasificación elegida (una fila por columna, una columna por hoja),
+        en un archivo .xlsx o .csv. Las combinaciones no clasificadas
+        todavía usan el mismo valor por defecto (el nombre de la hoja) que
+        se muestra en la interfaz."""
+        if not self.multi_xls_datasets or not self.multi_xls_common_columns:
+            messagebox.showwarning("Sin Datos", "Carga datos primero.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Save Classifications"
+        )
+        if not filename:
+            return
+
+        sheet_labels = [ds['label'] for ds in self.multi_xls_datasets]
+        rows = []
+        for i, col_name in enumerate(self.multi_xls_common_columns):
+            saved = self.multi_xls_classifications.get(i, {})
+            row = {'Column': col_name}
+            for label in sheet_labels:
+                row[label] = saved.get(label, label)
+            rows.append(row)
+
+        df = pd.DataFrame(rows).set_index('Column')
+        if filename.lower().endswith('.csv'):
+            df.to_csv(filename)
+        else:
+            df.to_excel(filename)
+
+        messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
