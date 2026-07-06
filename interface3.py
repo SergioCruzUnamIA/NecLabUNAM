@@ -105,10 +105,11 @@ class NecLabApp:
         self.multi_xls_common_columns = []
         self.multi_xls_column_listbox = None
         self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
-        self.multi_xls_smoothing_var = tk.BooleanVar(value=False)
+        self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_smoothing_check = None
         self.multi_xls_smoothing_points_spinbox = None
+        self.multi_xls_shared_scale_var = tk.BooleanVar(value=True)
         self.multi_xls_plot_frame = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
@@ -1627,9 +1628,18 @@ class NecLabApp:
             width=4
         )
         self.multi_xls_smoothing_points_spinbox.pack(side='left')
-        self.multi_xls_smoothing_points_spinbox.config(state=DISABLED)
+        self.multi_xls_smoothing_points_spinbox.config(
+            state='normal' if self.multi_xls_smoothing_var.get() else DISABLED)
         self.multi_xls_smoothing_points_var.trace_add(
             'write', lambda *args: self._on_multi_xls_smoothing_toggle())
+
+        tk.Checkbutton(sidebar, text="Escala de Color Compartida (mapa de calor)",
+                       variable=self.multi_xls_shared_scale_var,
+                       command=self._on_multi_xls_shared_scale_toggle,
+                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
+                       activebackground=_C['panel'], font=('Arial', 9),
+                       wraplength=210, justify='left').grid(
+            row=5, column=0, sticky='w', padx=10, pady=(0, 6))
 
         self.btn_save_multi_xls_plot = ctk.CTkButton(
             sidebar, text="Save Plot Image", height=28, corner_radius=6,
@@ -1637,7 +1647,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_plot_image
         )
-        self.btn_save_multi_xls_plot.grid(row=5, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_plot.grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_save_multi_xls_heatmap = ctk.CTkButton(
             sidebar, text="Save Heatmap Image", height=28, corner_radius=6,
@@ -1645,14 +1655,14 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_heatmap_image
         )
-        self.btn_save_multi_xls_heatmap.grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_heatmap.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         ctk.CTkButton(
             sidebar, text="Editar Clasificaciones", height=28, corner_radius=6,
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             command=self._open_multi_xls_class_editor
-        ).grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
+        ).grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_save_multi_xls_classifications = ctk.CTkButton(
             sidebar, text="Save Classifications", height=28, corner_radius=6,
@@ -1660,7 +1670,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_classifications
         )
-        self.btn_save_multi_xls_classifications.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_classifications.grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_load_multi_xls_classifications = ctk.CTkButton(
             sidebar, text="Load Classifications", height=28, corner_radius=6,
@@ -1668,7 +1678,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._load_multi_xls_classifications
         )
-        self.btn_load_multi_xls_classifications.grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 10))
+        self.btn_load_multi_xls_classifications.grid(row=10, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -2000,6 +2010,11 @@ class NecLabApp:
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
+    def _on_multi_xls_shared_scale_toggle(self):
+        """Redibuja el mapa de calor con una escala de color compartida entre
+        todas las hojas, o una escala independiente para cada hoja."""
+        self._draw_multi_xls_heatmap()
+
     def _smooth_multi_xls_signal(self, values):
         """Apply Convex Envelope smoothing to a single sheet's column values
         when the 'Smoothing' checkbox is on."""
@@ -2186,8 +2201,11 @@ class NecLabApp:
         for m in raw_matrices:
             sheet_min = float(m[np.isfinite(m)].min())
             matrices.append((m / sheet_min).T)
-        norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
-        vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
+
+        shared_scale = self.multi_xls_shared_scale_var.get()
+        if shared_scale:
+            norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+            vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
 
         show_labels = self.multi_xls_show_labels_var.get()
         fig_width = w_px / 100
@@ -2221,7 +2239,12 @@ class NecLabApp:
         im = None
         for ds, matrix in zip(self.multi_xls_datasets, matrices):
             n_cols, n_samples = matrix.shape
-            im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=vmin, vmax=vmax,
+            if shared_scale:
+                im_vmin, im_vmax = vmin, vmax
+            else:
+                finite = matrix[np.isfinite(matrix)]
+                im_vmin, im_vmax = float(finite.min()), float(finite.max())
+            im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=im_vmin, vmax=im_vmax,
                            extent=(offset, offset + n_samples, n_cols, 0))
             if offset > 0:
                 ax.axvline(offset, color='white', linewidth=1.5)
@@ -2236,9 +2259,12 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
-        ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
-        if im is not None:
-            self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
+        if shared_scale:
+            ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
+            if im is not None:
+                self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
+        else:
+            ax.set_title('Todas las hojas (valor / mínimo de cada hoja, escala individual por hoja)')
         self.multi_xls_heatmap_fig.tight_layout()
         self._multi_xls_heatmap_canvas.draw()
 
