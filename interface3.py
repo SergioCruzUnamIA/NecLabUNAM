@@ -1699,7 +1699,20 @@ class NecLabApp:
         Nombres de Datos', que solo afecta a las etiquetas de la gráfica."""
         if self.multi_xls_column_listbox is None:
             return
+        old_columns = self.multi_xls_common_columns
+        old_classifications = self.multi_xls_classifications
         self.multi_xls_common_columns = common_column_names(self.multi_xls_datasets)
+
+        # Remap saved classifications from old column indices to new ones by
+        # matching column name, so (re)loading files doesn't discard
+        # classification work already done -- only columns that no longer
+        # exist are dropped.
+        name_to_old_index = {name: i for i, name in enumerate(old_columns)}
+        self.multi_xls_classifications = {}
+        for new_idx, name in enumerate(self.multi_xls_common_columns):
+            old_idx = name_to_old_index.get(name)
+            if old_idx is not None and old_idx in old_classifications:
+                self.multi_xls_classifications[new_idx] = old_classifications[old_idx]
 
         self.multi_xls_column_listbox.delete(0, tk.END)
         for i in range(len(self.multi_xls_common_columns)):
@@ -1740,9 +1753,14 @@ class NecLabApp:
         for w in list(self.multi_xls_class_row.winfo_children()):
             w.destroy()
         self.multi_xls_class_combos = {}
-        self.multi_xls_classifications = {}
 
-        self.multi_xls_classes = [ds['label'] for ds in self.multi_xls_datasets]
+        # Merge in any new sheet names rather than overwriting the list, so
+        # custom classification options (renamed via the editor, or loaded
+        # from a saved file) survive (re)loading more/different files.
+        for label in (ds['label'] for ds in self.multi_xls_datasets):
+            if label not in self.multi_xls_classes:
+                self.multi_xls_classes.append(label)
+
         self.multi_xls_sheet_class_var = {
             ds['label']: tk.StringVar(value=ds['label']) for ds in self.multi_xls_datasets
         }
