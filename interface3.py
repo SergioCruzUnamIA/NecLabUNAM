@@ -105,6 +105,10 @@ class NecLabApp:
         self.multi_xls_common_columns = []
         self.multi_xls_column_listbox = None
         self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
+        self.multi_xls_smoothing_var = tk.BooleanVar(value=False)
+        self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
+        self.multi_xls_smoothing_check = None
+        self.multi_xls_smoothing_points_spinbox = None
         self.multi_xls_plot_frame = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
@@ -1603,13 +1607,37 @@ class NecLabApp:
                        activebackground=_C['panel'], font=('Arial', 9)).grid(
             row=3, column=0, sticky='w', padx=10, pady=(0, 6))
 
+        multi_smooth_frame = tk.Frame(sidebar, bg=_C['panel'])
+        multi_smooth_frame.grid(row=4, column=0, sticky='ew', padx=10, pady=(0, 6))
+
+        self.multi_xls_smoothing_check = tk.Checkbutton(
+            multi_smooth_frame, text="Smoothing", variable=self.multi_xls_smoothing_var,
+            command=self._on_multi_xls_smoothing_toggle,
+            bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
+            activebackground=_C['panel'], font=('Arial', 9)
+        )
+        self.multi_xls_smoothing_check.grid(row=0, column=0, sticky='w')
+
+        points_frame = tk.Frame(multi_smooth_frame, bg=_C['panel'])
+        points_frame.grid(row=1, column=0, sticky='w')
+        tk.Label(points_frame, text="Points:", bg=_C['panel'],
+                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
+        self.multi_xls_smoothing_points_spinbox = ttk.Spinbox(
+            points_frame, from_=2, to=50, textvariable=self.multi_xls_smoothing_points_var,
+            width=4
+        )
+        self.multi_xls_smoothing_points_spinbox.pack(side='left')
+        self.multi_xls_smoothing_points_spinbox.config(state=DISABLED)
+        self.multi_xls_smoothing_points_var.trace_add(
+            'write', lambda *args: self._on_multi_xls_smoothing_toggle())
+
         self.btn_save_multi_xls_plot = ctk.CTkButton(
             sidebar, text="Save Plot Image", height=28, corner_radius=6,
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_plot_image
         )
-        self.btn_save_multi_xls_plot.grid(row=4, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_plot.grid(row=5, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_save_multi_xls_heatmap = ctk.CTkButton(
             sidebar, text="Save Heatmap Image", height=28, corner_radius=6,
@@ -1617,14 +1645,14 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_heatmap_image
         )
-        self.btn_save_multi_xls_heatmap.grid(row=5, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_heatmap.grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         ctk.CTkButton(
             sidebar, text="Editar Clasificaciones", height=28, corner_radius=6,
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             command=self._open_multi_xls_class_editor
-        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
+        ).grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_save_multi_xls_classifications = ctk.CTkButton(
             sidebar, text="Save Classifications", height=28, corner_radius=6,
@@ -1632,7 +1660,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_classifications
         )
-        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_classifications.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_load_multi_xls_classifications = ctk.CTkButton(
             sidebar, text="Load Classifications", height=28, corner_radius=6,
@@ -1640,7 +1668,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._load_multi_xls_classifications
         )
-        self.btn_load_multi_xls_classifications.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 10))
+        self.btn_load_multi_xls_classifications.grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1963,6 +1991,27 @@ class NecLabApp:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
         self._draw_multi_xls_heatmap()
 
+    def _on_multi_xls_smoothing_toggle(self):
+        """Enable/disable the points spinbox and redraw the top plot with
+        Convex Envelope smoothing applied (or removed)."""
+        enabled = self.multi_xls_smoothing_var.get()
+        if self.multi_xls_smoothing_points_spinbox:
+            self.multi_xls_smoothing_points_spinbox.config(state='normal' if enabled else DISABLED)
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+    def _smooth_multi_xls_signal(self, values):
+        """Apply Convex Envelope smoothing to a single sheet's column values
+        when the 'Smoothing' checkbox is on."""
+        if not self.multi_xls_smoothing_var.get():
+            return values
+        try:
+            n_points = self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            return values
+        from peak_functions import _convex_envelope_detrend_signal
+        return _convex_envelope_detrend_signal(values, n_points=n_points)
+
     def _on_multi_xls_column_select(self, event=None):
         """Callback cuando el usuario elige una columna en la lista lateral."""
         sel = self.multi_xls_column_listbox.curselection()
@@ -2068,6 +2117,7 @@ class NecLabApp:
             n = len(values)
             if n == 0:
                 continue
+            values = self._smooth_multi_xls_signal(values)
             x = np.arange(offset, offset + n)
             ax.plot(x, values, linewidth=0.8)
             if offset > 0:
