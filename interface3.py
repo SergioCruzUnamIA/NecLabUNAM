@@ -2144,11 +2144,12 @@ class NecLabApp:
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
         muestras (el mismo eje que la gráfica de líneas de arriba) y el eje Y
         son las columnas (las series de datos); el color de cada pixel
-        representa su valor dividido entre el mínimo global de todas las
-        hojas, para que todas queden en la misma escala relativa. Las
-        imágenes de cada hoja se colocan una junto a otra. El canvas se crea
-        una sola vez y se reutiliza en cada redibujado (ver comentario en
-        __init__), ajustándose exactamente al tamaño del panel."""
+        representa su valor dividido entre el mínimo propio de esa hoja (cada
+        hoja se normaliza contra su propio mínimo, no uno global). Todas las
+        hojas comparten la misma escala de color. Las imágenes de cada hoja
+        se colocan una junto a otra. El canvas se crea una sola vez y se
+        reutiliza en cada redibujado (ver comentario en __init__), ajustándose
+        exactamente al tamaño del panel."""
         if self.multi_xls_heatmap_frame is None:
             return
 
@@ -2177,11 +2178,14 @@ class NecLabApp:
         finite_vals = np.concatenate([m[np.isfinite(m)].ravel() for m in raw_matrices])
         if finite_vals.size == 0:
             return
-        global_min = float(finite_vals.min())
 
-        # Normalize every sheet's values against the global minimum, then
-        # transpose so rows = data columns and columns = samples.
-        matrices = [(m / global_min).T for m in raw_matrices]
+        # Normalize each sheet's values against its own minimum (not one
+        # global minimum shared across all sheets), then transpose so rows =
+        # data columns and columns = samples.
+        matrices = []
+        for m in raw_matrices:
+            sheet_min = float(m[np.isfinite(m)].min())
+            matrices.append((m / sheet_min).T)
         norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
         vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
 
@@ -2232,7 +2236,7 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
-        ax.set_title('Todas las hojas (valor / mínimo global)')
+        ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
         if im is not None:
             self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
         self.multi_xls_heatmap_fig.tight_layout()
