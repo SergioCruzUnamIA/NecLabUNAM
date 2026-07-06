@@ -1632,7 +1632,15 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_classifications
         )
-        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 10))
+        self.btn_save_multi_xls_classifications.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
+
+        self.btn_load_multi_xls_classifications = ctk.CTkButton(
+            sidebar, text="Load Classifications", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._load_multi_xls_classifications
+        )
+        self.btn_load_multi_xls_classifications.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1691,7 +1699,20 @@ class NecLabApp:
         Nombres de Datos', que solo afecta a las etiquetas de la gráfica."""
         if self.multi_xls_column_listbox is None:
             return
+        old_columns = self.multi_xls_common_columns
+        old_classifications = self.multi_xls_classifications
         self.multi_xls_common_columns = common_column_names(self.multi_xls_datasets)
+
+        # Remap saved classifications from old column indices to new ones by
+        # matching column name, so (re)loading files doesn't discard
+        # classification work already done -- only columns that no longer
+        # exist are dropped.
+        name_to_old_index = {name: i for i, name in enumerate(old_columns)}
+        self.multi_xls_classifications = {}
+        for new_idx, name in enumerate(self.multi_xls_common_columns):
+            old_idx = name_to_old_index.get(name)
+            if old_idx is not None and old_idx in old_classifications:
+                self.multi_xls_classifications[new_idx] = old_classifications[old_idx]
 
         self.multi_xls_column_listbox.delete(0, tk.END)
         for i in range(len(self.multi_xls_common_columns)):
@@ -1715,6 +1736,7 @@ class NecLabApp:
             self.btn_save_multi_xls_heatmap.configure(state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.btn_save_multi_xls_classifications.configure(state='normal')
+            self.btn_load_multi_xls_classifications.configure(state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -1731,9 +1753,14 @@ class NecLabApp:
         for w in list(self.multi_xls_class_row.winfo_children()):
             w.destroy()
         self.multi_xls_class_combos = {}
-        self.multi_xls_classifications = {}
 
-        self.multi_xls_classes = [ds['label'] for ds in self.multi_xls_datasets]
+        # Merge in any new sheet names rather than overwriting the list, so
+        # custom classification options (renamed via the editor, or loaded
+        # from a saved file) survive (re)loading more/different files.
+        for label in (ds['label'] for ds in self.multi_xls_datasets):
+            if label not in self.multi_xls_classes:
+                self.multi_xls_classes.append(label)
+
         self.multi_xls_sheet_class_var = {
             ds['label']: tk.StringVar(value=ds['label']) for ds in self.multi_xls_datasets
         }
@@ -2221,6 +2248,15 @@ class NecLabApp:
                 row[label] = saved.get(label, label)
             rows.append(row)
 
+        # Also persist the classification options themselves, in their
+        # current order, as an extra column -- so loading this file back
+        # later can restore that exact dropdown ordering instead of just
+        # inferring it from whichever cell values happen to appear first.
+        for _ in range(max(0, len(self.multi_xls_classes) - len(rows))):
+            rows.append({'Column': ''})
+        for i, row in enumerate(rows):
+            row['_ClassOptions'] = self.multi_xls_classes[i] if i < len(self.multi_xls_classes) else ''
+
         df = pd.DataFrame(rows).set_index('Column')
         if filename.lower().endswith('.csv'):
             df.to_csv(filename)
@@ -2228,6 +2264,90 @@ class NecLabApp:
             df.to_excel(filename)
 
         messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
+
+    def _load_multi_xls_classifications(self):
+        """Carga clasificaciones previamente guardadas (mismo formato que
+        "Save Classifications": una fila por columna de datos, una columna
+        por hoja) y las aplica a las columnas/hojas que coincidan por
+        nombre con lo actualmente cargado. Cualquier valor de clasificación
+        nuevo se agrega a las opciones disponibles en los combobox."""
+        if not self.multi_xls_datasets or not self.multi_xls_common_columns:
+            messagebox.showwarning("Sin Datos", "Carga datos primero.")
+            return
+
+        from tkinter.filedialog import askopenfilename
+        import pandas as pd
+
+        filename = askopenfilename(
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All Files", "*.*")],
+            title="Load Classifications"
+        )
+        if not filename:
+            return
+
+        if filename.lower().endswith('.csv'):
+            df = pd.read_csv(filename, index_col=0)
+        else:
+            df = pd.read_excel(filename, index_col=0)
+
+        # Restore the classification options in the exact order they were
+        # saved in, if that column is present, rather than only inferring an
+        # order from whichever cell values happen to be encountered first.
+        restored_classes = []
+        if '_ClassOptions' in df.columns:
+            for val in df['_ClassOptions']:
+                if pd.isna(val):
+                    continue
+                val = str(val)
+                if val and val not in restored_classes:
+                    restored_classes.append(val)
+            df = df.drop(columns=['_ClassOptions'])
+
+        column_to_index = {name: i for i, name in enumerate(self.multi_xls_common_columns)}
+        sheet_labels = {ds['label'] for ds in self.multi_xls_datasets}
+        matched_sheets = [label for label in df.columns if label in sheet_labels]
+
+        applied = 0
+        new_classes = []
+        for col_name, row in df.iterrows():
+            col_idx = column_to_index.get(str(col_name))
+            if col_idx is None:
+                continue
+            for label in matched_sheets:
+                value = row[label]
+                if pd.isna(value):
+                    continue
+                value = str(value)
+                self.multi_xls_classifications.setdefault(col_idx, {})[label] = value
+                applied += 1
+                if value not in restored_classes and value not in new_classes:
+                    new_classes.append(value)
+
+        if not matched_sheets:
+            messagebox.showwarning(
+                "Sin Coincidencias",
+                "Ninguna columna u hoja del archivo coincide con los datos cargados."
+            )
+            return
+
+        if restored_classes or new_classes:
+            # Saved order first, then anything from the current session or
+            # the loaded data that wasn't part of the saved options list.
+            combined = list(restored_classes)
+            for c in self.multi_xls_classes:
+                if c not in combined:
+                    combined.append(c)
+            for c in new_classes:
+                if c not in combined:
+                    combined.append(c)
+            self.multi_xls_classes = combined
+            for combo in self.multi_xls_class_combos.values():
+                combo.configure(values=self.multi_xls_classes)
+
+        if self.multi_xls_current_index is not None:
+            self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
+
+        messagebox.showinfo("Loaded", f"Applied {applied} classifications from:\n{filename}")
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
