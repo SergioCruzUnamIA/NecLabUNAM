@@ -21,6 +21,12 @@ import subprocess
 import json
 import urllib.request
 
+# Shared horizontal axes bounds (figure-fraction) for the Datos Multiples top
+# line plot and bottom heatmap, so a sample's x-position lines up vertically
+# between the two regardless of the heatmap's colorbar taking extra space.
+_MULTI_XLS_AX_LEFT = 0.09
+_MULTI_XLS_AX_RIGHT = 0.86
+
 # ── L1 Sky Blue colour palette ────────────────────────────────────────────────
 _C = {
     'bg':     '#f0f4f8',   # main background
@@ -2150,6 +2156,14 @@ class NecLabApp:
         ax.set_title(display_label)
         ax.set_ylabel('Value')
         self.multi_xls_fig.tight_layout()
+
+        # Force the same horizontal bounds used by the heatmap below, so a
+        # sample's x-position lines up vertically between the two plots
+        # regardless of the heatmap's colorbar taking extra space on its side.
+        pos = ax.get_position()
+        ax.set_position([_MULTI_XLS_AX_LEFT, pos.y0,
+                          _MULTI_XLS_AX_RIGHT - _MULTI_XLS_AX_LEFT, pos.height])
+
         self._multi_xls_plot_canvas.draw()
 
         self._position_multi_xls_class_row(ax, bounds)
@@ -2261,11 +2275,23 @@ class NecLabApp:
         ax.set_ylabel('Column')
         if shared_scale:
             ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
-            if im is not None:
-                self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, ax=ax, shrink=0.8)
         else:
             ax.set_title('Todas las hojas (valor / mínimo de cada hoja, escala individual por hoja)')
         self.multi_xls_heatmap_fig.tight_layout()
+
+        # Force the same horizontal bounds used by the top line plot, so a
+        # sample's x-position lines up vertically between the two. The
+        # colorbar (when shown) goes in its own explicit axes to the right
+        # of this fixed span, instead of letting fig.colorbar() shrink ax
+        # to make room for it.
+        pos = ax.get_position()
+        ax.set_position([_MULTI_XLS_AX_LEFT, pos.y0,
+                          _MULTI_XLS_AX_RIGHT - _MULTI_XLS_AX_LEFT, pos.height])
+        if shared_scale and im is not None:
+            cax = self.multi_xls_heatmap_fig.add_axes(
+                [_MULTI_XLS_AX_RIGHT + 0.02, pos.y0, 0.02, pos.height])
+            self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, cax=cax)
+
         self._multi_xls_heatmap_canvas.draw()
 
     def _save_multi_xls_plot_image(self):
