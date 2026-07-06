@@ -115,7 +115,7 @@ class NecLabApp:
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_smoothing_check = None
         self.multi_xls_smoothing_points_spinbox = None
-        self.multi_xls_shared_scale_var = tk.BooleanVar(value=True)
+        self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
         self.multi_xls_plot_frame = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
@@ -2138,6 +2138,11 @@ class NecLabApp:
             n = len(values)
             if n == 0:
                 continue
+            # Normalize this sheet's column against its own minimum,
+            # independently of every other sheet.
+            finite = values[np.isfinite(values)]
+            if finite.size and finite.min() != 0:
+                values = values / finite.min()
             values = self._smooth_multi_xls_signal(values)
             x = np.arange(offset, offset + n)
             ax.plot(x, values, linewidth=0.8)
@@ -2154,7 +2159,7 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_title(display_label)
-        ax.set_ylabel('Value')
+        ax.set_ylabel('Value / mínimo de cada hoja')
         self.multi_xls_fig.tight_layout()
 
         # Force the same horizontal bounds used by the heatmap below, so a
