@@ -2248,6 +2248,15 @@ class NecLabApp:
                 row[label] = saved.get(label, label)
             rows.append(row)
 
+        # Also persist the classification options themselves, in their
+        # current order, as an extra column -- so loading this file back
+        # later can restore that exact dropdown ordering instead of just
+        # inferring it from whichever cell values happen to appear first.
+        for _ in range(max(0, len(self.multi_xls_classes) - len(rows))):
+            rows.append({'Column': ''})
+        for i, row in enumerate(rows):
+            row['_ClassOptions'] = self.multi_xls_classes[i] if i < len(self.multi_xls_classes) else ''
+
         df = pd.DataFrame(rows).set_index('Column')
         if filename.lower().endswith('.csv'):
             df.to_csv(filename)
@@ -2281,6 +2290,19 @@ class NecLabApp:
         else:
             df = pd.read_excel(filename, index_col=0)
 
+        # Restore the classification options in the exact order they were
+        # saved in, if that column is present, rather than only inferring an
+        # order from whichever cell values happen to be encountered first.
+        restored_classes = []
+        if '_ClassOptions' in df.columns:
+            for val in df['_ClassOptions']:
+                if pd.isna(val):
+                    continue
+                val = str(val)
+                if val and val not in restored_classes:
+                    restored_classes.append(val)
+            df = df.drop(columns=['_ClassOptions'])
+
         column_to_index = {name: i for i, name in enumerate(self.multi_xls_common_columns)}
         sheet_labels = {ds['label'] for ds in self.multi_xls_datasets}
         matched_sheets = [label for label in df.columns if label in sheet_labels]
@@ -2298,7 +2320,7 @@ class NecLabApp:
                 value = str(value)
                 self.multi_xls_classifications.setdefault(col_idx, {})[label] = value
                 applied += 1
-                if value not in self.multi_xls_classes and value not in new_classes:
+                if value not in restored_classes and value not in new_classes:
                     new_classes.append(value)
 
         if not matched_sheets:
@@ -2308,8 +2330,17 @@ class NecLabApp:
             )
             return
 
-        if new_classes:
-            self.multi_xls_classes.extend(new_classes)
+        if restored_classes or new_classes:
+            # Saved order first, then anything from the current session or
+            # the loaded data that wasn't part of the saved options list.
+            combined = list(restored_classes)
+            for c in self.multi_xls_classes:
+                if c not in combined:
+                    combined.append(c)
+            for c in new_classes:
+                if c not in combined:
+                    combined.append(c)
+            self.multi_xls_classes = combined
             for combo in self.multi_xls_class_combos.values():
                 combo.configure(values=self.multi_xls_classes)
 
