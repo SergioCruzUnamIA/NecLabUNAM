@@ -84,6 +84,7 @@ class NecLabApp:
         self.corr = None
         self._data_fig = None
         self._corr_fig = None
+        self._corr_df = None
         self.selection_column_indices = []
         self.plot_top_frame = None
         self.plot_bottom_frame = None
@@ -645,6 +646,15 @@ class NecLabApp:
         self.btn_save_corr.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
         row += 1
 
+        self.btn_save_corr_data = ctk.CTkButton(
+            sidebar_frame, text="Save Correlation Data", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._save_correlation_data
+        )
+        self.btn_save_corr_data.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
+        row += 1
+
         self.btn_save_peaks = ctk.CTkButton(
             sidebar_frame, text="Save Peaks CSV", height=28, corner_radius=6,
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
@@ -729,6 +739,7 @@ class NecLabApp:
         if self._corr_fig is not None:
             plt.close(self._corr_fig)
             self._corr_fig = None
+        self._corr_df = None
 
         if len(self.selection_column_indices) < 2:
             tk.Label(
@@ -736,6 +747,8 @@ class NecLabApp:
                 text="Add 2+ columns to Selection to see correlation",
                 font=('Arial', 12), bg=_C['panel'], fg=_C['sub']
             ).pack(fill=tk.BOTH, expand=True)
+            if hasattr(self, 'btn_save_corr_data'):
+                self.btn_save_corr_data.configure(state='disabled')
             return
 
         import pandas as pd
@@ -745,6 +758,9 @@ class NecLabApp:
         col_labels = [self.column_listbox.get(i) for i in sel_indices]
         df = pd.DataFrame(data_sel, columns=col_labels)
         corr = df.corr(method=method)
+        self._corr_df = corr
+        if hasattr(self, 'btn_save_corr_data'):
+            self.btn_save_corr_data.configure(state='normal')
 
         self._corr_fig, ax = plt.subplots()
         cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
@@ -1076,6 +1092,26 @@ class NecLabApp:
         )
         if filename:
             self._corr_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_correlation_data(self):
+        """Save the current correlation matrix values to a CSV or Excel file."""
+        if self._corr_df is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"),
+                       ("All Files", "*.*")],
+            title="Save Correlation Data"
+        )
+        if not filename:
+            return
+
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            self._corr_df.to_excel(filename, sheet_name='Correlation')
+        else:
+            self._corr_df.to_csv(filename)
+        messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
 
     def open_visualization_data(self):
         """Abre datos para visualización de picos."""
