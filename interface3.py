@@ -117,6 +117,8 @@ class NecLabApp:
         self.multi_xls_smoothing_check = None
         self.multi_xls_smoothing_points_spinbox = None
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
+        self.multi_xls_xlim = None
+        self.multi_xls_ylim = None
         self.multi_xls_plot_frame = None
         self.multi_xls_fig = None
         self.multi_xls_current_column = None
@@ -1683,13 +1685,20 @@ class NecLabApp:
                        wraplength=210, justify='left').grid(
             row=5, column=0, sticky='w', padx=10, pady=(0, 6))
 
+        ctk.CTkButton(
+            sidebar, text="Límites de Ejes (Gráfica Superior)", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            command=self._open_multi_xls_axis_limits_dialog
+        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
+
         self.btn_save_multi_xls_plot = ctk.CTkButton(
             sidebar, text="Save Plot Image", height=28, corner_radius=6,
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_plot_image
         )
-        self.btn_save_multi_xls_plot.grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_plot.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_save_multi_xls_heatmap = ctk.CTkButton(
             sidebar, text="Save Heatmap Image", height=28, corner_radius=6,
@@ -1697,14 +1706,14 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_heatmap_image
         )
-        self.btn_save_multi_xls_heatmap.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_heatmap.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         ctk.CTkButton(
             sidebar, text="Editar Clasificaciones", height=28, corner_radius=6,
             fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             command=self._open_multi_xls_class_editor
-        ).grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
+        ).grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_save_multi_xls_classifications = ctk.CTkButton(
             sidebar, text="Save Classifications", height=28, corner_radius=6,
@@ -1712,7 +1721,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._save_multi_xls_classifications
         )
-        self.btn_save_multi_xls_classifications.grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 2))
+        self.btn_save_multi_xls_classifications.grid(row=10, column=0, sticky='ew', padx=10, pady=(0, 2))
 
         self.btn_load_multi_xls_classifications = ctk.CTkButton(
             sidebar, text="Load Classifications", height=28, corner_radius=6,
@@ -1720,7 +1729,7 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._load_multi_xls_classifications
         )
-        self.btn_load_multi_xls_classifications.grid(row=10, column=0, sticky='ew', padx=10, pady=(0, 10))
+        self.btn_load_multi_xls_classifications.grid(row=11, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
@@ -1877,19 +1886,29 @@ class NecLabApp:
             self._multi_xls_syncing_class_row = False
 
     def _position_multi_xls_class_row(self, ax, bounds):
-        """Coloca cada combobox de clasificación alineado en pixeles con el
-        segmento (offset_inicio, offset_fin) de su hoja en la gráfica 'ax'
-        recién dibujada."""
+        """Coloca cada combobox de clasificación alineado en pixeles con la
+        porción VISIBLE (según los límites actuales del eje X, que pueden
+        haberse fijado manualmente desde 'Límites de Ejes') del segmento
+        (offset_inicio, offset_fin) de su hoja en la gráfica 'ax' recién
+        dibujada. Las hojas que quedan totalmente fuera del rango visible
+        se ocultan en vez de colocarse fuera del canvas."""
         if self.multi_xls_class_row is None:
             return
+        xlim = ax.get_xlim()
         placed = set()
         for ds, (x0_data, x1_data) in zip(self.multi_xls_datasets, bounds):
             label = ds['label']
             combo = self.multi_xls_class_combos.get(label)
             if combo is None:
                 continue
-            x0_px = ax.transData.transform((x0_data, 0))[0]
-            x1_px = ax.transData.transform((x1_data, 0))[0]
+
+            vis_x0 = max(x0_data, xlim[0])
+            vis_x1 = min(x1_data, xlim[1])
+            if vis_x1 <= vis_x0:
+                continue
+
+            x0_px = ax.transData.transform((vis_x0, 0))[0]
+            x1_px = ax.transData.transform((vis_x1, 0))[0]
             width_px = max(x1_px - x0_px, 30)
             combo.place(x=x0_px, y=2, width=width_px - 2, height=26)
             placed.add(label)
@@ -2035,6 +2054,70 @@ class NecLabApp:
 
         if self.multi_xls_current_index is not None:
             self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
+
+    def _open_multi_xls_axis_limits_dialog(self):
+        """Diálogo para fijar manualmente los límites de los ejes X/Y de la
+        gráfica superior de 'Datos Multiples', o volver a autoescalado."""
+        if self._multi_xls_plot_ax is None:
+            messagebox.showinfo("Sin datos", "Carga y grafica una columna primero.")
+            return
+
+        cur_xlim = self.multi_xls_xlim or self._multi_xls_plot_ax.get_xlim()
+        cur_ylim = self.multi_xls_ylim or self._multi_xls_plot_ax.get_ylim()
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Límites de Ejes - Gráfica Superior")
+        dialog.geometry("300x230")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        tk.Label(dialog, text="Eje X", font=('Arial', 10, 'bold')).grid(
+            row=0, column=0, columnspan=2, sticky='w', padx=10, pady=(12, 2))
+        tk.Label(dialog, text="Min:").grid(row=1, column=0, sticky='e', padx=(10, 4))
+        x_min_var = tk.StringVar(value=f"{cur_xlim[0]:.4g}")
+        tk.Entry(dialog, textvariable=x_min_var, width=12).grid(row=1, column=1, sticky='w', padx=(0, 10), pady=2)
+        tk.Label(dialog, text="Max:").grid(row=2, column=0, sticky='e', padx=(10, 4))
+        x_max_var = tk.StringVar(value=f"{cur_xlim[1]:.4g}")
+        tk.Entry(dialog, textvariable=x_max_var, width=12).grid(row=2, column=1, sticky='w', padx=(0, 10), pady=2)
+
+        tk.Label(dialog, text="Eje Y", font=('Arial', 10, 'bold')).grid(
+            row=3, column=0, columnspan=2, sticky='w', padx=10, pady=(12, 2))
+        tk.Label(dialog, text="Min:").grid(row=4, column=0, sticky='e', padx=(10, 4))
+        y_min_var = tk.StringVar(value=f"{cur_ylim[0]:.4g}")
+        tk.Entry(dialog, textvariable=y_min_var, width=12).grid(row=4, column=1, sticky='w', padx=(0, 10), pady=2)
+        tk.Label(dialog, text="Max:").grid(row=5, column=0, sticky='e', padx=(10, 4))
+        y_max_var = tk.StringVar(value=f"{cur_ylim[1]:.4g}")
+        tk.Entry(dialog, textvariable=y_max_var, width=12).grid(row=5, column=1, sticky='w', padx=(0, 10), pady=2)
+
+        def apply_limits():
+            try:
+                xmin, xmax = float(x_min_var.get()), float(x_max_var.get())
+                ymin, ymax = float(y_min_var.get()), float(y_max_var.get())
+            except ValueError:
+                messagebox.showerror("Valor inválido", "Todos los límites deben ser números.", parent=dialog)
+                return
+            if xmin >= xmax or ymin >= ymax:
+                messagebox.showerror("Rango inválido", "El mínimo debe ser menor que el máximo.", parent=dialog)
+                return
+            self.multi_xls_xlim = (xmin, xmax)
+            self.multi_xls_ylim = (ymin, ymax)
+            dialog.destroy()
+            if self.multi_xls_current_index is not None:
+                self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+        def reset_auto():
+            self.multi_xls_xlim = None
+            self.multi_xls_ylim = None
+            dialog.destroy()
+            if self.multi_xls_current_index is not None:
+                self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+        btns = tk.Frame(dialog)
+        btns.grid(row=6, column=0, columnspan=2, pady=18)
+        tk.Button(btns, text="Auto", command=reset_auto, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Aplicar", command=apply_limits, width=8).pack(side='left', padx=4)
 
     def _on_multi_xls_show_labels_toggle(self):
         """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
@@ -2196,6 +2279,14 @@ class NecLabApp:
             ax.set_xticklabels([])
         ax.set_title(display_label)
         ax.set_ylabel('Value / mínimo de cada hoja')
+
+        # Manual axis limits set via "Límites de Ejes", if any; otherwise
+        # matplotlib keeps autoscaling to the plotted data as usual.
+        if self.multi_xls_xlim is not None:
+            ax.set_xlim(self.multi_xls_xlim)
+        if self.multi_xls_ylim is not None:
+            ax.set_ylim(self.multi_xls_ylim)
+
         self.multi_xls_fig.tight_layout()
 
         # Force the same horizontal bounds used by the heatmap below, so a
