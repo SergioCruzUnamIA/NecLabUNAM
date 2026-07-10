@@ -146,8 +146,6 @@ class NecLabApp:
         self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
         self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
-        self.multi_xls_smoothing_check = None
-        self.multi_xls_smoothing_points_spinbox = None
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
         self.multi_xls_xlim = None
         self.multi_xls_ylim = None
@@ -159,8 +157,8 @@ class NecLabApp:
         self.multi_xls_heatmap_fig = None
         self._multi_xls_plot_resize_job = None
         self._multi_xls_heatmap_resize_job = None
-        self.btn_save_multi_xls_plot = None
-        self.btn_save_multi_xls_heatmap = None
+        self.multi_xls_menu_grafica = None
+        self.multi_xls_menu_datos = None
         self.multi_xls_class_row = None
         self.multi_xls_plot_placeholder = None
         self.multi_xls_heatmap_placeholder = None
@@ -1639,16 +1637,79 @@ class NecLabApp:
         return datasets
 
     def _create_multi_xls_layout(self):
-        """Construye la pestaña 'Datos Multiples': lista de columnas (celdas)
-        a la izquierda y la gráfica combinada, con scroll horizontal, a la derecha."""
-        Grid.rowconfigure(self.multi_xls_tab, 0, weight=1)
-        Grid.columnconfigure(self.multi_xls_tab, 0, weight=0)
-        Grid.columnconfigure(self.multi_xls_tab, 1, weight=1)
+        """Construye la pestaña 'Datos Multiples': un menú local ('Vista',
+        'Gráfica', 'Datos') con los controles que antes eran botones/checks de
+        la barra lateral, una lista de columnas (celdas) redimensionable a la
+        izquierda (arrastrando el divisor) y la gráfica combinada a la derecha."""
+        Grid.rowconfigure(self.multi_xls_tab, 0, weight=0)
+        Grid.rowconfigure(self.multi_xls_tab, 1, weight=1)
+        Grid.columnconfigure(self.multi_xls_tab, 0, weight=1)
 
-        sidebar = tk.Frame(self.multi_xls_tab, bg=_C['panel'], width=250,
+        # Local menu bar, docked at the top of the tab (same look as the
+        # window's top 'Archivo' menu), grouping the controls that used to
+        # be individual checkboxes/buttons stacked in the sidebar.
+        menubar = tk.Frame(self.multi_xls_tab, bg='#f5f5f5', height=26,
                            highlightbackground=_C['border'], highlightthickness=1)
-        sidebar.grid(row=0, column=0, sticky='nsew', padx=(8, 0), pady=8)
-        sidebar.grid_propagate(False)
+        menubar.grid(row=0, column=0, sticky='ew')
+        menubar.grid_propagate(False)
+
+        def add_tab_menu(label, build):
+            mb = tk.Menubutton(menubar, text=label, font=('Segoe UI', 9),
+                                bg='#f5f5f5', activebackground='#dbeafe',
+                                relief='flat', bd=0, padx=8, pady=3)
+            menu = tk.Menu(mb, tearoff=0, font=('Segoe UI', 9))
+            build(menu)
+            mb['menu'] = menu
+            mb.pack(side='left')
+            return menu
+
+        def build_vista_menu(m):
+            m.add_checkbutton(label="Mostrar Nombres de Datos",
+                               variable=self.multi_xls_show_labels_var,
+                               command=self._on_multi_xls_show_labels_toggle)
+            m.add_checkbutton(label="Smoothing",
+                               variable=self.multi_xls_smoothing_var,
+                               command=self._on_multi_xls_smoothing_toggle)
+            m.add_command(label="Puntos de Smoothing...",
+                          command=self._open_multi_xls_smoothing_points_dialog)
+            m.add_separator()
+            m.add_checkbutton(label="Escala de Color Compartida (mapa de calor)",
+                               variable=self.multi_xls_shared_scale_var,
+                               command=self._on_multi_xls_shared_scale_toggle)
+
+        def build_grafica_menu(m):
+            m.add_command(label="Límites de Ejes (Gráfica Superior)...",
+                          command=self._open_multi_xls_axis_limits_dialog)
+            m.add_separator()
+            m.add_command(label="Save Plot Image...", state='disabled',
+                          command=self._save_multi_xls_plot_image)
+            m.add_command(label="Save Heatmap Image...", state='disabled',
+                          command=self._save_multi_xls_heatmap_image)
+
+        def build_datos_menu(m):
+            m.add_command(label="Editar Clasificaciones...",
+                          command=self._open_multi_xls_class_editor)
+            m.add_separator()
+            m.add_command(label="Save Classifications...", state='disabled',
+                          command=self._save_multi_xls_classifications)
+            m.add_command(label="Load Classifications...", state='disabled',
+                          command=self._load_multi_xls_classifications)
+
+        add_tab_menu("Vista", build_vista_menu)
+        self.multi_xls_menu_grafica = add_tab_menu("Gráfica", build_grafica_menu)
+        self.multi_xls_menu_datos = add_tab_menu("Datos", build_datos_menu)
+
+        self.multi_xls_smoothing_points_var.trace_add(
+            'write', lambda *args: self._on_multi_xls_smoothing_toggle())
+
+        # Sidebar (column list) and plot area, in a draggable-sash
+        # PanedWindow so the list can be resized by dragging the divider
+        # instead of being stuck at a fixed width.
+        paned = ttk.PanedWindow(self.multi_xls_tab, orient='horizontal')
+        paned.grid(row=1, column=0, sticky='nsew', padx=8, pady=8)
+
+        sidebar = tk.Frame(paned, bg=_C['panel'],
+                           highlightbackground=_C['border'], highlightthickness=1)
         sidebar.columnconfigure(0, weight=1)
 
         tk.Label(sidebar, text="DATOS (CELDAS)", font=('Arial', 8, 'bold'),
@@ -1658,7 +1719,7 @@ class NecLabApp:
 
         lb_frame = tk.Frame(sidebar, bg=_C['card'],
                             highlightbackground=_C['border'], highlightthickness=1)
-        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 4))
+        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 10))
         sidebar.rowconfigure(2, weight=1)
         lb_frame.rowconfigure(0, weight=1)
         lb_frame.columnconfigure(0, weight=1)
@@ -1677,101 +1738,20 @@ class NecLabApp:
         scrollbar.config(command=self.multi_xls_column_listbox.yview)
         self.multi_xls_column_listbox.bind('<<ListboxSelect>>', self._on_multi_xls_column_select)
 
-        tk.Checkbutton(sidebar, text="Mostrar Nombres de Datos",
-                       variable=self.multi_xls_show_labels_var,
-                       command=self._on_multi_xls_show_labels_toggle,
-                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-                       activebackground=_C['panel'], font=('Arial', 9)).grid(
-            row=3, column=0, sticky='w', padx=10, pady=(0, 6))
-
-        multi_smooth_frame = tk.Frame(sidebar, bg=_C['panel'])
-        multi_smooth_frame.grid(row=4, column=0, sticky='ew', padx=10, pady=(0, 6))
-
-        self.multi_xls_smoothing_check = tk.Checkbutton(
-            multi_smooth_frame, text="Smoothing", variable=self.multi_xls_smoothing_var,
-            command=self._on_multi_xls_smoothing_toggle,
-            bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-            activebackground=_C['panel'], font=('Arial', 9)
-        )
-        self.multi_xls_smoothing_check.grid(row=0, column=0, sticky='w')
-
-        points_frame = tk.Frame(multi_smooth_frame, bg=_C['panel'])
-        points_frame.grid(row=1, column=0, sticky='w')
-        tk.Label(points_frame, text="Points:", bg=_C['panel'],
-                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
-        self.multi_xls_smoothing_points_spinbox = ttk.Spinbox(
-            points_frame, from_=2, to=50, textvariable=self.multi_xls_smoothing_points_var,
-            width=4
-        )
-        self.multi_xls_smoothing_points_spinbox.pack(side='left')
-        self.multi_xls_smoothing_points_spinbox.config(
-            state='normal' if self.multi_xls_smoothing_var.get() else DISABLED)
-        self.multi_xls_smoothing_points_var.trace_add(
-            'write', lambda *args: self._on_multi_xls_smoothing_toggle())
-
-        tk.Checkbutton(sidebar, text="Escala de Color Compartida (mapa de calor)",
-                       variable=self.multi_xls_shared_scale_var,
-                       command=self._on_multi_xls_shared_scale_toggle,
-                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-                       activebackground=_C['panel'], font=('Arial', 9),
-                       wraplength=210, justify='left').grid(
-            row=5, column=0, sticky='w', padx=10, pady=(0, 6))
-
-        ctk.CTkButton(
-            sidebar, text="Límites de Ejes (Gráfica Superior)", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            command=self._open_multi_xls_axis_limits_dialog
-        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_save_multi_xls_plot = ctk.CTkButton(
-            sidebar, text="Save Plot Image", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_multi_xls_plot_image
-        )
-        self.btn_save_multi_xls_plot.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_save_multi_xls_heatmap = ctk.CTkButton(
-            sidebar, text="Save Heatmap Image", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_multi_xls_heatmap_image
-        )
-        self.btn_save_multi_xls_heatmap.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        ctk.CTkButton(
-            sidebar, text="Editar Clasificaciones", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            command=self._open_multi_xls_class_editor
-        ).grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_save_multi_xls_classifications = ctk.CTkButton(
-            sidebar, text="Save Classifications", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_multi_xls_classifications
-        )
-        self.btn_save_multi_xls_classifications.grid(row=10, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_load_multi_xls_classifications = ctk.CTkButton(
-            sidebar, text="Load Classifications", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._load_multi_xls_classifications
-        )
-        self.btn_load_multi_xls_classifications.grid(row=11, column=0, sticky='ew', padx=10, pady=(0, 10))
-
         # Right side - stacked plot areas (line plot on top, heatmap below).
         # Both are redrawn to exactly fill their frame on every resize, so
         # the whole graph and every sheet image are always visible without
         # needing to scroll.
-        right_container = tk.Frame(self.multi_xls_tab, bg=_C['bg'])
-        right_container.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+        right_container = tk.Frame(paned, bg=_C['bg'])
         right_container.rowconfigure(0, weight=3)
         right_container.rowconfigure(1, weight=2)
         right_container.columnconfigure(0, weight=1)
+
+        paned.add(sidebar, weight=0)
+        paned.add(right_container, weight=1)
+        # Give the sidebar a sensible starting width (same as the old fixed
+        # width); the user can drag the sash to resize it from here.
+        self.root.after(50, lambda: paned.sashpos(0, 250))
 
         self.multi_xls_plot_frame = tk.Frame(right_container, bg=_C['panel'],
                                               highlightbackground=_C['border'],
@@ -1853,11 +1833,11 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
 
         if self.multi_xls_datasets:
-            self.btn_save_multi_xls_plot.configure(state='normal')
-            self.btn_save_multi_xls_heatmap.configure(state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
-            self.btn_save_multi_xls_classifications.configure(state='normal')
-            self.btn_load_multi_xls_classifications.configure(state='normal')
+            self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
+            self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -2159,13 +2139,43 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
 
     def _on_multi_xls_smoothing_toggle(self):
-        """Enable/disable the points spinbox and redraw the top plot with
-        Convex Envelope smoothing applied (or removed)."""
-        enabled = self.multi_xls_smoothing_var.get()
-        if self.multi_xls_smoothing_points_spinbox:
-            self.multi_xls_smoothing_points_spinbox.config(state='normal' if enabled else DISABLED)
+        """Redibuja la gráfica superior con el smoothing Convex Envelope
+        aplicado (o removido), o con el número de puntos actualizado."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+    def _open_multi_xls_smoothing_points_dialog(self):
+        """Diálogo para ajustar el número de puntos usado por el smoothing
+        Convex Envelope de la gráfica superior de 'Datos Multiples'."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Puntos de Smoothing")
+        dialog.geometry("260x120")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        row = tk.Frame(dialog)
+        row.pack(padx=16, pady=(20, 8), fill='x')
+        tk.Label(row, text="Número de puntos:").pack(side='left')
+        points_var = tk.StringVar(value=str(self.multi_xls_smoothing_points_var.get()))
+        ttk.Spinbox(row, from_=2, to=50, textvariable=points_var, width=6).pack(side='left', padx=(8, 0))
+
+        def apply_points():
+            try:
+                n = int(points_var.get())
+            except ValueError:
+                messagebox.showerror("Valor inválido", "Debe ser un número entero.", parent=dialog)
+                return
+            if not (2 <= n <= 50):
+                messagebox.showerror("Valor inválido", "Debe estar entre 2 y 50.", parent=dialog)
+                return
+            self.multi_xls_smoothing_points_var.set(n)
+            dialog.destroy()
+
+        btns = tk.Frame(dialog)
+        btns.pack(side='bottom', pady=16)
+        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Aplicar", command=apply_points, width=8).pack(side='left', padx=4)
 
     def _on_multi_xls_shared_scale_toggle(self):
         """Redibuja el mapa de calor con una escala de color compartida entre
