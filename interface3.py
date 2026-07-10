@@ -8,6 +8,7 @@ os.environ["OMP_NUM_THREADS"] = "1"  # Limita número de threads
 
 import tkinter as tk
 from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messagebox
+import tkinter.font as tkfont
 import customtkinter as ctk
 ctk.set_appearance_mode("light")
 from PIL import Image, ImageTk, ImageOps
@@ -21,11 +22,55 @@ import subprocess
 import json
 import urllib.request
 
-# Shared horizontal axes bounds (figure-fraction) for the Datos Multiples top
-# line plot and bottom heatmap, so a sample's x-position lines up vertically
-# between the two regardless of the heatmap's colorbar taking extra space.
-_MULTI_XLS_AX_LEFT = 0.09
-_MULTI_XLS_AX_RIGHT = 0.86
+# Axes margins (in inches, not a fixed fraction of the figure) for the Datos
+# Multiples top line plot and bottom heatmap. Left/right are shared by both
+# so a sample's x-position lines up vertically between the two regardless of
+# the heatmap's colorbar taking extra space on its side. Using inches instead
+# of a fixed fraction keeps the margins just large enough for their content
+# (axis label, title, colorbar) instead of eating a growing chunk of the
+# figure as the panel gets wider.
+_MULTI_XLS_LEFT_IN = 0.62             # y-axis label + tick numbers
+_MULTI_XLS_RIGHT_IN_CBAR = 0.95       # reserved when the heatmap colorbar
+                                       # will be drawn (kept on the line plot
+                                       # too, which has none, so both x-axes
+                                       # stay aligned)
+_MULTI_XLS_RIGHT_IN_PLAIN = 0.15      # reserved when no colorbar will be
+                                       # drawn this redraw (escala individual
+                                       # por hoja): just a hair of breathing
+                                       # room instead of a full colorbar's worth
+_MULTI_XLS_TOP_IN = 0.35              # title
+_MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
+_MULTI_XLS_BOTTOM_IN_NOLABELS = 0.22  # no labels: just the tick marks
+_MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
+_MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
+
+
+def _multi_xls_axes_margins(fig_width, fig_height, show_labels, reserve_colorbar):
+    """(left, right, top, bottom) axes-position fractions for the Datos
+    Multiples line plot / heatmap figures, computed from constant margins in
+    inches so the plotted area keeps expanding to fill the panel as it grows
+    instead of leaving a fixed fraction of it unused. `reserve_colorbar`
+    controls whether the right margin needs to fit the heatmap's colorbar
+    (shared_scale on) or can shrink to a minimal margin (colorbar hidden)."""
+    left = _MULTI_XLS_LEFT_IN / fig_width
+    right_in = _MULTI_XLS_RIGHT_IN_CBAR if reserve_colorbar else _MULTI_XLS_RIGHT_IN_PLAIN
+    right = 1 - right_in / fig_width
+    top = 1 - _MULTI_XLS_TOP_IN / fig_height
+    bottom_in = _MULTI_XLS_BOTTOM_IN_LABELS if show_labels else _MULTI_XLS_BOTTOM_IN_NOLABELS
+    bottom = bottom_in / fig_height
+
+    # Guard against degenerate figures (e.g. a panel dragged down to its
+    # minimum height): if the fixed top/bottom margins would leave no room
+    # for the plot itself, shrink them proportionally instead of handing
+    # matplotlib an invalid (bottom >= top) subplot rectangle.
+    min_plot_frac = 0.15
+    if bottom >= top - min_plot_frac:
+        total = bottom + (1 - top)
+        scale = (1 - min_plot_frac) / total if total > 0 else 0
+        bottom *= scale
+        top = 1 - (1 - top) * scale
+
+    return left, right, top, bottom
 
 # ── L1 Sky Blue colour palette ────────────────────────────────────────────────
 _C = {
@@ -114,9 +159,12 @@ class NecLabApp:
         self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
         self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
-        self.multi_xls_smoothing_check = None
-        self.multi_xls_smoothing_points_spinbox = None
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
+        # 'local': min of this column, within each sheet (default, previous
+        # behavior). 'sheet': min across all columns of each sheet (matches
+        # the heatmap's normalization). 'column_global': min of this column
+        # pooled across every loaded sheet, so all sheets share one divisor.
+        self.multi_xls_norm_mode_var = tk.StringVar(value='local')
         self.multi_xls_xlim = None
         self.multi_xls_ylim = None
         self.multi_xls_plot_frame = None
@@ -127,8 +175,19 @@ class NecLabApp:
         self.multi_xls_heatmap_fig = None
         self._multi_xls_plot_resize_job = None
         self._multi_xls_heatmap_resize_job = None
-        self.btn_save_multi_xls_plot = None
-        self.btn_save_multi_xls_heatmap = None
+        self._multi_xls_sash_dragging = False
+        # Cache the expensive per-sheet data processing (interpolation,
+        # normalization, smoothing / heatmap normalization) so a
+        # resize-triggered redraw - which doesn't change any of that, only
+        # the figure size - can skip straight to replotting instead of
+        # redoing it from scratch. Keyed so loading new files, changing the
+        # selected column, or toggling any relevant setting invalidates it.
+        self._multi_xls_series_cache_key = None
+        self._multi_xls_series_cache = None
+        self._multi_xls_heatmap_matrices_cache_key = None
+        self._multi_xls_heatmap_matrices_cache = None
+        self.multi_xls_menu_grafica = None
+        self.multi_xls_menu_datos = None
         self.multi_xls_class_row = None
         self.multi_xls_plot_placeholder = None
         self.multi_xls_heatmap_placeholder = None
@@ -1607,16 +1666,101 @@ class NecLabApp:
         return datasets
 
     def _create_multi_xls_layout(self):
-        """Construye la pestaña 'Datos Multiples': lista de columnas (celdas)
-        a la izquierda y la gráfica combinada, con scroll horizontal, a la derecha."""
-        Grid.rowconfigure(self.multi_xls_tab, 0, weight=1)
-        Grid.columnconfigure(self.multi_xls_tab, 0, weight=0)
-        Grid.columnconfigure(self.multi_xls_tab, 1, weight=1)
+        """Construye la pestaña 'Datos Multiples': un menú local ('Vista',
+        'Gráfica', 'Datos') con los controles que antes eran botones/checks de
+        la barra lateral, una lista de columnas (celdas) redimensionable a la
+        izquierda (arrastrando el divisor) y la gráfica combinada a la derecha."""
+        Grid.rowconfigure(self.multi_xls_tab, 0, weight=0)
+        Grid.rowconfigure(self.multi_xls_tab, 1, weight=1)
+        Grid.columnconfigure(self.multi_xls_tab, 0, weight=1)
 
-        sidebar = tk.Frame(self.multi_xls_tab, bg=_C['panel'], width=250,
+        # Local menu bar, docked at the top of the tab (same look as the
+        # window's top 'Archivo' menu), grouping the controls that used to
+        # be individual checkboxes/buttons stacked in the sidebar.
+        menubar = tk.Frame(self.multi_xls_tab, bg='#f5f5f5', height=26,
                            highlightbackground=_C['border'], highlightthickness=1)
-        sidebar.grid(row=0, column=0, sticky='nsew', padx=(8, 0), pady=8)
-        sidebar.grid_propagate(False)
+        menubar.grid(row=0, column=0, sticky='ew')
+        menubar.grid_propagate(False)
+
+        def add_tab_menu(label, build):
+            mb = tk.Menubutton(menubar, text=label, font=('Segoe UI', 9),
+                                bg='#f5f5f5', activebackground='#dbeafe',
+                                relief='flat', bd=0, padx=8, pady=3)
+            menu = tk.Menu(mb, tearoff=0, font=('Segoe UI', 9))
+            build(menu)
+            mb['menu'] = menu
+            mb.pack(side='left')
+            return menu
+
+        def build_vista_menu(m):
+            m.add_checkbutton(label="Mostrar Nombres de Datos",
+                               variable=self.multi_xls_show_labels_var,
+                               command=self._on_multi_xls_show_labels_toggle)
+            m.add_checkbutton(label="Smoothing",
+                               variable=self.multi_xls_smoothing_var,
+                               command=self._on_multi_xls_smoothing_toggle)
+            m.add_command(label="Puntos de Smoothing...",
+                          command=self._open_multi_xls_smoothing_points_dialog)
+            m.add_separator()
+            m.add_checkbutton(label="Escala de Color Compartida (mapa de calor)",
+                               variable=self.multi_xls_shared_scale_var,
+                               command=self._on_multi_xls_shared_scale_toggle)
+            m.add_separator()
+            norm_menu = tk.Menu(m, tearoff=0, font=('Segoe UI', 9))
+            norm_menu.add_radiobutton(
+                label="Por Columna (mínimo de esa columna en cada hoja)",
+                variable=self.multi_xls_norm_mode_var, value='local',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_radiobutton(
+                label="Por Hoja (mínimo de toda la hoja)",
+                variable=self.multi_xls_norm_mode_var, value='sheet',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_radiobutton(
+                label="Por Columna en Todas las Hojas (mínimo compartido)",
+                variable=self.multi_xls_norm_mode_var, value='column_global',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_radiobutton(
+                label="Global (mínimo de todas las columnas y hojas)",
+                variable=self.multi_xls_norm_mode_var, value='all_global',
+                command=self._on_multi_xls_norm_mode_toggle)
+            m.add_cascade(label="Normalización", menu=norm_menu)
+
+        def build_grafica_menu(m):
+            m.add_command(label="Límites de Ejes (Gráfica Superior)...",
+                          command=self._open_multi_xls_axis_limits_dialog)
+            m.add_separator()
+            m.add_command(label="Save Plot Image...", state='disabled',
+                          command=self._save_multi_xls_plot_image)
+            m.add_command(label="Save Heatmap Image...", state='disabled',
+                          command=self._save_multi_xls_heatmap_image)
+            m.add_separator()
+            m.add_command(label="Save Plotted Points (CSV/XLSX)...", state='disabled',
+                          command=self._save_multi_xls_plot_points)
+
+        def build_datos_menu(m):
+            m.add_command(label="Editar Clasificaciones...",
+                          command=self._open_multi_xls_class_editor)
+            m.add_separator()
+            m.add_command(label="Save Classifications...", state='disabled',
+                          command=self._save_multi_xls_classifications)
+            m.add_command(label="Load Classifications...", state='disabled',
+                          command=self._load_multi_xls_classifications)
+
+        add_tab_menu("Vista", build_vista_menu)
+        self.multi_xls_menu_grafica = add_tab_menu("Gráfica", build_grafica_menu)
+        self.multi_xls_menu_datos = add_tab_menu("Datos", build_datos_menu)
+
+        self.multi_xls_smoothing_points_var.trace_add(
+            'write', lambda *args: self._on_multi_xls_smoothing_toggle())
+
+        # Sidebar (column list) and plot area, in a draggable-sash
+        # PanedWindow so the list can be resized by dragging the divider
+        # instead of being stuck at a fixed width.
+        paned = ttk.PanedWindow(self.multi_xls_tab, orient='horizontal')
+        paned.grid(row=1, column=0, sticky='nsew', padx=8, pady=8)
+
+        sidebar = tk.Frame(paned, bg=_C['panel'],
+                           highlightbackground=_C['border'], highlightthickness=1)
         sidebar.columnconfigure(0, weight=1)
 
         tk.Label(sidebar, text="DATOS (CELDAS)", font=('Arial', 8, 'bold'),
@@ -1626,7 +1770,7 @@ class NecLabApp:
 
         lb_frame = tk.Frame(sidebar, bg=_C['card'],
                             highlightbackground=_C['border'], highlightthickness=1)
-        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 4))
+        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 10))
         sidebar.rowconfigure(2, weight=1)
         lb_frame.rowconfigure(0, weight=1)
         lb_frame.columnconfigure(0, weight=1)
@@ -1645,106 +1789,65 @@ class NecLabApp:
         scrollbar.config(command=self.multi_xls_column_listbox.yview)
         self.multi_xls_column_listbox.bind('<<ListboxSelect>>', self._on_multi_xls_column_select)
 
-        tk.Checkbutton(sidebar, text="Mostrar Nombres de Datos",
-                       variable=self.multi_xls_show_labels_var,
-                       command=self._on_multi_xls_show_labels_toggle,
-                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-                       activebackground=_C['panel'], font=('Arial', 9)).grid(
-            row=3, column=0, sticky='w', padx=10, pady=(0, 6))
-
-        multi_smooth_frame = tk.Frame(sidebar, bg=_C['panel'])
-        multi_smooth_frame.grid(row=4, column=0, sticky='ew', padx=10, pady=(0, 6))
-
-        self.multi_xls_smoothing_check = tk.Checkbutton(
-            multi_smooth_frame, text="Smoothing", variable=self.multi_xls_smoothing_var,
-            command=self._on_multi_xls_smoothing_toggle,
-            bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-            activebackground=_C['panel'], font=('Arial', 9)
-        )
-        self.multi_xls_smoothing_check.grid(row=0, column=0, sticky='w')
-
-        points_frame = tk.Frame(multi_smooth_frame, bg=_C['panel'])
-        points_frame.grid(row=1, column=0, sticky='w')
-        tk.Label(points_frame, text="Points:", bg=_C['panel'],
-                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
-        self.multi_xls_smoothing_points_spinbox = ttk.Spinbox(
-            points_frame, from_=2, to=50, textvariable=self.multi_xls_smoothing_points_var,
-            width=4
-        )
-        self.multi_xls_smoothing_points_spinbox.pack(side='left')
-        self.multi_xls_smoothing_points_spinbox.config(
-            state='normal' if self.multi_xls_smoothing_var.get() else DISABLED)
-        self.multi_xls_smoothing_points_var.trace_add(
-            'write', lambda *args: self._on_multi_xls_smoothing_toggle())
-
-        tk.Checkbutton(sidebar, text="Escala de Color Compartida (mapa de calor)",
-                       variable=self.multi_xls_shared_scale_var,
-                       command=self._on_multi_xls_shared_scale_toggle,
-                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-                       activebackground=_C['panel'], font=('Arial', 9),
-                       wraplength=210, justify='left').grid(
-            row=5, column=0, sticky='w', padx=10, pady=(0, 6))
-
-        ctk.CTkButton(
-            sidebar, text="Límites de Ejes (Gráfica Superior)", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            command=self._open_multi_xls_axis_limits_dialog
-        ).grid(row=6, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_save_multi_xls_plot = ctk.CTkButton(
-            sidebar, text="Save Plot Image", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_multi_xls_plot_image
-        )
-        self.btn_save_multi_xls_plot.grid(row=7, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_save_multi_xls_heatmap = ctk.CTkButton(
-            sidebar, text="Save Heatmap Image", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_multi_xls_heatmap_image
-        )
-        self.btn_save_multi_xls_heatmap.grid(row=8, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        ctk.CTkButton(
-            sidebar, text="Editar Clasificaciones", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            command=self._open_multi_xls_class_editor
-        ).grid(row=9, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_save_multi_xls_classifications = ctk.CTkButton(
-            sidebar, text="Save Classifications", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_multi_xls_classifications
-        )
-        self.btn_save_multi_xls_classifications.grid(row=10, column=0, sticky='ew', padx=10, pady=(0, 2))
-
-        self.btn_load_multi_xls_classifications = ctk.CTkButton(
-            sidebar, text="Load Classifications", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._load_multi_xls_classifications
-        )
-        self.btn_load_multi_xls_classifications.grid(row=11, column=0, sticky='ew', padx=10, pady=(0, 10))
-
-        # Right side - stacked plot areas (line plot on top, heatmap below).
-        # Both are redrawn to exactly fill their frame on every resize, so
+        # Right side - stacked plot areas (line plot on top, heatmap below),
+        # in their own vertical PanedWindow so that split can be resized by
+        # dragging too, instead of being stuck at a fixed 3:2 ratio. Both
+        # panels are redrawn to exactly fill their frame on every resize, so
         # the whole graph and every sheet image are always visible without
         # needing to scroll.
-        right_container = tk.Frame(self.multi_xls_tab, bg=_C['bg'])
-        right_container.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
-        right_container.rowconfigure(0, weight=3)
-        right_container.rowconfigure(1, weight=2)
-        right_container.columnconfigure(0, weight=1)
+        right_paned = ttk.PanedWindow(paned, orient='vertical')
 
-        self.multi_xls_plot_frame = tk.Frame(right_container, bg=_C['panel'],
+        paned.add(sidebar, weight=0)
+        paned.add(right_paned, weight=1)
+        # Give the sidebar a sensible starting width (same as the old fixed
+        # width); the user can drag the sash to resize it from here.
+        self.root.after(50, lambda: paned.sashpos(0, 250))
+
+        # ttk.PanedWindow has no built-in minsize per pane, so enforce one by
+        # snapping the sash back whenever the sidebar is dragged narrower
+        # than what "Column 999" needs to display without truncating.
+        sidebar_min_w = tkfont.Font(family='Arial', size=10).measure('Column 999') + 60
+
+        def _enforce_sidebar_min_width(event=None):
+            w = sidebar.winfo_width()
+            if 0 < w < sidebar_min_w:
+                paned.sashpos(0, sidebar_min_w)
+
+        sidebar.bind('<Configure>', _enforce_sidebar_min_width)
+
+        # While a sash is actively being dragged, suppress the debounced
+        # resize-redraws entirely (see _on_multi_xls_plot_frame_resize /
+        # _on_multi_xls_heatmap_frame_resize) - they're expensive (reprocess
+        # every sheet's data from scratch), and a plain human drag has
+        # natural pauses long enough for the debounce timer to fire mid-drag
+        # anyway, which reads as stutter. Redraw once, immediately, on
+        # release instead.
+        def _on_sash_press(event=None):
+            self._multi_xls_sash_dragging = True
+            # Also cancel any job already scheduled from a resize that
+            # happened just before the drag started (e.g. the initial
+            # layout) - otherwise it could still fire mid-drag, since only
+            # *new* scheduling is blocked while dragging.
+            if self._multi_xls_plot_resize_job is not None:
+                self.root.after_cancel(self._multi_xls_plot_resize_job)
+                self._multi_xls_plot_resize_job = None
+            if self._multi_xls_heatmap_resize_job is not None:
+                self.root.after_cancel(self._multi_xls_heatmap_resize_job)
+                self._multi_xls_heatmap_resize_job = None
+
+        paned.bind('<ButtonPress-1>', _on_sash_press)
+        right_paned.bind('<ButtonPress-1>', _on_sash_press)
+
+        # Redraw both plots immediately when the user releases either sash,
+        # instead of waiting for the debounce timer used for window-border
+        # resizes (which can't be tied to a mouse-release event, since that
+        # drag is owned by the OS window manager, not Tk).
+        paned.bind('<ButtonRelease-1>', self._on_multi_xls_sash_release)
+        right_paned.bind('<ButtonRelease-1>', self._on_multi_xls_sash_release)
+
+        self.multi_xls_plot_frame = tk.Frame(right_paned, bg=_C['panel'],
                                               highlightbackground=_C['border'],
                                               highlightthickness=1)
-        self.multi_xls_plot_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 4))
         self.multi_xls_plot_frame.bind('<Configure>', self._on_multi_xls_plot_frame_resize)
 
         # Row of per-sheet classification dropdowns, pixel-aligned above the
@@ -1770,16 +1873,36 @@ class NecLabApp:
         self.multi_xls_plot_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Bottom: heatmap images (one per sheet, columns=datos, rows=muestras)
-        self.multi_xls_heatmap_frame = tk.Frame(right_container, bg=_C['panel'],
+        self.multi_xls_heatmap_frame = tk.Frame(right_paned, bg=_C['panel'],
                                                  highlightbackground=_C['border'],
                                                  highlightthickness=1)
-        self.multi_xls_heatmap_frame.grid(row=1, column=0, sticky='nsew', pady=(4, 0))
         self.multi_xls_heatmap_frame.bind('<Configure>', self._on_multi_xls_heatmap_frame_resize)
 
         self.multi_xls_heatmap_placeholder = tk.Label(
             self.multi_xls_heatmap_frame, text="Las imágenes de las hojas aparecerán aquí",
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
         self.multi_xls_heatmap_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        right_paned.add(self.multi_xls_plot_frame, weight=3)
+        right_paned.add(self.multi_xls_heatmap_frame, weight=2)
+        # Same 3:2 starting ratio the old fixed Grid rows used.
+        self.root.after(50, lambda: right_paned.sashpos(0, int(right_paned.winfo_height() * 0.6)))
+
+        # Keep both panels at a legible minimum height, same idea as the
+        # sidebar's minimum width above.
+        right_min_h = 160
+
+        def _enforce_right_paned_min_height(event=None):
+            total = right_paned.winfo_height()
+            if total <= 1:
+                return
+            pos = right_paned.sashpos(0)
+            if pos < right_min_h:
+                right_paned.sashpos(0, right_min_h)
+            elif total - pos < right_min_h:
+                right_paned.sashpos(0, total - right_min_h)
+
+        self.multi_xls_plot_frame.bind('<Configure>', _enforce_right_paned_min_height, add='+')
 
     def _populate_multi_xls_columns(self):
         """Llena la lista lateral con nombres genéricos 'Column N' (uno por
@@ -1821,11 +1944,12 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
 
         if self.multi_xls_datasets:
-            self.btn_save_multi_xls_plot.configure(state='normal')
-            self.btn_save_multi_xls_heatmap.configure(state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Plotted Points (CSV/XLSX)...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
-            self.btn_save_multi_xls_classifications.configure(state='normal')
-            self.btn_load_multi_xls_classifications.configure(state='normal')
+            self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
+            self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recrea el combobox de clasificación de cada hoja cargada (uno por
@@ -2127,18 +2251,52 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
 
     def _on_multi_xls_smoothing_toggle(self):
-        """Enable/disable the points spinbox and redraw the top plot with
-        Convex Envelope smoothing applied (or removed)."""
-        enabled = self.multi_xls_smoothing_var.get()
-        if self.multi_xls_smoothing_points_spinbox:
-            self.multi_xls_smoothing_points_spinbox.config(state='normal' if enabled else DISABLED)
+        """Redibuja la gráfica superior con el smoothing Convex Envelope
+        aplicado (o removido), o con el número de puntos actualizado."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
+    def _open_multi_xls_smoothing_points_dialog(self):
+        """Diálogo para ajustar el número de puntos usado por el smoothing
+        Convex Envelope de la gráfica superior de 'Datos Multiples'."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Puntos de Smoothing")
+        dialog.geometry("260x120")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        row = tk.Frame(dialog)
+        row.pack(padx=16, pady=(20, 8), fill='x')
+        tk.Label(row, text="Número de puntos:").pack(side='left')
+        points_var = tk.StringVar(value=str(self.multi_xls_smoothing_points_var.get()))
+        ttk.Spinbox(row, from_=2, to=50, textvariable=points_var, width=6).pack(side='left', padx=(8, 0))
+
+        def apply_points():
+            try:
+                n = int(points_var.get())
+            except ValueError:
+                messagebox.showerror("Valor inválido", "Debe ser un número entero.", parent=dialog)
+                return
+            if not (2 <= n <= 50):
+                messagebox.showerror("Valor inválido", "Debe estar entre 2 y 50.", parent=dialog)
+                return
+            self.multi_xls_smoothing_points_var.set(n)
+            dialog.destroy()
+
+        btns = tk.Frame(dialog)
+        btns.pack(side='bottom', pady=16)
+        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Aplicar", command=apply_points, width=8).pack(side='left', padx=4)
+
     def _on_multi_xls_shared_scale_toggle(self):
         """Redibuja el mapa de calor con una escala de color compartida entre
-        todas las hojas, o una escala independiente para cada hoja."""
+        todas las hojas, o una escala independiente para cada hoja. También
+        redibuja la gráfica de líneas: su margen derecho depende de si el
+        mapa de calor mostrará colorbar, para que ambas sigan alineadas."""
         self._draw_multi_xls_heatmap()
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
 
     def _smooth_multi_xls_signal(self, values):
         """Apply Convex Envelope smoothing to a single sheet's column values
@@ -2151,6 +2309,97 @@ class NecLabApp:
             return values
         from peak_functions import _convex_envelope_detrend_signal
         return _convex_envelope_detrend_signal(values, n_points=n_points)
+
+    def _on_multi_xls_norm_mode_toggle(self):
+        """Redibuja ambas gráficas con el modo de normalización elegido:
+        por columna (local, por defecto), por hoja, por columna en todas
+        las hojas, o global (todas las columnas y hojas). Ambas gráficas
+        usan el mismo modo, así que las dos se redibujan."""
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+        self._draw_multi_xls_heatmap()
+
+    def _compute_multi_xls_series(self, col_name):
+        """Para cada hoja cargada que tenga la columna 'col_name', devuelve
+        (label, values) ya interpolados, normalizados y suavizados - el
+        mismo procesamiento que dibuja la gráfica superior, factorizado
+        aparte para que 'Save Plotted Points' exporte exactamente lo que se
+        ve. El divisor de la normalización depende de
+        multi_xls_norm_mode_var:
+        - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
+          usa su propio mínimo).
+        - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
+          cada hoja (mismo criterio que el heatmap).
+        - 'column_global': mínimo de esa columna, agrupando todas las
+          hojas cargadas - un solo valor, compartido por todas.
+        - 'all_global': mínimo de todas las columnas y todas las hojas - un
+          solo valor para absolutamente todo lo cargado, sin importar la
+          columna seleccionada.
+
+        El resultado se guarda en caché (por columna + modo de
+        normalización + smoothing), porque un redibujado disparado solo por
+        cambio de tamaño de panel no cambia ninguno de estos datos - así se
+        evita reprocesar cada hoja en cada resize."""
+        import pandas as pd
+
+        mode = self.multi_xls_norm_mode_var.get()
+        smoothing_on = self.multi_xls_smoothing_var.get()
+        try:
+            smoothing_points = self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            smoothing_points = None
+        cache_key = (id(self.multi_xls_datasets), col_name, mode, smoothing_on, smoothing_points)
+        if self._multi_xls_series_cache_key == cache_key:
+            return self._multi_xls_series_cache
+
+        column_global_min = None
+        if mode == 'column_global':
+            pooled = []
+            for ds in self.multi_xls_datasets:
+                if col_name in ds['df'].columns:
+                    v = ds['df'][col_name].to_numpy(dtype=float)
+                    pooled.append(v[np.isfinite(v)])
+            if pooled:
+                pooled = np.concatenate(pooled)
+                if pooled.size:
+                    column_global_min = pooled.min()
+
+        all_global_min = None
+        if mode == 'all_global':
+            pooled = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
+            finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
+            if finite.size:
+                all_global_min = finite.min()
+
+        series = []
+        for ds in self.multi_xls_datasets:
+            if col_name not in ds['df'].columns:
+                continue
+            values = ds['df'][col_name].to_numpy(dtype=float)
+            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+            if len(values) == 0:
+                continue
+
+            if mode == 'sheet':
+                all_values = ds['df'].to_numpy(dtype=float)
+                finite = all_values[np.isfinite(all_values)]
+                divisor = finite.min() if finite.size else None
+            elif mode == 'column_global':
+                divisor = column_global_min
+            elif mode == 'all_global':
+                divisor = all_global_min
+            else:  # 'local'
+                finite = values[np.isfinite(values)]
+                divisor = finite.min() if finite.size else None
+
+            if divisor is not None and divisor != 0:
+                values = values / divisor
+            values = self._smooth_multi_xls_signal(values)
+            series.append((ds['label'], values))
+
+        self._multi_xls_series_cache_key = cache_key
+        self._multi_xls_series_cache = series
+        return series
 
     def _on_multi_xls_column_select(self, event=None):
         """Callback cuando el usuario elige una columna en la lista lateral."""
@@ -2175,7 +2424,13 @@ class NecLabApp:
     def _on_multi_xls_plot_frame_resize(self, event=None):
         """Redibuja la gráfica de líneas (con un pequeño retraso, para no
         redibujar en cada pixel mientras se arrastra la ventana) para que
-        siga llenando exactamente el panel tras cambiar de tamaño."""
+        siga llenando exactamente el panel tras cambiar de tamaño. Mientras
+        se arrastra un sash, no se agenda nada: el redibujo (caro, porque
+        reprocesa los datos de cada hoja) se hace una sola vez, al soltar
+        (ver _on_multi_xls_sash_release), en vez de arriesgarse a que el
+        temporizador dispare a mitad del arrastre y se sienta como trabado."""
+        if self._multi_xls_sash_dragging:
+            return
         if self._multi_xls_plot_resize_job is not None:
             self.root.after_cancel(self._multi_xls_plot_resize_job)
         self._multi_xls_plot_resize_job = self.root.after(200, self._redraw_multi_xls_plot_for_resize)
@@ -2187,10 +2442,32 @@ class NecLabApp:
 
     def _on_multi_xls_heatmap_frame_resize(self, event=None):
         """Redibuja el panel de imágenes (con un pequeño retraso) para que
-        siga llenando exactamente el panel tras cambiar de tamaño."""
+        siga llenando exactamente el panel tras cambiar de tamaño. Igual que
+        en _on_multi_xls_plot_frame_resize, no agenda nada mientras se
+        arrastra un sash."""
+        if self._multi_xls_sash_dragging:
+            return
         if self._multi_xls_heatmap_resize_job is not None:
             self.root.after_cancel(self._multi_xls_heatmap_resize_job)
         self._multi_xls_heatmap_resize_job = self.root.after(200, self._draw_multi_xls_heatmap)
+
+    def _on_multi_xls_sash_release(self, event=None):
+        """Redibuja ambas gráficas inmediatamente al soltar el mouse tras
+        arrastrar el divisor entre la lista y las gráficas, en vez de esperar
+        al temporizador de espera usado para el redimensionado de ventana
+        (que sí necesita ese retraso, porque no hay un evento de "mouse
+        liberado" al que enganchar cuando el arrastre lo controla el gestor
+        de ventanas del sistema operativo en vez de Tk)."""
+        self._multi_xls_sash_dragging = False
+        if self._multi_xls_plot_resize_job is not None:
+            self.root.after_cancel(self._multi_xls_plot_resize_job)
+            self._multi_xls_plot_resize_job = None
+        if self._multi_xls_heatmap_resize_job is not None:
+            self.root.after_cancel(self._multi_xls_heatmap_resize_job)
+            self._multi_xls_heatmap_resize_job = None
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+        self._draw_multi_xls_heatmap()
 
     def _draw_multi_xls_plot(self, index):
         """Grafica la columna en la posición 'index' de cada hoja cargada,
@@ -2217,11 +2494,10 @@ class NecLabApp:
             self.multi_xls_current_column = self.multi_xls_common_columns[index]
             return
 
-        import pandas as pd
-
         col_name = self.multi_xls_common_columns[index]
         display_label = self.multi_xls_column_listbox.get(index)
         show_labels = self.multi_xls_show_labels_var.get()
+        reserve_colorbar = self.multi_xls_shared_scale_var.get()
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
@@ -2249,26 +2525,14 @@ class NecLabApp:
         tick_positions = []
         tick_labels = []
         bounds = []
-        for ds in self.multi_xls_datasets:
-            if col_name not in ds['df'].columns:
-                continue
-            values = ds['df'][col_name].to_numpy(dtype=float)
-            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+        for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
-            if n == 0:
-                continue
-            # Normalize this sheet's column against its own minimum,
-            # independently of every other sheet.
-            finite = values[np.isfinite(values)]
-            if finite.size and finite.min() != 0:
-                values = values / finite.min()
-            values = self._smooth_multi_xls_signal(values)
             x = np.arange(offset, offset + n)
             ax.plot(x, values, linewidth=0.8)
             if offset > 0:
                 ax.axvline(offset, color=_C['sub'], linestyle='--', linewidth=1, alpha=0.6)
             tick_positions.append(offset + n / 2)
-            tick_labels.append(ds['label'])
+            tick_labels.append(label)
             bounds.append((offset, offset + n))
             offset += n
 
@@ -2278,38 +2542,141 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_title(display_label)
-        ax.set_ylabel('Value / mínimo de cada hoja')
+        norm_mode = self.multi_xls_norm_mode_var.get()
+        if norm_mode == 'sheet':
+            ax.set_ylabel('Value / mínimo de toda la hoja')
+        elif norm_mode == 'column_global':
+            ax.set_ylabel('Value / mínimo de la columna (todas las hojas)')
+        elif norm_mode == 'all_global':
+            ax.set_ylabel('Value / mínimo global (todas las columnas y hojas)')
+        else:
+            ax.set_ylabel('Value / mínimo de la columna')
 
-        # Manual axis limits set via "Límites de Ejes", if any; otherwise
-        # matplotlib keeps autoscaling to the plotted data as usual.
+        # Manual axis limits set via "Límites de Ejes", if any; otherwise fit
+        # tightly to the data range (matching the heatmap below) instead of
+        # matplotlib's default 5% autoscale padding on each side.
         if self.multi_xls_xlim is not None:
             ax.set_xlim(self.multi_xls_xlim)
+        else:
+            ax.set_xlim(0, offset)
         if self.multi_xls_ylim is not None:
             ax.set_ylim(self.multi_xls_ylim)
 
-        self.multi_xls_fig.tight_layout()
-
-        # Force the same horizontal bounds used by the heatmap below, so a
-        # sample's x-position lines up vertically between the two plots
-        # regardless of the heatmap's colorbar taking extra space on its side.
-        pos = ax.get_position()
-        ax.set_position([_MULTI_XLS_AX_LEFT, pos.y0,
-                          _MULTI_XLS_AX_RIGHT - _MULTI_XLS_AX_LEFT, pos.height])
+        # Margins are computed in inches (not tight_layout's auto-padding or a
+        # fixed fraction) so the axes always use as much of the panel as
+        # possible: the bottom margin shrinks when the rotated sheet-name
+        # labels are hidden, and the shared left/right bounds keep this plot
+        # aligned with the heatmap below regardless of panel width.
+        left, right, top, bottom = _multi_xls_axes_margins(
+            fig_width, fig_height, show_labels, reserve_colorbar)
+        self.multi_xls_fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
 
         self._multi_xls_plot_canvas.draw()
 
         self._position_multi_xls_class_row(ax, bounds)
         self.btn_multi_xls_next_column.lift()
 
+    def _compute_multi_xls_heatmap_matrices(self):
+        """Devuelve (matrices, vmin, vmax, per_sheet_ranges) para el
+        heatmap: cada matriz normalizada y transpuesta (filas=columnas de
+        datos, columnas=muestras); vmin/vmax (o None, None si no aplica
+        escala compartida); y una lista de (min, max) por hoja para cuando
+        no aplica. Devuelve (None, None, None, None) si no hay datos
+        finitos.
+
+        Usa el mismo modo de normalización (multi_xls_norm_mode_var) que la
+        gráfica de líneas de arriba, adaptado a que aquí cada hoja se
+        muestra entera (todas sus columnas a la vez, una por fila):
+        - 'local': cada fila (columna de datos) se normaliza contra su
+          propio mínimo, calculado solo dentro de esa hoja.
+        - 'sheet': toda la hoja (todas sus columnas juntas) se normaliza
+          contra un solo mínimo, dentro de esa hoja (comportamiento
+          original de este heatmap).
+        - 'column_global': cada fila (columna de datos, por posición) se
+          normaliza contra el mínimo de esa misma posición de columna,
+          agrupando todas las hojas cargadas.
+        - 'all_global': un solo mínimo para absolutamente todo lo cargado.
+
+        Cacheado por (datasets, modo de normalización, escala compartida) -
+        nada de esto cambia con el tamaño del panel, así que un redibujado
+        disparado solo por resize reutiliza el resultado en vez de
+        reprocesar todas las hojas."""
+        mode = self.multi_xls_norm_mode_var.get()
+        shared_scale = self.multi_xls_shared_scale_var.get()
+        cache_key = (id(self.multi_xls_datasets), mode, shared_scale)
+        if self._multi_xls_heatmap_matrices_cache_key == cache_key:
+            return self._multi_xls_heatmap_matrices_cache
+
+        raw_matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
+        finite_vals = (np.concatenate([m[np.isfinite(m)].ravel() for m in raw_matrices])
+                       if raw_matrices else np.array([]))
+        if finite_vals.size == 0:
+            result = (None, None, None, None)
+        else:
+            matrices = []
+            if mode == 'local':
+                # Each data column normalized against its own minimum,
+                # within that sheet only.
+                for m in raw_matrices:
+                    with np.errstate(invalid='ignore'):
+                        col_mins = np.where(np.isfinite(m), m, np.nan)
+                        col_mins = np.nanmin(col_mins, axis=0, keepdims=True)
+                    col_mins = np.where(np.isfinite(col_mins) & (col_mins != 0), col_mins, 1.0)
+                    matrices.append((m / col_mins).T)
+            elif mode == 'column_global':
+                # Each data column (by position) normalized against the
+                # minimum of that same column position, pooled across
+                # every loaded sheet.
+                n_cols = max((m.shape[1] for m in raw_matrices), default=0)
+                pooled_min = np.full(n_cols, np.nan)
+                for m in raw_matrices:
+                    for c in range(m.shape[1]):
+                        col = m[:, c]
+                        finite = col[np.isfinite(col)]
+                        if finite.size:
+                            v = finite.min()
+                            pooled_min[c] = v if np.isnan(pooled_min[c]) else min(pooled_min[c], v)
+                pooled_min = np.where(np.isfinite(pooled_min) & (pooled_min != 0), pooled_min, 1.0)
+                for m in raw_matrices:
+                    matrices.append((m / pooled_min[:m.shape[1]]).T)
+            elif mode == 'all_global':
+                all_min = finite_vals.min()
+                if all_min == 0:
+                    all_min = 1.0
+                matrices = [(m / all_min).T for m in raw_matrices]
+            else:  # 'sheet' (default / previous behavior)
+                for m in raw_matrices:
+                    sheet_min = float(m[np.isfinite(m)].min())
+                    matrices.append((m / sheet_min).T)
+
+            per_sheet_ranges = []
+            for m in matrices:
+                finite = m[np.isfinite(m)]
+                per_sheet_ranges.append((float(finite.min()), float(finite.max())))
+
+            vmin = vmax = None
+            if shared_scale:
+                norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+                vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
+
+            result = (matrices, vmin, vmax, per_sheet_ranges)
+
+        self._multi_xls_heatmap_matrices_cache_key = cache_key
+        self._multi_xls_heatmap_matrices_cache = result
+        return result
+
     def _draw_multi_xls_heatmap(self):
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
         muestras (el mismo eje que la gráfica de líneas de arriba) y el eje Y
         son las columnas (las series de datos); el color de cada pixel
-        representa su valor dividido entre el mínimo propio de esa hoja (cada
-        hoja se normaliza contra su propio mínimo, no uno global). Todas las
-        hojas comparten la misma escala de color. Las imágenes de cada hoja
-        se colocan una junto a otra. El canvas se crea una sola vez y se
-        reutiliza en cada redibujado (ver comentario en __init__), ajustándose
+        representa su valor dividido entre un mínimo, calculado según el
+        modo elegido en el submenú 'Normalización' (ver
+        _compute_multi_xls_heatmap_matrices) - el mismo modo que usa la
+        gráfica de líneas de arriba. Si 'Escala de Color Compartida' está
+        activo, todas las hojas comparten la misma escala de color; si no,
+        cada hoja usa su propio rango. Las imágenes de cada hoja se colocan
+        una junto a otra. El canvas se crea una sola vez y se reutiliza en
+        cada redibujado (ver comentario en __init__), ajustándose
         exactamente al tamaño del panel."""
         if self.multi_xls_heatmap_frame is None:
             return
@@ -2335,23 +2702,10 @@ class NecLabApp:
         if w_px <= 1 or h_px <= 1:
             return
 
-        raw_matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
-        finite_vals = np.concatenate([m[np.isfinite(m)].ravel() for m in raw_matrices])
-        if finite_vals.size == 0:
-            return
-
-        # Normalize each sheet's values against its own minimum (not one
-        # global minimum shared across all sheets), then transpose so rows =
-        # data columns and columns = samples.
-        matrices = []
-        for m in raw_matrices:
-            sheet_min = float(m[np.isfinite(m)].min())
-            matrices.append((m / sheet_min).T)
-
         shared_scale = self.multi_xls_shared_scale_var.get()
-        if shared_scale:
-            norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
-            vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
+        matrices, vmin, vmax, per_sheet_ranges = self._compute_multi_xls_heatmap_matrices()
+        if matrices is None:
+            return
 
         show_labels = self.multi_xls_show_labels_var.get()
         fig_width = w_px / 100
@@ -2383,13 +2737,12 @@ class NecLabApp:
         tick_positions = []
         tick_labels = []
         im = None
-        for ds, matrix in zip(self.multi_xls_datasets, matrices):
+        for ds, matrix, sheet_range in zip(self.multi_xls_datasets, matrices, per_sheet_ranges):
             n_cols, n_samples = matrix.shape
             if shared_scale:
                 im_vmin, im_vmax = vmin, vmax
             else:
-                finite = matrix[np.isfinite(matrix)]
-                im_vmin, im_vmax = float(finite.min()), float(finite.max())
+                im_vmin, im_vmax = sheet_range
             im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=im_vmin, vmax=im_vmax,
                            extent=(offset, offset + n_samples, n_cols, 0))
             if offset > 0:
@@ -2405,23 +2758,29 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
+        norm_mode_desc = {
+            'local': 'mínimo de cada columna en cada hoja',
+            'sheet': 'mínimo de cada hoja',
+            'column_global': 'mínimo de cada columna (todas las hojas)',
+            'all_global': 'mínimo global (todas las columnas y hojas)',
+        }.get(self.multi_xls_norm_mode_var.get(), 'mínimo de cada hoja')
         if shared_scale:
-            ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
+            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc})')
         else:
-            ax.set_title('Todas las hojas (valor / mínimo de cada hoja, escala individual por hoja)')
-        self.multi_xls_heatmap_fig.tight_layout()
-
-        # Force the same horizontal bounds used by the top line plot, so a
-        # sample's x-position lines up vertically between the two. The
-        # colorbar (when shown) goes in its own explicit axes to the right
-        # of this fixed span, instead of letting fig.colorbar() shrink ax
-        # to make room for it.
+            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc}, escala individual por hoja)')
+        # Same shared left/right bounds as the top line plot (see
+        # _multi_xls_axes_margins), so a sample's x-position lines up
+        # vertically between the two. The colorbar (when shown) goes in its
+        # own explicit axes carved out of the reserved right margin, instead
+        # of letting fig.colorbar() shrink ax to make room for it.
+        left, right, top, bottom = _multi_xls_axes_margins(
+            fig_width, fig_height, show_labels, shared_scale)
+        self.multi_xls_heatmap_fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
         pos = ax.get_position()
-        ax.set_position([_MULTI_XLS_AX_LEFT, pos.y0,
-                          _MULTI_XLS_AX_RIGHT - _MULTI_XLS_AX_LEFT, pos.height])
         if shared_scale and im is not None:
-            cax = self.multi_xls_heatmap_fig.add_axes(
-                [_MULTI_XLS_AX_RIGHT + 0.02, pos.y0, 0.02, pos.height])
+            cax_left = right + _MULTI_XLS_CBAR_GAP_IN / fig_width
+            cax_width = _MULTI_XLS_CBAR_WIDTH_IN / fig_width
+            cax = self.multi_xls_heatmap_fig.add_axes([cax_left, pos.y0, cax_width, pos.height])
             self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, cax=cax)
 
         self._multi_xls_heatmap_canvas.draw()
@@ -2455,6 +2814,39 @@ class NecLabApp:
         )
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_multi_xls_plot_points(self):
+        """Guarda, en un archivo .csv o .xlsx, los puntos finales (ya
+        interpolados, normalizados y suavizados) que se están graficando
+        actualmente en la gráfica superior de 'Datos Multiples' - una
+        columna por hoja cargada."""
+        if self.multi_xls_current_column is None:
+            messagebox.showwarning("Sin Datos", "Selecciona una columna primero.")
+            return
+
+        series = self._compute_multi_xls_series(self.multi_xls_current_column)
+        if not series:
+            messagebox.showwarning("Sin Datos", "No hay puntos para guardar.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
+            title="Save Plotted Points"
+        )
+        if not filename:
+            return
+
+        df = pd.DataFrame({label: pd.Series(values) for label, values in series})
+        df.index.name = 'Sample'
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            df.to_excel(filename)
+        else:
+            df.to_csv(filename)
+        messagebox.showinfo("Saved", f"Plotted points saved to:\n{filename}")
 
     def _save_multi_xls_classifications(self):
         """Guarda, para cada columna de datos y cada hoja cargada, la
