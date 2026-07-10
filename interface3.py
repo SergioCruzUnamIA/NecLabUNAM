@@ -21,11 +21,35 @@ import subprocess
 import json
 import urllib.request
 
-# Shared horizontal axes bounds (figure-fraction) for the Datos Multiples top
-# line plot and bottom heatmap, so a sample's x-position lines up vertically
-# between the two regardless of the heatmap's colorbar taking extra space.
-_MULTI_XLS_AX_LEFT = 0.09
-_MULTI_XLS_AX_RIGHT = 0.86
+# Axes margins (in inches, not a fixed fraction of the figure) for the Datos
+# Multiples top line plot and bottom heatmap. Left/right are shared by both
+# so a sample's x-position lines up vertically between the two regardless of
+# the heatmap's colorbar taking extra space on its side. Using inches instead
+# of a fixed fraction keeps the margins just large enough for their content
+# (axis label, title, colorbar) instead of eating a growing chunk of the
+# figure as the panel gets wider.
+_MULTI_XLS_LEFT_IN = 0.62             # y-axis label + tick numbers
+_MULTI_XLS_RIGHT_IN = 0.95            # reserved for the heatmap colorbar
+                                       # (kept on the line plot too, which has
+                                       # none, so both x-axes stay aligned)
+_MULTI_XLS_TOP_IN = 0.35              # title
+_MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
+_MULTI_XLS_BOTTOM_IN_NOLABELS = 0.22  # no labels: just the tick marks
+_MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
+_MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
+
+
+def _multi_xls_axes_margins(fig_width, fig_height, show_labels):
+    """(left, right, top, bottom) axes-position fractions for the Datos
+    Multiples line plot / heatmap figures, computed from constant margins in
+    inches so the plotted area keeps expanding to fill the panel as it grows
+    instead of leaving a fixed fraction of it unused."""
+    left = _MULTI_XLS_LEFT_IN / fig_width
+    right = 1 - _MULTI_XLS_RIGHT_IN / fig_width
+    top = 1 - _MULTI_XLS_TOP_IN / fig_height
+    bottom_in = _MULTI_XLS_BOTTOM_IN_LABELS if show_labels else _MULTI_XLS_BOTTOM_IN_NOLABELS
+    bottom = bottom_in / fig_height
+    return left, right, top, bottom
 
 # ── L1 Sky Blue colour palette ────────────────────────────────────────────────
 _C = {
@@ -2287,14 +2311,13 @@ class NecLabApp:
         if self.multi_xls_ylim is not None:
             ax.set_ylim(self.multi_xls_ylim)
 
-        self.multi_xls_fig.tight_layout()
-
-        # Force the same horizontal bounds used by the heatmap below, so a
-        # sample's x-position lines up vertically between the two plots
-        # regardless of the heatmap's colorbar taking extra space on its side.
-        pos = ax.get_position()
-        ax.set_position([_MULTI_XLS_AX_LEFT, pos.y0,
-                          _MULTI_XLS_AX_RIGHT - _MULTI_XLS_AX_LEFT, pos.height])
+        # Margins are computed in inches (not tight_layout's auto-padding or a
+        # fixed fraction) so the axes always use as much of the panel as
+        # possible: the bottom margin shrinks when the rotated sheet-name
+        # labels are hidden, and the shared left/right bounds keep this plot
+        # aligned with the heatmap below regardless of panel width.
+        left, right, top, bottom = _multi_xls_axes_margins(fig_width, fig_height, show_labels)
+        self.multi_xls_fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
 
         self._multi_xls_plot_canvas.draw()
 
@@ -2409,19 +2432,18 @@ class NecLabApp:
             ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
         else:
             ax.set_title('Todas las hojas (valor / mínimo de cada hoja, escala individual por hoja)')
-        self.multi_xls_heatmap_fig.tight_layout()
-
-        # Force the same horizontal bounds used by the top line plot, so a
-        # sample's x-position lines up vertically between the two. The
-        # colorbar (when shown) goes in its own explicit axes to the right
-        # of this fixed span, instead of letting fig.colorbar() shrink ax
-        # to make room for it.
+        # Same shared left/right bounds as the top line plot (see
+        # _multi_xls_axes_margins), so a sample's x-position lines up
+        # vertically between the two. The colorbar (when shown) goes in its
+        # own explicit axes carved out of the reserved right margin, instead
+        # of letting fig.colorbar() shrink ax to make room for it.
+        left, right, top, bottom = _multi_xls_axes_margins(fig_width, fig_height, show_labels)
+        self.multi_xls_heatmap_fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
         pos = ax.get_position()
-        ax.set_position([_MULTI_XLS_AX_LEFT, pos.y0,
-                          _MULTI_XLS_AX_RIGHT - _MULTI_XLS_AX_LEFT, pos.height])
         if shared_scale and im is not None:
-            cax = self.multi_xls_heatmap_fig.add_axes(
-                [_MULTI_XLS_AX_RIGHT + 0.02, pos.y0, 0.02, pos.height])
+            cax_left = right + _MULTI_XLS_CBAR_GAP_IN / fig_width
+            cax_width = _MULTI_XLS_CBAR_WIDTH_IN / fig_width
+            cax = self.multi_xls_heatmap_fig.add_axes([cax_left, pos.y0, cax_width, pos.height])
             self._multi_xls_heatmap_colorbar = self.multi_xls_heatmap_fig.colorbar(im, cax=cax)
 
         self._multi_xls_heatmap_canvas.draw()
