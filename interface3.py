@@ -170,6 +170,7 @@ class NecLabApp:
         self.multi_xls_heatmap_fig = None
         self._multi_xls_plot_resize_job = None
         self._multi_xls_heatmap_resize_job = None
+        self._multi_xls_sash_dragging = False
         self.multi_xls_menu_grafica = None
         self.multi_xls_menu_datos = None
         self.multi_xls_class_row = None
@@ -1777,6 +1778,19 @@ class NecLabApp:
 
         sidebar.bind('<Configure>', _enforce_sidebar_min_width)
 
+        # While a sash is actively being dragged, suppress the debounced
+        # resize-redraws entirely (see _on_multi_xls_plot_frame_resize /
+        # _on_multi_xls_heatmap_frame_resize) - they're expensive (reprocess
+        # every sheet's data from scratch), and a plain human drag has
+        # natural pauses long enough for the debounce timer to fire mid-drag
+        # anyway, which reads as stutter. Redraw once, immediately, on
+        # release instead.
+        def _on_sash_press(event=None):
+            self._multi_xls_sash_dragging = True
+
+        paned.bind('<ButtonPress-1>', _on_sash_press)
+        right_paned.bind('<ButtonPress-1>', _on_sash_press)
+
         # Redraw both plots immediately when the user releases either sash,
         # instead of waiting for the debounce timer used for window-border
         # resizes (which can't be tied to a mouse-release event, since that
@@ -2271,7 +2285,13 @@ class NecLabApp:
     def _on_multi_xls_plot_frame_resize(self, event=None):
         """Redibuja la gráfica de líneas (con un pequeño retraso, para no
         redibujar en cada pixel mientras se arrastra la ventana) para que
-        siga llenando exactamente el panel tras cambiar de tamaño."""
+        siga llenando exactamente el panel tras cambiar de tamaño. Mientras
+        se arrastra un sash, no se agenda nada: el redibujo (caro, porque
+        reprocesa los datos de cada hoja) se hace una sola vez, al soltar
+        (ver _on_multi_xls_sash_release), en vez de arriesgarse a que el
+        temporizador dispare a mitad del arrastre y se sienta como trabado."""
+        if self._multi_xls_sash_dragging:
+            return
         if self._multi_xls_plot_resize_job is not None:
             self.root.after_cancel(self._multi_xls_plot_resize_job)
         self._multi_xls_plot_resize_job = self.root.after(200, self._redraw_multi_xls_plot_for_resize)
@@ -2283,7 +2303,11 @@ class NecLabApp:
 
     def _on_multi_xls_heatmap_frame_resize(self, event=None):
         """Redibuja el panel de imágenes (con un pequeño retraso) para que
-        siga llenando exactamente el panel tras cambiar de tamaño."""
+        siga llenando exactamente el panel tras cambiar de tamaño. Igual que
+        en _on_multi_xls_plot_frame_resize, no agenda nada mientras se
+        arrastra un sash."""
+        if self._multi_xls_sash_dragging:
+            return
         if self._multi_xls_heatmap_resize_job is not None:
             self.root.after_cancel(self._multi_xls_heatmap_resize_job)
         self._multi_xls_heatmap_resize_job = self.root.after(200, self._draw_multi_xls_heatmap)
@@ -2295,6 +2319,7 @@ class NecLabApp:
         (que sí necesita ese retraso, porque no hay un evento de "mouse
         liberado" al que enganchar cuando el arrastre lo controla el gestor
         de ventanas del sistema operativo en vez de Tk)."""
+        self._multi_xls_sash_dragging = False
         if self._multi_xls_plot_resize_job is not None:
             self.root.after_cancel(self._multi_xls_plot_resize_job)
             self._multi_xls_plot_resize_job = None
