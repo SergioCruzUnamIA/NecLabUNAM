@@ -160,7 +160,11 @@ class NecLabApp:
         self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
-        self.multi_xls_norm_global_var = tk.BooleanVar(value=False)
+        # 'local': min of this column, within each sheet (default, previous
+        # behavior). 'sheet': min across all columns of each sheet (matches
+        # the heatmap's normalization). 'column_global': min of this column
+        # pooled across every loaded sheet, so all sheets share one divisor.
+        self.multi_xls_norm_mode_var = tk.StringVar(value='local')
         self.multi_xls_xlim = None
         self.multi_xls_ylim = None
         self.multi_xls_plot_frame = None
@@ -1692,9 +1696,20 @@ class NecLabApp:
                                variable=self.multi_xls_shared_scale_var,
                                command=self._on_multi_xls_shared_scale_toggle)
             m.add_separator()
-            m.add_checkbutton(label="Normalización Global (mínimo de toda la hoja)",
-                               variable=self.multi_xls_norm_global_var,
-                               command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu = tk.Menu(m, tearoff=0, font=('Segoe UI', 9))
+            norm_menu.add_radiobutton(
+                label="Por Columna (mínimo de esa columna en cada hoja)",
+                variable=self.multi_xls_norm_mode_var, value='local',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_radiobutton(
+                label="Por Hoja (mínimo de toda la hoja)",
+                variable=self.multi_xls_norm_mode_var, value='sheet',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_radiobutton(
+                label="Por Columna en Todas las Hojas (mínimo compartido)",
+                variable=self.multi_xls_norm_mode_var, value='column_global',
+                command=self._on_multi_xls_norm_mode_toggle)
+            m.add_cascade(label="Normalización", menu=norm_menu)
 
         def build_grafica_menu(m):
             m.add_command(label="Límites de Ejes (Gráfica Superior)...",
@@ -2273,8 +2288,9 @@ class NecLabApp:
 
     def _on_multi_xls_norm_mode_toggle(self):
         """Redibuja la gráfica superior con el modo de normalización
-        elegido: mínimo de la columna actual (local, por defecto) o mínimo
-        de toda la hoja (global, mismo criterio que ya usa el heatmap)."""
+        elegido: por columna (local, por defecto), por hoja (global, mismo
+        criterio que ya usa el heatmap), o por columna en todas las hojas
+        (un solo mínimo compartido por todas)."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
@@ -2283,12 +2299,30 @@ class NecLabApp:
         (label, values) ya interpolados, normalizados y suavizados - el
         mismo procesamiento que dibuja la gráfica superior, factorizado
         aparte para que 'Save Plotted Points' exporte exactamente lo que se
-        ve. La normalización divide entre el mínimo de solo esa columna
-        (local) o el mínimo de toda la hoja (global), según
-        multi_xls_norm_global_var."""
+        ve. El divisor de la normalización depende de
+        multi_xls_norm_mode_var:
+        - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
+          usa su propio mínimo).
+        - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
+          cada hoja (mismo criterio que el heatmap).
+        - 'column_global': mínimo de esa columna, agrupando todas las
+          hojas cargadas - un solo valor, compartido por todas."""
         import pandas as pd
 
-        global_norm = self.multi_xls_norm_global_var.get()
+        mode = self.multi_xls_norm_mode_var.get()
+
+        column_global_min = None
+        if mode == 'column_global':
+            pooled = []
+            for ds in self.multi_xls_datasets:
+                if col_name in ds['df'].columns:
+                    v = ds['df'][col_name].to_numpy(dtype=float)
+                    pooled.append(v[np.isfinite(v)])
+            if pooled:
+                pooled = np.concatenate(pooled)
+                if pooled.size:
+                    column_global_min = pooled.min()
+
         series = []
         for ds in self.multi_xls_datasets:
             if col_name not in ds['df'].columns:
@@ -2297,13 +2331,19 @@ class NecLabApp:
             values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
             if len(values) == 0:
                 continue
-            if global_norm:
+
+            if mode == 'sheet':
                 all_values = ds['df'].to_numpy(dtype=float)
                 finite = all_values[np.isfinite(all_values)]
-            else:
+                divisor = finite.min() if finite.size else None
+            elif mode == 'column_global':
+                divisor = column_global_min
+            else:  # 'local'
                 finite = values[np.isfinite(values)]
-            if finite.size and finite.min() != 0:
-                values = values / finite.min()
+                divisor = finite.min() if finite.size else None
+
+            if divisor is not None and divisor != 0:
+                values = values / divisor
             values = self._smooth_multi_xls_signal(values)
             series.append((ds['label'], values))
         return series
@@ -2449,8 +2489,11 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_title(display_label)
-        if self.multi_xls_norm_global_var.get():
+        norm_mode = self.multi_xls_norm_mode_var.get()
+        if norm_mode == 'sheet':
             ax.set_ylabel('Value / mínimo de toda la hoja')
+        elif norm_mode == 'column_global':
+            ax.set_ylabel('Value / mínimo de la columna (todas las hojas)')
         else:
             ax.set_ylabel('Value / mínimo de la columna')
 
