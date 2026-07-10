@@ -176,6 +176,16 @@ class NecLabApp:
         self._multi_xls_plot_resize_job = None
         self._multi_xls_heatmap_resize_job = None
         self._multi_xls_sash_dragging = False
+        # Cache the expensive per-sheet data processing (interpolation,
+        # normalization, smoothing / heatmap normalization) so a
+        # resize-triggered redraw - which doesn't change any of that, only
+        # the figure size - can skip straight to replotting instead of
+        # redoing it from scratch. Keyed so loading new files, changing the
+        # selected column, or toggling any relevant setting invalidates it.
+        self._multi_xls_series_cache_key = None
+        self._multi_xls_series_cache = None
+        self._multi_xls_heatmap_matrices_cache_key = None
+        self._multi_xls_heatmap_matrices_cache = None
         self.multi_xls_menu_grafica = None
         self.multi_xls_menu_datos = None
         self.multi_xls_class_row = None
@@ -1810,6 +1820,16 @@ class NecLabApp:
         # release instead.
         def _on_sash_press(event=None):
             self._multi_xls_sash_dragging = True
+            # Also cancel any job already scheduled from a resize that
+            # happened just before the drag started (e.g. the initial
+            # layout) - otherwise it could still fire mid-drag, since only
+            # *new* scheduling is blocked while dragging.
+            if self._multi_xls_plot_resize_job is not None:
+                self.root.after_cancel(self._multi_xls_plot_resize_job)
+                self._multi_xls_plot_resize_job = None
+            if self._multi_xls_heatmap_resize_job is not None:
+                self.root.after_cancel(self._multi_xls_heatmap_resize_job)
+                self._multi_xls_heatmap_resize_job = None
 
         paned.bind('<ButtonPress-1>', _on_sash_press)
         right_paned.bind('<ButtonPress-1>', _on_sash_press)
@@ -2306,10 +2326,23 @@ class NecLabApp:
         - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
           cada hoja (mismo criterio que el heatmap).
         - 'column_global': mínimo de esa columna, agrupando todas las
-          hojas cargadas - un solo valor, compartido por todas."""
+          hojas cargadas - un solo valor, compartido por todas.
+
+        El resultado se guarda en caché (por columna + modo de
+        normalización + smoothing), porque un redibujado disparado solo por
+        cambio de tamaño de panel no cambia ninguno de estos datos - así se
+        evita reprocesar cada hoja en cada resize."""
         import pandas as pd
 
         mode = self.multi_xls_norm_mode_var.get()
+        smoothing_on = self.multi_xls_smoothing_var.get()
+        try:
+            smoothing_points = self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            smoothing_points = None
+        cache_key = (id(self.multi_xls_datasets), col_name, mode, smoothing_on, smoothing_points)
+        if self._multi_xls_series_cache_key == cache_key:
+            return self._multi_xls_series_cache
 
         column_global_min = None
         if mode == 'column_global':
@@ -2346,6 +2379,9 @@ class NecLabApp:
                 values = values / divisor
             values = self._smooth_multi_xls_signal(values)
             series.append((ds['label'], values))
+
+        self._multi_xls_series_cache_key = cache_key
+        self._multi_xls_series_cache = series
         return series
 
     def _on_multi_xls_column_select(self, event=None):
@@ -2521,6 +2557,52 @@ class NecLabApp:
         self._position_multi_xls_class_row(ax, bounds)
         self.btn_multi_xls_next_column.lift()
 
+    def _compute_multi_xls_heatmap_matrices(self):
+        """Devuelve (matrices, vmin, vmax, per_sheet_ranges) para el
+        heatmap: cada matriz normalizada contra el mínimo de su propia
+        hoja y transpuesta (filas=columnas de datos, columnas=muestras);
+        vmin/vmax (o None, None si no aplica escala compartida); y una
+        lista de (min, max) por hoja para cuando no aplica. Devuelve
+        (None, None, None, None) si no hay datos finitos.
+
+        Cacheado por (datasets, escala compartida) - esto no cambia con el
+        tamaño del panel, así que un redibujado disparado solo por resize
+        reutiliza el resultado en vez de reprocesar todas las hojas."""
+        shared_scale = self.multi_xls_shared_scale_var.get()
+        cache_key = (id(self.multi_xls_datasets), shared_scale)
+        if self._multi_xls_heatmap_matrices_cache_key == cache_key:
+            return self._multi_xls_heatmap_matrices_cache
+
+        raw_matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
+        finite_vals = (np.concatenate([m[np.isfinite(m)].ravel() for m in raw_matrices])
+                       if raw_matrices else np.array([]))
+        if finite_vals.size == 0:
+            result = (None, None, None, None)
+        else:
+            # Normalize each sheet's values against its own minimum (not one
+            # global minimum shared across all sheets), then transpose so
+            # rows = data columns and columns = samples.
+            matrices = []
+            for m in raw_matrices:
+                sheet_min = float(m[np.isfinite(m)].min())
+                matrices.append((m / sheet_min).T)
+
+            per_sheet_ranges = []
+            for m in matrices:
+                finite = m[np.isfinite(m)]
+                per_sheet_ranges.append((float(finite.min()), float(finite.max())))
+
+            vmin = vmax = None
+            if shared_scale:
+                norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+                vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
+
+            result = (matrices, vmin, vmax, per_sheet_ranges)
+
+        self._multi_xls_heatmap_matrices_cache_key = cache_key
+        self._multi_xls_heatmap_matrices_cache = result
+        return result
+
     def _draw_multi_xls_heatmap(self):
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
         muestras (el mismo eje que la gráfica de líneas de arriba) y el eje Y
@@ -2555,23 +2637,10 @@ class NecLabApp:
         if w_px <= 1 or h_px <= 1:
             return
 
-        raw_matrices = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
-        finite_vals = np.concatenate([m[np.isfinite(m)].ravel() for m in raw_matrices])
-        if finite_vals.size == 0:
-            return
-
-        # Normalize each sheet's values against its own minimum (not one
-        # global minimum shared across all sheets), then transpose so rows =
-        # data columns and columns = samples.
-        matrices = []
-        for m in raw_matrices:
-            sheet_min = float(m[np.isfinite(m)].min())
-            matrices.append((m / sheet_min).T)
-
         shared_scale = self.multi_xls_shared_scale_var.get()
-        if shared_scale:
-            norm_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
-            vmin, vmax = float(norm_finite.min()), float(norm_finite.max())
+        matrices, vmin, vmax, per_sheet_ranges = self._compute_multi_xls_heatmap_matrices()
+        if matrices is None:
+            return
 
         show_labels = self.multi_xls_show_labels_var.get()
         fig_width = w_px / 100
@@ -2603,13 +2672,12 @@ class NecLabApp:
         tick_positions = []
         tick_labels = []
         im = None
-        for ds, matrix in zip(self.multi_xls_datasets, matrices):
+        for ds, matrix, sheet_range in zip(self.multi_xls_datasets, matrices, per_sheet_ranges):
             n_cols, n_samples = matrix.shape
             if shared_scale:
                 im_vmin, im_vmax = vmin, vmax
             else:
-                finite = matrix[np.isfinite(matrix)]
-                im_vmin, im_vmax = float(finite.min()), float(finite.max())
+                im_vmin, im_vmax = sheet_range
             im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=im_vmin, vmax=im_vmax,
                            extent=(offset, offset + n_samples, n_cols, 0))
             if offset > 0:
