@@ -2311,12 +2311,13 @@ class NecLabApp:
         return _convex_envelope_detrend_signal(values, n_points=n_points)
 
     def _on_multi_xls_norm_mode_toggle(self):
-        """Redibuja la gráfica superior con el modo de normalización
-        elegido: por columna (local, por defecto), por hoja (global, mismo
-        criterio que ya usa el heatmap), o por columna en todas las hojas
-        (un solo mínimo compartido por todas)."""
+        """Redibuja ambas gráficas con el modo de normalización elegido:
+        por columna (local, por defecto), por hoja, por columna en todas
+        las hojas, o global (todas las columnas y hojas). Ambas gráficas
+        usan el mismo modo, así que las dos se redibujan."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
+        self._draw_multi_xls_heatmap()
 
     def _compute_multi_xls_series(self, col_name):
         """Para cada hoja cargada que tenga la columna 'col_name', devuelve
@@ -2577,17 +2578,32 @@ class NecLabApp:
 
     def _compute_multi_xls_heatmap_matrices(self):
         """Devuelve (matrices, vmin, vmax, per_sheet_ranges) para el
-        heatmap: cada matriz normalizada contra el mínimo de su propia
-        hoja y transpuesta (filas=columnas de datos, columnas=muestras);
-        vmin/vmax (o None, None si no aplica escala compartida); y una
-        lista de (min, max) por hoja para cuando no aplica. Devuelve
-        (None, None, None, None) si no hay datos finitos.
+        heatmap: cada matriz normalizada y transpuesta (filas=columnas de
+        datos, columnas=muestras); vmin/vmax (o None, None si no aplica
+        escala compartida); y una lista de (min, max) por hoja para cuando
+        no aplica. Devuelve (None, None, None, None) si no hay datos
+        finitos.
 
-        Cacheado por (datasets, escala compartida) - esto no cambia con el
-        tamaño del panel, así que un redibujado disparado solo por resize
-        reutiliza el resultado en vez de reprocesar todas las hojas."""
+        Usa el mismo modo de normalización (multi_xls_norm_mode_var) que la
+        gráfica de líneas de arriba, adaptado a que aquí cada hoja se
+        muestra entera (todas sus columnas a la vez, una por fila):
+        - 'local': cada fila (columna de datos) se normaliza contra su
+          propio mínimo, calculado solo dentro de esa hoja.
+        - 'sheet': toda la hoja (todas sus columnas juntas) se normaliza
+          contra un solo mínimo, dentro de esa hoja (comportamiento
+          original de este heatmap).
+        - 'column_global': cada fila (columna de datos, por posición) se
+          normaliza contra el mínimo de esa misma posición de columna,
+          agrupando todas las hojas cargadas.
+        - 'all_global': un solo mínimo para absolutamente todo lo cargado.
+
+        Cacheado por (datasets, modo de normalización, escala compartida) -
+        nada de esto cambia con el tamaño del panel, así que un redibujado
+        disparado solo por resize reutiliza el resultado en vez de
+        reprocesar todas las hojas."""
+        mode = self.multi_xls_norm_mode_var.get()
         shared_scale = self.multi_xls_shared_scale_var.get()
-        cache_key = (id(self.multi_xls_datasets), shared_scale)
+        cache_key = (id(self.multi_xls_datasets), mode, shared_scale)
         if self._multi_xls_heatmap_matrices_cache_key == cache_key:
             return self._multi_xls_heatmap_matrices_cache
 
@@ -2597,13 +2613,41 @@ class NecLabApp:
         if finite_vals.size == 0:
             result = (None, None, None, None)
         else:
-            # Normalize each sheet's values against its own minimum (not one
-            # global minimum shared across all sheets), then transpose so
-            # rows = data columns and columns = samples.
             matrices = []
-            for m in raw_matrices:
-                sheet_min = float(m[np.isfinite(m)].min())
-                matrices.append((m / sheet_min).T)
+            if mode == 'local':
+                # Each data column normalized against its own minimum,
+                # within that sheet only.
+                for m in raw_matrices:
+                    with np.errstate(invalid='ignore'):
+                        col_mins = np.where(np.isfinite(m), m, np.nan)
+                        col_mins = np.nanmin(col_mins, axis=0, keepdims=True)
+                    col_mins = np.where(np.isfinite(col_mins) & (col_mins != 0), col_mins, 1.0)
+                    matrices.append((m / col_mins).T)
+            elif mode == 'column_global':
+                # Each data column (by position) normalized against the
+                # minimum of that same column position, pooled across
+                # every loaded sheet.
+                n_cols = max((m.shape[1] for m in raw_matrices), default=0)
+                pooled_min = np.full(n_cols, np.nan)
+                for m in raw_matrices:
+                    for c in range(m.shape[1]):
+                        col = m[:, c]
+                        finite = col[np.isfinite(col)]
+                        if finite.size:
+                            v = finite.min()
+                            pooled_min[c] = v if np.isnan(pooled_min[c]) else min(pooled_min[c], v)
+                pooled_min = np.where(np.isfinite(pooled_min) & (pooled_min != 0), pooled_min, 1.0)
+                for m in raw_matrices:
+                    matrices.append((m / pooled_min[:m.shape[1]]).T)
+            elif mode == 'all_global':
+                all_min = finite_vals.min()
+                if all_min == 0:
+                    all_min = 1.0
+                matrices = [(m / all_min).T for m in raw_matrices]
+            else:  # 'sheet' (default / previous behavior)
+                for m in raw_matrices:
+                    sheet_min = float(m[np.isfinite(m)].min())
+                    matrices.append((m / sheet_min).T)
 
             per_sheet_ranges = []
             for m in matrices:
@@ -2625,11 +2669,14 @@ class NecLabApp:
         """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
         muestras (el mismo eje que la gráfica de líneas de arriba) y el eje Y
         son las columnas (las series de datos); el color de cada pixel
-        representa su valor dividido entre el mínimo propio de esa hoja (cada
-        hoja se normaliza contra su propio mínimo, no uno global). Todas las
-        hojas comparten la misma escala de color. Las imágenes de cada hoja
-        se colocan una junto a otra. El canvas se crea una sola vez y se
-        reutiliza en cada redibujado (ver comentario en __init__), ajustándose
+        representa su valor dividido entre un mínimo, calculado según el
+        modo elegido en el submenú 'Normalización' (ver
+        _compute_multi_xls_heatmap_matrices) - el mismo modo que usa la
+        gráfica de líneas de arriba. Si 'Escala de Color Compartida' está
+        activo, todas las hojas comparten la misma escala de color; si no,
+        cada hoja usa su propio rango. Las imágenes de cada hoja se colocan
+        una junto a otra. El canvas se crea una sola vez y se reutiliza en
+        cada redibujado (ver comentario en __init__), ajustándose
         exactamente al tamaño del panel."""
         if self.multi_xls_heatmap_frame is None:
             return
@@ -2711,10 +2758,16 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
+        norm_mode_desc = {
+            'local': 'mínimo de cada columna en cada hoja',
+            'sheet': 'mínimo de cada hoja',
+            'column_global': 'mínimo de cada columna (todas las hojas)',
+            'all_global': 'mínimo global (todas las columnas y hojas)',
+        }.get(self.multi_xls_norm_mode_var.get(), 'mínimo de cada hoja')
         if shared_scale:
-            ax.set_title('Todas las hojas (valor / mínimo de cada hoja)')
+            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc})')
         else:
-            ax.set_title('Todas las hojas (valor / mínimo de cada hoja, escala individual por hoja)')
+            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc}, escala individual por hoja)')
         # Same shared left/right bounds as the top line plot (see
         # _multi_xls_axes_margins), so a sample's x-position lines up
         # vertically between the two. The colorbar (when shown) goes in its
