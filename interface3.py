@@ -8,6 +8,7 @@ os.environ["OMP_NUM_THREADS"] = "1"  # Limita número de threads
 
 import tkinter as tk
 from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messagebox
+import tkinter.font as tkfont
 import customtkinter as ctk
 ctk.set_appearance_mode("light")
 from PIL import Image, ImageTk, ImageOps
@@ -1753,6 +1754,24 @@ class NecLabApp:
         # width); the user can drag the sash to resize it from here.
         self.root.after(50, lambda: paned.sashpos(0, 250))
 
+        # ttk.PanedWindow has no built-in minsize per pane, so enforce one by
+        # snapping the sash back whenever the sidebar is dragged narrower
+        # than what "Column 999" needs to display without truncating.
+        sidebar_min_w = tkfont.Font(family='Arial', size=10).measure('Column 999') + 60
+
+        def _enforce_sidebar_min_width(event=None):
+            w = sidebar.winfo_width()
+            if 0 < w < sidebar_min_w:
+                paned.sashpos(0, sidebar_min_w)
+
+        sidebar.bind('<Configure>', _enforce_sidebar_min_width)
+
+        # Redraw both plots immediately when the user releases the sash,
+        # instead of waiting for the debounce timer used for window-border
+        # resizes (which can't be tied to a mouse-release event, since that
+        # drag is owned by the OS window manager, not Tk).
+        paned.bind('<ButtonRelease-1>', self._on_multi_xls_sash_release)
+
         self.multi_xls_plot_frame = tk.Frame(right_container, bg=_C['panel'],
                                               highlightbackground=_C['border'],
                                               highlightthickness=1)
@@ -2237,6 +2256,23 @@ class NecLabApp:
         if self._multi_xls_heatmap_resize_job is not None:
             self.root.after_cancel(self._multi_xls_heatmap_resize_job)
         self._multi_xls_heatmap_resize_job = self.root.after(200, self._draw_multi_xls_heatmap)
+
+    def _on_multi_xls_sash_release(self, event=None):
+        """Redibuja ambas gráficas inmediatamente al soltar el mouse tras
+        arrastrar el divisor entre la lista y las gráficas, en vez de esperar
+        al temporizador de espera usado para el redimensionado de ventana
+        (que sí necesita ese retraso, porque no hay un evento de "mouse
+        liberado" al que enganchar cuando el arrastre lo controla el gestor
+        de ventanas del sistema operativo en vez de Tk)."""
+        if self._multi_xls_plot_resize_job is not None:
+            self.root.after_cancel(self._multi_xls_plot_resize_job)
+            self._multi_xls_plot_resize_job = None
+        if self._multi_xls_heatmap_resize_job is not None:
+            self.root.after_cancel(self._multi_xls_heatmap_resize_job)
+            self._multi_xls_heatmap_resize_job = None
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+        self._draw_multi_xls_heatmap()
 
     def _draw_multi_xls_plot(self, index):
         """Grafica la columna en la posición 'index' de cada hoja cargada,
