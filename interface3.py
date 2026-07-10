@@ -1719,6 +1719,10 @@ class NecLabApp:
                 label="Por Columna en Todas las Hojas (mínimo compartido)",
                 variable=self.multi_xls_norm_mode_var, value='column_global',
                 command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_radiobutton(
+                label="Global (mínimo de todas las columnas y hojas)",
+                variable=self.multi_xls_norm_mode_var, value='all_global',
+                command=self._on_multi_xls_norm_mode_toggle)
             m.add_cascade(label="Normalización", menu=norm_menu)
 
         def build_grafica_menu(m):
@@ -2327,6 +2331,9 @@ class NecLabApp:
           cada hoja (mismo criterio que el heatmap).
         - 'column_global': mínimo de esa columna, agrupando todas las
           hojas cargadas - un solo valor, compartido por todas.
+        - 'all_global': mínimo de todas las columnas y todas las hojas - un
+          solo valor para absolutamente todo lo cargado, sin importar la
+          columna seleccionada.
 
         El resultado se guarda en caché (por columna + modo de
         normalización + smoothing), porque un redibujado disparado solo por
@@ -2356,6 +2363,13 @@ class NecLabApp:
                 if pooled.size:
                     column_global_min = pooled.min()
 
+        all_global_min = None
+        if mode == 'all_global':
+            pooled = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
+            finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
+            if finite.size:
+                all_global_min = finite.min()
+
         series = []
         for ds in self.multi_xls_datasets:
             if col_name not in ds['df'].columns:
@@ -2371,6 +2385,8 @@ class NecLabApp:
                 divisor = finite.min() if finite.size else None
             elif mode == 'column_global':
                 divisor = column_global_min
+            elif mode == 'all_global':
+                divisor = all_global_min
             else:  # 'local'
                 finite = values[np.isfinite(values)]
                 divisor = finite.min() if finite.size else None
@@ -2530,6 +2546,8 @@ class NecLabApp:
             ax.set_ylabel('Value / mínimo de toda la hoja')
         elif norm_mode == 'column_global':
             ax.set_ylabel('Value / mínimo de la columna (todas las hojas)')
+        elif norm_mode == 'all_global':
+            ax.set_ylabel('Value / mínimo global (todas las columnas y hojas)')
         else:
             ax.set_ylabel('Value / mínimo de la columna')
 
