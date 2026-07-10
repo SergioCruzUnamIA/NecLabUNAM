@@ -58,6 +58,18 @@ def _multi_xls_axes_margins(fig_width, fig_height, show_labels, reserve_colorbar
     top = 1 - _MULTI_XLS_TOP_IN / fig_height
     bottom_in = _MULTI_XLS_BOTTOM_IN_LABELS if show_labels else _MULTI_XLS_BOTTOM_IN_NOLABELS
     bottom = bottom_in / fig_height
+
+    # Guard against degenerate figures (e.g. a panel dragged down to its
+    # minimum height): if the fixed top/bottom margins would leave no room
+    # for the plot itself, shrink them proportionally instead of handing
+    # matplotlib an invalid (bottom >= top) subplot rectangle.
+    min_plot_frac = 0.15
+    if bottom >= top - min_plot_frac:
+        total = bottom + (1 - top)
+        scale = (1 - min_plot_frac) / total if total > 0 else 0
+        bottom *= scale
+        top = 1 - (1 - top) * scale
+
     return left, right, top, bottom
 
 # ── L1 Sky Blue colour palette ────────────────────────────────────────────────
@@ -1739,17 +1751,16 @@ class NecLabApp:
         scrollbar.config(command=self.multi_xls_column_listbox.yview)
         self.multi_xls_column_listbox.bind('<<ListboxSelect>>', self._on_multi_xls_column_select)
 
-        # Right side - stacked plot areas (line plot on top, heatmap below).
-        # Both are redrawn to exactly fill their frame on every resize, so
+        # Right side - stacked plot areas (line plot on top, heatmap below),
+        # in their own vertical PanedWindow so that split can be resized by
+        # dragging too, instead of being stuck at a fixed 3:2 ratio. Both
+        # panels are redrawn to exactly fill their frame on every resize, so
         # the whole graph and every sheet image are always visible without
         # needing to scroll.
-        right_container = tk.Frame(paned, bg=_C['bg'])
-        right_container.rowconfigure(0, weight=3)
-        right_container.rowconfigure(1, weight=2)
-        right_container.columnconfigure(0, weight=1)
+        right_paned = ttk.PanedWindow(paned, orient='vertical')
 
         paned.add(sidebar, weight=0)
-        paned.add(right_container, weight=1)
+        paned.add(right_paned, weight=1)
         # Give the sidebar a sensible starting width (same as the old fixed
         # width); the user can drag the sash to resize it from here.
         self.root.after(50, lambda: paned.sashpos(0, 250))
@@ -1766,16 +1777,16 @@ class NecLabApp:
 
         sidebar.bind('<Configure>', _enforce_sidebar_min_width)
 
-        # Redraw both plots immediately when the user releases the sash,
+        # Redraw both plots immediately when the user releases either sash,
         # instead of waiting for the debounce timer used for window-border
         # resizes (which can't be tied to a mouse-release event, since that
         # drag is owned by the OS window manager, not Tk).
         paned.bind('<ButtonRelease-1>', self._on_multi_xls_sash_release)
+        right_paned.bind('<ButtonRelease-1>', self._on_multi_xls_sash_release)
 
-        self.multi_xls_plot_frame = tk.Frame(right_container, bg=_C['panel'],
+        self.multi_xls_plot_frame = tk.Frame(right_paned, bg=_C['panel'],
                                               highlightbackground=_C['border'],
                                               highlightthickness=1)
-        self.multi_xls_plot_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 4))
         self.multi_xls_plot_frame.bind('<Configure>', self._on_multi_xls_plot_frame_resize)
 
         # Row of per-sheet classification dropdowns, pixel-aligned above the
@@ -1801,16 +1812,36 @@ class NecLabApp:
         self.multi_xls_plot_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Bottom: heatmap images (one per sheet, columns=datos, rows=muestras)
-        self.multi_xls_heatmap_frame = tk.Frame(right_container, bg=_C['panel'],
+        self.multi_xls_heatmap_frame = tk.Frame(right_paned, bg=_C['panel'],
                                                  highlightbackground=_C['border'],
                                                  highlightthickness=1)
-        self.multi_xls_heatmap_frame.grid(row=1, column=0, sticky='nsew', pady=(4, 0))
         self.multi_xls_heatmap_frame.bind('<Configure>', self._on_multi_xls_heatmap_frame_resize)
 
         self.multi_xls_heatmap_placeholder = tk.Label(
             self.multi_xls_heatmap_frame, text="Las imágenes de las hojas aparecerán aquí",
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
         self.multi_xls_heatmap_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        right_paned.add(self.multi_xls_plot_frame, weight=3)
+        right_paned.add(self.multi_xls_heatmap_frame, weight=2)
+        # Same 3:2 starting ratio the old fixed Grid rows used.
+        self.root.after(50, lambda: right_paned.sashpos(0, int(right_paned.winfo_height() * 0.6)))
+
+        # Keep both panels at a legible minimum height, same idea as the
+        # sidebar's minimum width above.
+        right_min_h = 160
+
+        def _enforce_right_paned_min_height(event=None):
+            total = right_paned.winfo_height()
+            if total <= 1:
+                return
+            pos = right_paned.sashpos(0)
+            if pos < right_min_h:
+                right_paned.sashpos(0, right_min_h)
+            elif total - pos < right_min_h:
+                right_paned.sashpos(0, total - right_min_h)
+
+        self.multi_xls_plot_frame.bind('<Configure>', _enforce_right_paned_min_height, add='+')
 
     def _populate_multi_xls_columns(self):
         """Llena la lista lateral con nombres genéricos 'Column N' (uno por
