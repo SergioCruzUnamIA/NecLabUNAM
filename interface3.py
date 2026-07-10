@@ -160,6 +160,7 @@ class NecLabApp:
         self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
+        self.multi_xls_norm_global_var = tk.BooleanVar(value=False)
         self.multi_xls_xlim = None
         self.multi_xls_ylim = None
         self.multi_xls_plot_frame = None
@@ -1690,6 +1691,10 @@ class NecLabApp:
             m.add_checkbutton(label="Escala de Color Compartida (mapa de calor)",
                                variable=self.multi_xls_shared_scale_var,
                                command=self._on_multi_xls_shared_scale_toggle)
+            m.add_separator()
+            m.add_checkbutton(label="Normalización Global (mínimo de toda la hoja)",
+                               variable=self.multi_xls_norm_global_var,
+                               command=self._on_multi_xls_norm_mode_toggle)
 
         def build_grafica_menu(m):
             m.add_command(label="Límites de Ejes (Gráfica Superior)...",
@@ -1699,6 +1704,9 @@ class NecLabApp:
                           command=self._save_multi_xls_plot_image)
             m.add_command(label="Save Heatmap Image...", state='disabled',
                           command=self._save_multi_xls_heatmap_image)
+            m.add_separator()
+            m.add_command(label="Save Plotted Points (CSV/XLSX)...", state='disabled',
+                          command=self._save_multi_xls_plot_points)
 
         def build_datos_menu(m):
             m.add_command(label="Editar Clasificaciones...",
@@ -1899,6 +1907,7 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
             self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Plotted Points (CSV/XLSX)...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
             self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
@@ -2262,6 +2271,43 @@ class NecLabApp:
         from peak_functions import _convex_envelope_detrend_signal
         return _convex_envelope_detrend_signal(values, n_points=n_points)
 
+    def _on_multi_xls_norm_mode_toggle(self):
+        """Redibuja la gráfica superior con el modo de normalización
+        elegido: mínimo de la columna actual (local, por defecto) o mínimo
+        de toda la hoja (global, mismo criterio que ya usa el heatmap)."""
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+    def _compute_multi_xls_series(self, col_name):
+        """Para cada hoja cargada que tenga la columna 'col_name', devuelve
+        (label, values) ya interpolados, normalizados y suavizados - el
+        mismo procesamiento que dibuja la gráfica superior, factorizado
+        aparte para que 'Save Plotted Points' exporte exactamente lo que se
+        ve. La normalización divide entre el mínimo de solo esa columna
+        (local) o el mínimo de toda la hoja (global), según
+        multi_xls_norm_global_var."""
+        import pandas as pd
+
+        global_norm = self.multi_xls_norm_global_var.get()
+        series = []
+        for ds in self.multi_xls_datasets:
+            if col_name not in ds['df'].columns:
+                continue
+            values = ds['df'][col_name].to_numpy(dtype=float)
+            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+            if len(values) == 0:
+                continue
+            if global_norm:
+                all_values = ds['df'].to_numpy(dtype=float)
+                finite = all_values[np.isfinite(all_values)]
+            else:
+                finite = values[np.isfinite(values)]
+            if finite.size and finite.min() != 0:
+                values = values / finite.min()
+            values = self._smooth_multi_xls_signal(values)
+            series.append((ds['label'], values))
+        return series
+
     def _on_multi_xls_column_select(self, event=None):
         """Callback cuando el usuario elige una columna en la lista lateral."""
         sel = self.multi_xls_column_listbox.curselection()
@@ -2355,8 +2401,6 @@ class NecLabApp:
             self.multi_xls_current_column = self.multi_xls_common_columns[index]
             return
 
-        import pandas as pd
-
         col_name = self.multi_xls_common_columns[index]
         display_label = self.multi_xls_column_listbox.get(index)
         show_labels = self.multi_xls_show_labels_var.get()
@@ -2388,26 +2432,14 @@ class NecLabApp:
         tick_positions = []
         tick_labels = []
         bounds = []
-        for ds in self.multi_xls_datasets:
-            if col_name not in ds['df'].columns:
-                continue
-            values = ds['df'][col_name].to_numpy(dtype=float)
-            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+        for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
-            if n == 0:
-                continue
-            # Normalize this sheet's column against its own minimum,
-            # independently of every other sheet.
-            finite = values[np.isfinite(values)]
-            if finite.size and finite.min() != 0:
-                values = values / finite.min()
-            values = self._smooth_multi_xls_signal(values)
             x = np.arange(offset, offset + n)
             ax.plot(x, values, linewidth=0.8)
             if offset > 0:
                 ax.axvline(offset, color=_C['sub'], linestyle='--', linewidth=1, alpha=0.6)
             tick_positions.append(offset + n / 2)
-            tick_labels.append(ds['label'])
+            tick_labels.append(label)
             bounds.append((offset, offset + n))
             offset += n
 
@@ -2417,7 +2449,10 @@ class NecLabApp:
         else:
             ax.set_xticklabels([])
         ax.set_title(display_label)
-        ax.set_ylabel('Value / mínimo de cada hoja')
+        if self.multi_xls_norm_global_var.get():
+            ax.set_ylabel('Value / mínimo de toda la hoja')
+        else:
+            ax.set_ylabel('Value / mínimo de la columna')
 
         # Manual axis limits set via "Límites de Ejes", if any; otherwise fit
         # tightly to the data range (matching the heatmap below) instead of
@@ -2597,6 +2632,39 @@ class NecLabApp:
         )
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_multi_xls_plot_points(self):
+        """Guarda, en un archivo .csv o .xlsx, los puntos finales (ya
+        interpolados, normalizados y suavizados) que se están graficando
+        actualmente en la gráfica superior de 'Datos Multiples' - una
+        columna por hoja cargada."""
+        if self.multi_xls_current_column is None:
+            messagebox.showwarning("Sin Datos", "Selecciona una columna primero.")
+            return
+
+        series = self._compute_multi_xls_series(self.multi_xls_current_column)
+        if not series:
+            messagebox.showwarning("Sin Datos", "No hay puntos para guardar.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
+            title="Save Plotted Points"
+        )
+        if not filename:
+            return
+
+        df = pd.DataFrame({label: pd.Series(values) for label, values in series})
+        df.index.name = 'Sample'
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            df.to_excel(filename)
+        else:
+            df.to_csv(filename)
+        messagebox.showinfo("Saved", f"Plotted points saved to:\n{filename}")
 
     def _save_multi_xls_classifications(self):
         """Guarda, para cada columna de datos y cada hoja cargada, la
