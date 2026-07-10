@@ -2317,10 +2317,13 @@ class NecLabApp:
         ax.set_title(display_label)
         ax.set_ylabel('Value / mínimo de cada hoja')
 
-        # Manual axis limits set via "Límites de Ejes", if any; otherwise
-        # matplotlib keeps autoscaling to the plotted data as usual.
+        # Manual axis limits set via "Límites de Ejes", if any; otherwise fit
+        # tightly to the data range (matching the heatmap below) instead of
+        # matplotlib's default 5% autoscale padding on each side.
         if self.multi_xls_xlim is not None:
             ax.set_xlim(self.multi_xls_xlim)
+        else:
+            ax.set_xlim(0, offset)
         if self.multi_xls_ylim is not None:
             ax.set_ylim(self.multi_xls_ylim)
 
