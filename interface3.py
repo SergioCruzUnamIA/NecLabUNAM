@@ -2392,12 +2392,18 @@ class NecLabApp:
 
     def _compute_multi_xls_series(self, col_name):
         """Para cada hoja cargada que tenga la columna 'col_name', devuelve
-        (label, values) ya interpolados, normalizados y suavizados - el
+        (label, values) ya interpolados, suavizados y normalizados - el
         mismo procesamiento que dibuja la gráfica superior, factorizado
-        aparte para que el caché lo pueda reutilizar. El divisor de la
-        normalización depende de multi_xls_norm_mode_var:
-        - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
-          usa su propio mínimo).
+        aparte para que el caché lo pueda reutilizar. El smoothing (si está
+        activo) se aplica antes de la normalización, pero el divisor
+        siempre se calcula sobre la señal cruda (antes de suavizar): el
+        smoothing Convex Envelope resta una línea base que pasa por los
+        puntos más bajos de la señal, así que una señal ya suavizada tiene
+        su mínimo pegado a ~0 (a veces negativo) por construcción - dividir
+        entre eso arruinaría la normalización en vez de aplicarla. El
+        divisor depende de multi_xls_norm_mode_var:
+        - 'local': mínimo de esa columna (antes de suavizar), dentro de
+          cada hoja (cada hoja usa su propio mínimo).
         - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
           cada hoja (mismo criterio que el heatmap).
         - 'column_global': mínimo de esa columna, agrupando todas las
@@ -2450,6 +2456,12 @@ class NecLabApp:
             if len(values) == 0:
                 continue
 
+            # The divisor must come from the raw (pre-smoothing) signal, not
+            # the detrended one: Convex Envelope smoothing subtracts a
+            # baseline through the signal's own lowest points, so a smoothed
+            # trace's minimum sits right at ~0 (occasionally negative) by
+            # construction - dividing by that would blow up/flip the signal
+            # instead of normalizing it.
             if mode == 'sheet':
                 all_values = ds['df'].to_numpy(dtype=float)
                 finite = all_values[np.isfinite(all_values)]
@@ -2462,9 +2474,10 @@ class NecLabApp:
                 finite = values[np.isfinite(values)]
                 divisor = finite.min() if finite.size else None
 
+            values = self._smooth_multi_xls_signal(values)
+
             if divisor is not None and divisor != 0:
                 values = values / divisor
-            values = self._smooth_multi_xls_signal(values)
             series.append((ds['label'], values))
 
         self._multi_xls_series_cache_key = cache_key
@@ -2888,9 +2901,9 @@ class NecLabApp:
     def _save_multi_xls_smoothed_data(self):
         """Guarda, en un solo archivo .xlsx, todas las columnas comunes con
         exactamente el mismo procesamiento que se ve en la gráfica superior
-        (interpoladas, normalizadas según 'multi_xls_norm_mode_var' y - si
-        'Smoothing' está activo - suavizadas con Convex Envelope), para cada
-        hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
+        (interpoladas, suavizadas con Convex Envelope - si 'Smoothing' está
+        activo - y luego normalizadas según 'multi_xls_norm_mode_var'), para
+        cada hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
         una sola hoja de cálculo, separados por 20 filas en blanco, en vez de
         una hoja de Excel distinta por cada una. A diferencia de la gráfica,
         que solo muestra la columna seleccionada, esto exporta todas las
@@ -2969,6 +2982,10 @@ class NecLabApp:
                     values = ds['df'][col_name].to_numpy(dtype=float)
                     values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
 
+                    # Divisor from the raw signal, same reasoning as
+                    # _compute_multi_xls_series: the detrended signal's own
+                    # minimum sits at ~0 by construction and can't be used
+                    # as a normalization divisor.
                     if norm_mode == 'sheet':
                         divisor = sheet_min
                     elif norm_mode == 'column_global':
@@ -2979,12 +2996,13 @@ class NecLabApp:
                         finite = values[np.isfinite(values)]
                         divisor = finite.min() if finite.size else None
 
-                    if divisor is not None and divisor != 0:
-                        values = values / divisor
-
                     if smoothing_on:
                         from peak_functions import _convex_envelope_detrend_signal
                         values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
+
+                    if divisor is not None and divisor != 0:
+                        values = values / divisor
+
                     out_cols[col_name] = values
                 blocks.append(pd.DataFrame(out_cols))
 
