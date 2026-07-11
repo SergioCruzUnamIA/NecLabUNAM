@@ -1169,7 +1169,7 @@ class NecLabApp:
             return
 
         if filename.lower().endswith(('.xlsx', '.xls')):
-            self._corr_df.to_excel(filename, sheet_name='Correlation')
+            self._corr_df.to_excel(filename, sheet_name='Correlation', engine='xlsxwriter')
         else:
             self._corr_df.to_csv(filename)
         messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
@@ -2857,7 +2857,7 @@ class NecLabApp:
             if i < len(blocks) - 1:
                 stacked.append(pd.DataFrame(np.nan, index=range(gap_rows), columns=block.columns))
         combined = pd.concat(stacked, ignore_index=True)
-        combined.to_excel(filename, index=False, header=False)
+        combined.to_excel(filename, index=False, header=False, engine='xlsxwriter')
 
         messagebox.showinfo("Saved", f"Data saved to:\n{filename}")
 
@@ -2904,7 +2904,7 @@ class NecLabApp:
         if filename.lower().endswith('.csv'):
             df.to_csv(filename)
         else:
-            df.to_excel(filename)
+            df.to_excel(filename, engine='xlsxwriter')
 
         messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
 
