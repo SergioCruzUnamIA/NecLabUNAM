@@ -11,6 +11,7 @@ from tkinter import *
 from tkinter import ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter.filedialog import asksaveasfilename
+from progress_utils import run_save_with_progress
 import pandas as pd
 from sklearn.impute import SimpleImputer
 import os
@@ -596,7 +597,7 @@ def create_visualization_window():
     button_save = tk.Button(
         visualization_window,
         text="Save",
-        command=save
+        command=lambda: save(visualization_window)
     )
     button_close.grid(row=1,column=2)
     button_save.grid(row=1,column=1)
@@ -690,19 +691,19 @@ def add_peak_buttons(main_window, data_sel, *args):
     save_button = tk.Button(
         button_frame,
         text="Save Image",
-        command=save
+        command=lambda: save(main_window)
     )
     save_button.pack(side=tk.LEFT, padx=5)
-    
+
     # Add Save Peaks CSV button if peaks are available
     if len(args) >= 3:
         peaks = args[2] if len(args) > 2 else []
         time_data = np.arange(len(data_sel))  # Use indices as time if no time column
-        
+
         save_csv_button = tk.Button(
             button_frame,
             text="Save Peaks CSV",
-            command=lambda: save_peaks_csv(peaks, time_data, data_sel)
+            command=lambda: save_peaks_csv(peaks, time_data, data_sel, main_window)
         )
         save_csv_button.pack(side=tk.LEFT, padx=5)
     
@@ -899,15 +900,15 @@ def show_peak_config(main_window, data_sel, args):
     save_button = tk.Button(
         button_row_frame,
         text="Save Image",
-        command=save
+        command=lambda: save(main_window)
     )
     save_button.pack(side=tk.LEFT, padx=5)
-    
+
     time_data = np.arange(len(data_sel))
     save_csv_button = tk.Button(
         button_row_frame,
         text="Save Peaks CSV",
-        command=lambda: save_peaks_csv(peaks, time_data, data_sel)
+        command=lambda: save_peaks_csv(peaks, time_data, data_sel, main_window)
     )
     save_csv_button.pack(side=tk.LEFT, padx=5)
 
@@ -974,10 +975,10 @@ def show_scale_widget(main_window):
                     child.grid()
                     break
 
-def save():
+def save(parent=None):
     """Save the current plot as an image"""
     default_name = get_default_save_name(".png")
-    
+
     filename = asksaveasfilename(
         initialfile=default_name,
         defaultextension=".png",
@@ -994,12 +995,18 @@ def save():
         ]
     )
     if filename:  # Only save if user didn't cancel
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        def worker():
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            return filename
 
-def save_peaks_csv(peaks, time_data, signal_data):
+        run_save_with_progress(
+            parent, title="Guardando Imagen", message="Guardando imagen...",
+            worker_fn=worker)
+
+def save_peaks_csv(peaks, time_data, signal_data, parent=None):
     """Save peaks data to CSV file"""
     default_name = get_default_save_name("_peaks.csv")
-    
+
     filename = asksaveasfilename(
         initialfile=default_name,
         defaultextension=".csv",
@@ -1009,19 +1016,24 @@ def save_peaks_csv(peaks, time_data, signal_data):
         ],
         title="Save Peaks Data"
     )
-    
+
     if filename:
-        # Create DataFrame with peak information
-        peak_indices = peaks
-        peak_times = time_data[peak_indices] if time_data is not None else peak_indices
-        peak_values = signal_data[peak_indices]
-        
-        df = pd.DataFrame({
-            'Peak_Index': peak_indices,
-            'Time': peak_times,
-            'Signal_Value': peak_values
-        })
-        
-        df.to_csv(filename, index=False)
-        from tkinter import messagebox
-        messagebox.showinfo("Success", f"Peaks saved to {os.path.basename(filename)}")
+        def worker():
+            # Create DataFrame with peak information
+            peak_indices = peaks
+            peak_times = time_data[peak_indices] if time_data is not None else peak_indices
+            peak_values = signal_data[peak_indices]
+
+            df = pd.DataFrame({
+                'Peak_Index': peak_indices,
+                'Time': peak_times,
+                'Signal_Value': peak_values
+            })
+
+            df.to_csv(filename, index=False)
+            return filename
+
+        run_save_with_progress(
+            parent, title="Guardando Picos", message="Guardando picos...",
+            worker_fn=worker,
+            success_message=lambda fn: f"Peaks saved to {os.path.basename(fn)}")

@@ -23,6 +23,8 @@ import subprocess
 import json
 import urllib.request
 
+from progress_utils import run_with_progress_window, run_save_with_progress, run_load_with_progress
+
 # Axes margins (in inches, not a fixed fraction of the figure) for the Datos
 # Multiples top line plot and bottom heatmap. Left/right are shared by both
 # so a sample's x-position lines up vertically between the two regardless of
@@ -94,7 +96,7 @@ from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, commo
 
 # Intentar importar módulos de procesamiento de imagen si existen
 try:
-    from image_loader import load_ometiff_image, process_image_slice
+    from image_loader import pick_ometiff_file, read_ometiff_image, process_image_slice
     from image_processing import auto_contrast, threshold_image_pil
     HAS_IMAGE_MODULES = True
 except ImportError:
@@ -1137,8 +1139,16 @@ class NecLabApp:
                        ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Data Image"
         )
-        if filename:
-            self._data_fig.savefig(filename, dpi=300, bbox_inches='tight')
+        if not filename:
+            return
+        fig = self._data_fig
+
+        def worker():
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Imagen", "Guardando imagen...", worker_fn=worker)
 
     def _save_correlation_image(self):
         """Save the current correlation heatmap to a file."""
@@ -1152,8 +1162,16 @@ class NecLabApp:
                        ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Correlation Image"
         )
-        if filename:
-            self._corr_fig.savefig(filename, dpi=300, bbox_inches='tight')
+        if not filename:
+            return
+        fig = self._corr_fig
+
+        def worker():
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Imagen", "Guardando imagen...", worker_fn=worker)
 
     def _save_correlation_data(self):
         """Save the current correlation matrix values to a CSV or Excel file."""
@@ -1169,48 +1187,61 @@ class NecLabApp:
         if not filename:
             return
 
-        if filename.lower().endswith(('.xlsx', '.xls')):
-            self._corr_df.to_excel(filename, sheet_name='Correlation', engine='xlsxwriter')
-        else:
-            self._corr_df.to_csv(filename)
-        messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
+        corr_df = self._corr_df
+
+        def worker():
+            if filename.lower().endswith(('.xlsx', '.xls')):
+                corr_df.to_excel(filename, sheet_name='Correlation', engine='xlsxwriter')
+            else:
+                corr_df.to_csv(filename)
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Datos", "Guardando matriz de correlación...", worker_fn=worker,
+            success_message=lambda fn: f"Correlation matrix saved to:\n{fn}")
 
     def open_visualization_data(self):
-        """Abre datos para visualización de picos."""
-        canvas = initialize_visualization(
+        """Abre datos para visualización de picos. La lectura/normalización
+        del archivo corre en un hilo aparte con ventana de progreso (ver
+        visualization_helpers.initialize_visualization); este callback
+        recibe el canvas resultante (o None si se canceló) cuando termina."""
+        def on_complete(canvas):
+            if canvas is not None:
+                self.canvas = canvas
+                self.notebook.select(self.data_tab)
+            if hasattr(self.root, 'loaded_data'):
+                self.loaded_data = self.root.loaded_data
+            if self.loaded_data is not None:
+                self.btn_add_sel.configure(state='normal')
+                self.btn_remove_sel.configure(state='normal')
+                self.btn_save_data.configure(state='normal')
+                self.btn_save_corr.configure(state='normal')
+                self.btn_save_peaks.configure(state='normal')
+                self.peak_method_combo.config(state='readonly')
+                self.smoothing_check.configure(state='normal')
+                self.show_smoothing_points_check.configure(state='normal')
+                self.menu_visual.entryconfig(
+                    "Dendograma",
+                    command=self._run_dendogram_on_selection,
+                    state=NORMAL
+                )
+                # The initial column is drawn by the legacy single-plot helper in
+                # visualization_helpers.py, which knows nothing about the
+                # smoothing/peak-finder split layout. Re-render through the same
+                # pipeline column clicks use, so the first column respects
+                # whichever Smoothing/peak-finder options are already selected.
+                self.current_column = 0
+                self._run_peak_on_column()
+
+        initialize_visualization(
             self.data_tab,
             self.menu_visual,
             self.canvas,
             self.column_listbox,
             self.update_column_display,
-            self.notebook
+            self.notebook,
+            on_complete=on_complete
         )
-        if canvas is not None:
-            self.canvas = canvas
-            self.notebook.select(self.data_tab)
-        if hasattr(self.root, 'loaded_data'):
-            self.loaded_data = self.root.loaded_data
-        if self.loaded_data is not None:
-            self.btn_add_sel.configure(state='normal')
-            self.btn_remove_sel.configure(state='normal')
-            self.btn_save_data.configure(state='normal')
-            self.btn_save_corr.configure(state='normal')
-            self.btn_save_peaks.configure(state='normal')
-            self.peak_method_combo.config(state='readonly')
-            self.smoothing_check.configure(state='normal')
-            self.show_smoothing_points_check.configure(state='normal')
-            self.menu_visual.entryconfig(
-                "Dendograma",
-                command=self._run_dendogram_on_selection,
-                state=NORMAL
-            )
-            # The initial column is drawn by the legacy single-plot helper in
-            # visualization_helpers.py, which knows nothing about the
-            # smoothing/peak-finder split layout. Re-render through the same
-            # pipeline column clicks use, so the first column respects
-            # whichever Smoothing/peak-finder options are already selected.
-            self.current_column = 0
-            self._run_peak_on_column()
     
     def _save_peaks_csv(self):
         """Run peak detection on every selection column and save peak indices to CSV."""
@@ -1228,8 +1259,6 @@ class NecLabApp:
             return
 
         from tkinter.filedialog import asksaveasfilename
-        from peak_functions import compute_peaks
-        import pandas as pd
 
         filename = asksaveasfilename(
             defaultextension=".csv",
@@ -1239,18 +1268,47 @@ class NecLabApp:
         if not filename:
             return
 
-        n_time = self.loaded_data.shape[0]
-        data_dict = {'TIME': list(range(n_time))}
-        for col_idx in self.selection_column_indices:
-            col_name = self.column_listbox.get(col_idx)
-            data_for_peak = self._get_data_for_peak(col_idx)
-            peaks = compute_peaks(data_for_peak, col_idx, method, params)
-            flags = np.zeros(n_time, dtype=int)
-            flags[peaks] = 1
-            data_dict[col_name] = flags
+        # Snapshot everything the worker thread needs up front, since Tk
+        # widgets/variables aren't safe to read from a background thread -
+        # the worker only ever touches these plain Python/numpy values.
+        smoothing_on = self.smoothing_var.get()
+        try:
+            smoothing_points = self.smoothing_points_var.get()
+        except tk.TclError:
+            smoothing_points = None
+        col_indices = list(self.selection_column_indices)
+        col_names = {idx: self.column_listbox.get(idx) for idx in col_indices}
+        loaded_data = self.loaded_data
 
-        pd.DataFrame(data_dict).to_csv(filename, index=False)
-        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
+        def worker(report_progress, report_error):
+            from peak_functions import compute_peaks, _convex_envelope_detrend_signal
+            import pandas as pd
+
+            n_time = loaded_data.shape[0]
+            data_dict = {'TIME': list(range(n_time))}
+            for i, col_idx in enumerate(col_indices):
+                report_progress(i, len(col_indices),
+                                 f"Procesando {col_names[col_idx]}  ({i + 1}/{len(col_indices)})")
+                if smoothing_on:
+                    data_for_peak = loaded_data.copy()
+                    data_for_peak[:, col_idx] = _convex_envelope_detrend_signal(
+                        loaded_data[:, col_idx], n_points=smoothing_points)
+                else:
+                    data_for_peak = loaded_data
+                peaks = compute_peaks(data_for_peak, col_idx, method, params)
+                flags = np.zeros(n_time, dtype=int)
+                flags[peaks] = 1
+                data_dict[col_names[col_idx]] = flags
+
+            pd.DataFrame(data_dict).to_csv(filename, index=False)
+            return filename
+
+        self._run_with_progress_window(
+            title="Guardando Picos", message="Calculando y guardando picos...",
+            maximum=len(col_indices), worker_fn=worker,
+            on_complete=lambda fn: messagebox.showinfo("Saved", f"Peak data saved to:\n{fn}"),
+            on_error=lambda exc: messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{exc}"),
+        )
 
     def _run_dendogram_on_selection(self):
         """Create the Dendogram tab on first use, then switch to it."""
@@ -1552,16 +1610,22 @@ class NecLabApp:
                        ("EPS Vector", "*.eps"), ("All Files", "*.*")],
             title="Save Dendrogram Image"
         )
-        if filename:
-            self.dendo_fig.savefig(filename, dpi=300, bbox_inches='tight')
+        if not filename:
+            return
+        fig = self.dendo_fig
+
+        def worker():
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Imagen", "Guardando imagen...", worker_fn=worker)
 
     def _dendo_save_csv(self):
         """Save dendrogram clustering data (labels + linkage matrix) to CSV."""
         if self.loaded_data is None:
             return
-        from corr_dendo_functions import AgglomerativeClustering
         from tkinter.filedialog import asksaveasfilename
-        import pandas as pd
 
         if len(self.dendo_selection_indices) >= 2:
             plot_data = self.loaded_data[:, self.dendo_selection_indices]
@@ -1576,28 +1640,35 @@ class NecLabApp:
         if not filename:
             return
 
-        clustering = AgglomerativeClustering(
-            distance_threshold=0, n_clusters=None
-        ).fit(plot_data.T)
+        def worker():
+            from corr_dendo_functions import AgglomerativeClustering
+            import pandas as pd
 
-        df_labels = pd.DataFrame({
-            'Sample_Index': list(range(len(clustering.labels_))),
-            'Cluster_Label': clustering.labels_
-        })
-        linkage_rows = [
-            {'Merge_Step': i, 'Child_1': int(c1), 'Child_2': int(c2),
-             'Distance': clustering.distances_[i]}
-            for i, (c1, c2) in enumerate(clustering.children_)
-        ]
-        df_linkage = pd.DataFrame(linkage_rows)
+            clustering = AgglomerativeClustering(
+                distance_threshold=0, n_clusters=None
+            ).fit(plot_data.T)
 
-        with open(filename, 'w', newline='') as f:
-            f.write("# Cluster Labels\n")
-            df_labels.to_csv(f, index=False)
-            f.write("\n# Linkage Matrix\n")
-            df_linkage.to_csv(f, index=False)
+            df_labels = pd.DataFrame({
+                'Sample_Index': list(range(len(clustering.labels_))),
+                'Cluster_Label': clustering.labels_
+            })
+            linkage_rows = [
+                {'Merge_Step': i, 'Child_1': int(c1), 'Child_2': int(c2),
+                 'Distance': clustering.distances_[i]}
+                for i, (c1, c2) in enumerate(clustering.children_)
+            ]
+            df_linkage = pd.DataFrame(linkage_rows)
 
-        messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
+            with open(filename, 'w', newline='') as f:
+                f.write("# Cluster Labels\n")
+                df_labels.to_csv(f, index=False)
+                f.write("\n# Linkage Matrix\n")
+                df_linkage.to_csv(f, index=False)
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Datos", "Calculando y guardando dendrograma...", worker_fn=worker,
+            success_message=lambda fn: f"Dendrogram data saved to:\n{fn}")
 
     def load_correlation_matrix_wrapper(self):
         """Wrapper para cargar matriz de correlación."""
@@ -1634,86 +1705,28 @@ class NecLabApp:
                                    on_complete, on_error=None):
         """Corre 'worker_fn(report_progress, report_error)' en un hilo
         aparte, mostrando una ventana de progreso que sigue respondiendo
-        (se puede mover, repintar, etc.) mientras tanto - en vez de
-        bloquear el hilo principal de Tk durante toda la operación, que es
-        lo que hacía que la ventana se reportara como "no responde" con
-        archivos grandes.
+        (se puede mover, repintar, etc.) mientras tanto, en vez de
+        bloquear el hilo principal de Tk durante toda la operación (ver
+        progress_utils.run_with_progress_window, que es lo que hace el
+        trabajo real; este método solo fija self.root como parent)."""
+        run_with_progress_window(self.root, title, message, maximum,
+                                  worker_fn, on_complete, on_error)
 
-        'worker_fn' debe llamar a report_progress(done, total, texto) para
-        actualizar la barra (opcional), y devolver su resultado, que se
-        pasa a on_complete(resultado) en el hilo principal cuando termina.
-        report_error(texto) muestra un messagebox de error sin detener el
-        hilo (para errores por-archivo que no deben abortar todo el
-        proceso). Una excepción no capturada dentro de worker_fn se pasa a
-        on_error(excepcion) (o se muestra con un messagebox genérico si
-        on_error es None), también en el hilo principal.
+    def _run_save_with_progress(self, title, message, worker_fn, success_message=None,
+                                 on_error=None):
+        """Atajo sobre _run_with_progress_window para el caso común de
+        guardar un archivo en un hilo aparte: worker_fn() no recibe
+        argumentos, hace el guardado (posiblemente lento) y devuelve el
+        resultado (normalmente el nombre de archivo)."""
+        run_save_with_progress(self.root, title, message, worker_fn,
+                                success_message=success_message, on_error=on_error)
 
-        Tkinter no es seguro para usar desde otro hilo que no sea el
-        principal: worker_fn nunca debe tocar widgets ni variables de Tk
-        directamente, solo llamar a report_progress/report_error (que solo
-        encolan un mensaje) y trabajar con datos planos de Python/pandas."""
-        progress_win = tk.Toplevel(self.root)
-        progress_win.title(title)
-        progress_win.transient(self.root)
-        progress_win.grab_set()
-        progress_win.resizable(False, False)
-        progress_win.protocol("WM_DELETE_WINDOW", lambda: None)
-
-        tk.Label(progress_win, text=message, font=('Arial', 11, 'bold')).pack(
-            pady=(15, 4), padx=15, anchor='w')
-        status_label = tk.Label(progress_win, text="Preparando...", font=('Arial', 9),
-                                 fg=_C['sub'], anchor='w')
-        status_label.pack(fill='x', padx=15, anchor='w')
-        progress_bar = ttk.Progressbar(progress_win, orient='horizontal', length=390,
-                                        mode='determinate', maximum=max(maximum, 1))
-        progress_bar.pack(pady=(8, 15), padx=15)
-        progress_win.update_idletasks()
-
-        result_queue = queue.Queue()
-
-        def report_progress(done, total, text):
-            result_queue.put(('progress', done, total, text))
-
-        def report_error(text):
-            result_queue.put(('error', text))
-
-        def run():
-            try:
-                result = worker_fn(report_progress, report_error)
-                result_queue.put(('done', result))
-            except Exception as exc:
-                result_queue.put(('exception', exc))
-
-        threading.Thread(target=run, daemon=True).start()
-
-        def poll():
-            try:
-                while True:
-                    item = result_queue.get_nowait()
-                    kind = item[0]
-                    if kind == 'progress':
-                        _, done, total, text = item
-                        progress_bar['maximum'] = max(total, 1)
-                        progress_bar['value'] = done
-                        status_label.config(text=text)
-                    elif kind == 'error':
-                        messagebox.showerror("Error", item[1], parent=progress_win)
-                    elif kind == 'done':
-                        progress_win.destroy()
-                        on_complete(item[1])
-                        return
-                    elif kind == 'exception':
-                        progress_win.destroy()
-                        if on_error:
-                            on_error(item[1])
-                        else:
-                            messagebox.showerror("Error", str(item[1]))
-                        return
-            except queue.Empty:
-                pass
-            progress_win.after(50, poll)
-
-        progress_win.after(50, poll)
+    def _run_load_with_progress(self, title, message, worker_fn, on_complete, on_error=None):
+        """Atajo sobre _run_with_progress_window para el caso común de
+        cargar un archivo en un hilo aparte: worker_fn() no recibe
+        argumentos, hace la lectura (posiblemente lenta) y devuelve el
+        resultado, que se pasa a on_complete en el hilo principal."""
+        run_load_with_progress(self.root, title, message, worker_fn, on_complete, on_error)
 
     def _load_xls_with_progress(self, selection, on_complete):
         """Carga las hojas seleccionadas en un hilo aparte (ver
@@ -2867,8 +2880,16 @@ class NecLabApp:
                        ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Plot Image"
         )
-        if filename:
-            self.multi_xls_fig.savefig(filename, dpi=300, bbox_inches='tight')
+        if not filename:
+            return
+        fig = self.multi_xls_fig
+
+        def worker():
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Imagen", "Guardando imagen...", worker_fn=worker)
 
     def _save_multi_xls_heatmap_image(self):
         """Guarda la imagen del heatmap de 'Datos Multiples' en un archivo."""
@@ -2882,8 +2903,16 @@ class NecLabApp:
                        ("EPS files", "*.eps"), ("All Files", "*.*")],
             title="Save Heatmap Image"
         )
-        if filename:
-            self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
+        if not filename:
+            return
+        fig = self.multi_xls_heatmap_fig
+
+        def worker():
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Imagen", "Guardando imagen...", worker_fn=worker)
 
     def _save_multi_xls_smoothed_data(self):
         """Guarda, en un solo archivo .xlsx, todas las columnas comunes ya
@@ -2969,7 +2998,6 @@ class NecLabApp:
             return
 
         from tkinter.filedialog import asksaveasfilename
-        import pandas as pd
 
         filename = asksaveasfilename(
             defaultextension=".xlsx",
@@ -2979,31 +3007,43 @@ class NecLabApp:
         if not filename:
             return
 
+        # Snapshot everything the worker thread needs up front, since Tk
+        # widgets/variables aren't safe to read from a background thread.
         sheet_labels = [ds['label'] for ds in self.multi_xls_datasets]
-        rows = []
-        for i, col_name in enumerate(self.multi_xls_common_columns):
-            saved = self.multi_xls_classifications.get(i, {})
-            row = {'Column': col_name}
-            for label in sheet_labels:
-                row[label] = saved.get(label, label)
-            rows.append(row)
+        common_columns = list(self.multi_xls_common_columns)
+        classifications = dict(self.multi_xls_classifications)
+        classes = list(self.multi_xls_classes)
 
-        # Also persist the classification options themselves, in their
-        # current order, as an extra column -- so loading this file back
-        # later can restore that exact dropdown ordering instead of just
-        # inferring it from whichever cell values happen to appear first.
-        for _ in range(max(0, len(self.multi_xls_classes) - len(rows))):
-            rows.append({'Column': ''})
-        for i, row in enumerate(rows):
-            row['_ClassOptions'] = self.multi_xls_classes[i] if i < len(self.multi_xls_classes) else ''
+        def worker():
+            import pandas as pd
 
-        df = pd.DataFrame(rows).set_index('Column')
-        if filename.lower().endswith('.csv'):
-            df.to_csv(filename)
-        else:
-            df.to_excel(filename, engine='xlsxwriter')
+            rows = []
+            for i, col_name in enumerate(common_columns):
+                saved = classifications.get(i, {})
+                row = {'Column': col_name}
+                for label in sheet_labels:
+                    row[label] = saved.get(label, label)
+                rows.append(row)
 
-        messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
+            # Also persist the classification options themselves, in their
+            # current order, as an extra column -- so loading this file back
+            # later can restore that exact dropdown ordering instead of just
+            # inferring it from whichever cell values happen to appear first.
+            for _ in range(max(0, len(classes) - len(rows))):
+                rows.append({'Column': ''})
+            for i, row in enumerate(rows):
+                row['_ClassOptions'] = classes[i] if i < len(classes) else ''
+
+            df = pd.DataFrame(rows).set_index('Column')
+            if filename.lower().endswith('.csv'):
+                df.to_csv(filename)
+            else:
+                df.to_excel(filename, engine='xlsxwriter')
+            return filename
+
+        self._run_save_with_progress(
+            "Guardando Clasificaciones", "Guardando clasificaciones...", worker_fn=worker,
+            success_message=lambda fn: f"Classifications saved to:\n{fn}")
 
     def _load_multi_xls_classifications(self):
         """Carga clasificaciones previamente guardadas (mismo formato que
@@ -3016,7 +3056,6 @@ class NecLabApp:
             return
 
         from tkinter.filedialog import askopenfilename
-        import pandas as pd
 
         filename = askopenfilename(
             filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All Files", "*.*")],
@@ -3025,69 +3064,95 @@ class NecLabApp:
         if not filename:
             return
 
-        if filename.lower().endswith('.csv'):
-            df = pd.read_csv(filename, index_col=0)
-        else:
-            df = pd.read_excel(filename, index_col=0)
+        # Snapshot everything the worker thread needs up front, since Tk
+        # widgets/variables aren't safe to read from a background thread -
+        # applying the result to self/widgets happens in on_complete below,
+        # back on the main thread.
+        common_columns = list(self.multi_xls_common_columns)
+        dataset_labels = {ds['label'] for ds in self.multi_xls_datasets}
 
-        # Restore the classification options in the exact order they were
-        # saved in, if that column is present, rather than only inferring an
-        # order from whichever cell values happen to be encountered first.
-        restored_classes = []
-        if '_ClassOptions' in df.columns:
-            for val in df['_ClassOptions']:
-                if pd.isna(val):
+        def worker(report_progress, report_error):
+            import pandas as pd
+
+            report_progress(0, 1, "Leyendo archivo...")
+            if filename.lower().endswith('.csv'):
+                df = pd.read_csv(filename, index_col=0)
+            else:
+                df = pd.read_excel(filename, index_col=0)
+
+            # Restore the classification options in the exact order they were
+            # saved in, if that column is present, rather than only inferring an
+            # order from whichever cell values happen to be encountered first.
+            restored_classes = []
+            if '_ClassOptions' in df.columns:
+                for val in df['_ClassOptions']:
+                    if pd.isna(val):
+                        continue
+                    val = str(val)
+                    if val and val not in restored_classes:
+                        restored_classes.append(val)
+                df = df.drop(columns=['_ClassOptions'])
+
+            column_to_index = {name: i for i, name in enumerate(common_columns)}
+            matched_sheets = [label for label in df.columns if label in dataset_labels]
+
+            applied_classifications = {}
+            applied = 0
+            new_classes = []
+            for col_name, row in df.iterrows():
+                col_idx = column_to_index.get(str(col_name))
+                if col_idx is None:
                     continue
-                val = str(val)
-                if val and val not in restored_classes:
-                    restored_classes.append(val)
-            df = df.drop(columns=['_ClassOptions'])
+                for label in matched_sheets:
+                    value = row[label]
+                    if pd.isna(value):
+                        continue
+                    value = str(value)
+                    applied_classifications.setdefault(col_idx, {})[label] = value
+                    applied += 1
+                    if value not in restored_classes and value not in new_classes:
+                        new_classes.append(value)
 
-        column_to_index = {name: i for i, name in enumerate(self.multi_xls_common_columns)}
-        sheet_labels = {ds['label'] for ds in self.multi_xls_datasets}
-        matched_sheets = [label for label in df.columns if label in sheet_labels]
+            report_progress(1, 1, "Listo")
+            return (matched_sheets, applied_classifications, applied, restored_classes, new_classes)
 
-        applied = 0
-        new_classes = []
-        for col_name, row in df.iterrows():
-            col_idx = column_to_index.get(str(col_name))
-            if col_idx is None:
-                continue
-            for label in matched_sheets:
-                value = row[label]
-                if pd.isna(value):
-                    continue
-                value = str(value)
-                self.multi_xls_classifications.setdefault(col_idx, {})[label] = value
-                applied += 1
-                if value not in restored_classes and value not in new_classes:
-                    new_classes.append(value)
+        def on_complete(result):
+            matched_sheets, applied_classifications, applied, restored_classes, new_classes = result
 
-        if not matched_sheets:
-            messagebox.showwarning(
-                "Sin Coincidencias",
-                "Ninguna columna u hoja del archivo coincide con los datos cargados."
-            )
-            return
+            if not matched_sheets:
+                messagebox.showwarning(
+                    "Sin Coincidencias",
+                    "Ninguna columna u hoja del archivo coincide con los datos cargados."
+                )
+                return
 
-        if restored_classes or new_classes:
-            # Saved order first, then anything from the current session or
-            # the loaded data that wasn't part of the saved options list.
-            combined = list(restored_classes)
-            for c in self.multi_xls_classes:
-                if c not in combined:
-                    combined.append(c)
-            for c in new_classes:
-                if c not in combined:
-                    combined.append(c)
-            self.multi_xls_classes = combined
-            for combo in self.multi_xls_class_combos.values():
-                combo.configure(values=self.multi_xls_classes)
+            for col_idx, label_values in applied_classifications.items():
+                self.multi_xls_classifications.setdefault(col_idx, {}).update(label_values)
 
-        if self.multi_xls_current_index is not None:
-            self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
+            if restored_classes or new_classes:
+                # Saved order first, then anything from the current session or
+                # the loaded data that wasn't part of the saved options list.
+                combined = list(restored_classes)
+                for c in self.multi_xls_classes:
+                    if c not in combined:
+                        combined.append(c)
+                for c in new_classes:
+                    if c not in combined:
+                        combined.append(c)
+                self.multi_xls_classes = combined
+                for combo in self.multi_xls_class_combos.values():
+                    combo.configure(values=self.multi_xls_classes)
 
-        messagebox.showinfo("Loaded", f"Applied {applied} classifications from:\n{filename}")
+            if self.multi_xls_current_index is not None:
+                self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
+
+            messagebox.showinfo("Loaded", f"Applied {applied} classifications from:\n{filename}")
+
+        self._run_with_progress_window(
+            title="Cargando Clasificaciones", message="Cargando clasificaciones...",
+            maximum=1, worker_fn=worker, on_complete=on_complete,
+            on_error=lambda exc: messagebox.showerror("Error", f"No se pudo cargar el archivo:\n{exc}"),
+        )
 
     # ==================== IMAGE PROCESSING METHODS ====================
     
@@ -3194,9 +3259,15 @@ class NecLabApp:
     # ==================== COMANDOS DE MENÚ - ARCHIVO ====================
     
     def open_ometiff_file(self):
-        """Abre un archivo OME-TIFF."""
+        """Abre un archivo OME-TIFF. El diálogo de selección corre en el
+        hilo principal (es solo UI), pero la lectura del stack -que puede
+        tardar bastante con archivos grandes- corre en un hilo aparte con
+        una ventana de progreso (ver progress_utils.run_with_progress_window)."""
         if HAS_IMAGE_MODULES:
-            img, metadata, xml_metadata = load_ometiff_image()
+            filename = pick_ometiff_file()
+            if not filename:
+                return
+            read_fn = read_ometiff_image
         else:
             filename = filedialog.askopenfilename(
                 title="Abrir OME-TIFF",
@@ -3204,44 +3275,55 @@ class NecLabApp:
             )
             if not filename:
                 return
-            
-            try:
-                reader = OMETIFFReader(fpath=filename)
-                img, metadata, xml_metadata = reader.read()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo cargar la imagen:\n{str(e)}")
+
+            def read_fn(fname):
+                reader = OMETIFFReader(fpath=fname)
+                return reader.read()
+
+        def worker(report_progress, report_error):
+            report_progress(0, 1, f"Leyendo {os.path.basename(filename)}...")
+            result = read_fn(filename)
+            report_progress(1, 1, "Listo")
+            return result
+
+        def on_complete(result):
+            img, metadata, xml_metadata = result
+            if img is None:
                 return
-        
-        if img is None:
-            return
-        
-        self.img_original = img
-        self.img_array = img.copy()
-        
-        # Actualizar slider de capas
-        num_slices = self.img_array.shape[0]
-        self.slice_slider.configure(to=num_slices - 1)
-        self.slice_slider.set(0)
-        
-        # Resetear ajustes
-        self._reset_adjustments()
-        
-        # Actualizar información
-        shape = self.img_array.shape
-        info_text = f"Dimensiones: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nTipo: {self.img_array.dtype}"
-        self.info_text.config(text=info_text)
-        
-        # Enable image menu items now that an image is loaded
-        self.menu_imagen.entryconfig("Auto Contraste", state=NORMAL)
-        self.menu_imagen.entryconfig("Histogram", state=NORMAL)
-        self.menu_imagen.entryconfig("Binarize", state=NORMAL)
-        self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
-        self.menu_bar.entryconfig("Análisis de Variabilidad", state=NORMAL)
 
-        # Cambiar a la pestaña de imagen
-        self.notebook.select(self.image_tab)
+            self.img_original = img
+            self.img_array = img.copy()
 
-        self._update_image_display()
+            # Actualizar slider de capas
+            num_slices = self.img_array.shape[0]
+            self.slice_slider.configure(to=num_slices - 1)
+            self.slice_slider.set(0)
+
+            # Resetear ajustes
+            self._reset_adjustments()
+
+            # Actualizar información
+            shape = self.img_array.shape
+            info_text = f"Dimensiones: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nTipo: {self.img_array.dtype}"
+            self.info_text.config(text=info_text)
+
+            # Enable image menu items now that an image is loaded
+            self.menu_imagen.entryconfig("Auto Contraste", state=NORMAL)
+            self.menu_imagen.entryconfig("Histogram", state=NORMAL)
+            self.menu_imagen.entryconfig("Binarize", state=NORMAL)
+            self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
+            self.menu_bar.entryconfig("Análisis de Variabilidad", state=NORMAL)
+
+            # Cambiar a la pestaña de imagen
+            self.notebook.select(self.image_tab)
+
+            self._update_image_display()
+
+        self._run_with_progress_window(
+            title="Cargando Imagen", message="Cargando archivo OME-TIFF...",
+            maximum=1, worker_fn=worker, on_complete=on_complete,
+            on_error=lambda exc: messagebox.showerror("Error", f"No se pudo cargar la imagen:\n{exc}"),
+        )
     
     # ==================== COMANDOS DE MENÚ - IMAGEN ====================
     

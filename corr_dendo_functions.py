@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
+from progress_utils import run_with_progress_window, run_save_with_progress, run_load_with_progress
 
 def get_main_plot_frame(main_window):
     """
@@ -153,9 +154,16 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
             title="Save Correlation Matrix"
         )
-        if filename:
+        if not filename:
+            return
+
+        def worker():
             corr_func.to_csv(filename, header=True, index=True)
-    
+            return filename
+
+        run_save_with_progress(
+            root, "Saving Correlation Matrix", "Saving correlation matrix...", worker_fn=worker)
+
     def _save_correlation_image():
         default_name = get_default_correlation_name('.png')
         filename = asksaveasfilename(
@@ -170,7 +178,10 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
                 ("All Files", "*.*")
             ]
         )
-        if filename:
+        if not filename:
+            return
+
+        def worker():
             # Save only correlation matrix
             fig_corr = plt.figure(figsize=(size, size))
             ax_temp = fig_corr.add_subplot(111)
@@ -180,7 +191,11 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             fig_corr.colorbar(cax_temp, ticks=[-1, 0, 1], aspect=40, shrink=.8)
             fig_corr.savefig(filename)
             plt.close(fig_corr)
-    
+            return filename
+
+        run_save_with_progress(
+            root, "Saving Correlation Image", "Saving correlation image...", worker_fn=worker)
+
     def _save_dendrogram_image():
         """Save dendrogram part of the plot"""
         default_name = get_default_correlation_name('_dendrogram.png')
@@ -196,7 +211,10 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
                 ("All Files", "*.*")
             ]
         )
-        if filename:
+        if not filename:
+            return
+
+        def worker():
             # Save only dendrogram
             fig_dendro = plt.figure(figsize=(size, size))
             ax_dendro_temp = fig_dendro.add_subplot(111)
@@ -206,7 +224,11 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             ax_dendro_temp.set_title('Dendrogram')
             fig_dendro.savefig(filename)
             plt.close(fig_dendro)
-    
+            return filename
+
+        run_save_with_progress(
+            root, "Saving Dendrogram", "Saving dendrogram image...", worker_fn=worker)
+
     def _save_all():
         default_name = get_default_correlation_name('_combined.png')
         filename = asksaveasfilename(
@@ -221,8 +243,15 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
                 ("All Files", "*.*")
             ]
         )
-        if filename:
+        if not filename:
+            return
+
+        def worker():
             fig.savefig(filename)
+            return filename
+
+        run_save_with_progress(
+            root, "Saving Combined Image", "Saving combined image...", worker_fn=worker)
     
     # Create button frame first so it claims its space before the canvas expands
     button_frame = tk.Frame(plot_frame)
@@ -340,9 +369,16 @@ def plot_dendogram(data, root, canvas):
                 ("All Files", "*.*")
             ]
         )
-        if filename:
+        if not filename:
+            return
+
+        def worker():
             fig.savefig(filename)
-    
+            return filename
+
+        run_save_with_progress(
+            root, "Saving Dendrogram", "Saving dendrogram image...", worker_fn=worker)
+
     def _save_dendrogram_csv():
         """Save dendrogram clustering data to CSV"""
         default_name = get_default_dendogram_name('.csv')
@@ -352,17 +388,20 @@ def plot_dendogram(data, root, canvas):
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
             title="Save Dendrogram Data"
         )
-        
-        if filename:
+
+        if not filename:
+            return
+
+        def worker():
             # Create DataFrame with clustering information
             # Include cluster labels and linkage information
             df_data = {
                 'Sample_Index': list(range(len(clustering.labels_))),
                 'Cluster_Label': clustering.labels_
             }
-            
+
             df = pd.DataFrame(df_data)
-            
+
             # Add linkage matrix information as separate section
             linkage_data = []
             for i, (child1, child2) in enumerate(clustering.children_):
@@ -372,17 +411,21 @@ def plot_dendogram(data, root, canvas):
                     'Child_2': int(child2),
                     'Distance': clustering.distances_[i]
                 })
-            
+
             df_linkage = pd.DataFrame(linkage_data)
-            
+
             # Save both dataframes to CSV
             with open(filename, 'w', newline='') as f:
                 f.write("# Cluster Labels\n")
                 df.to_csv(f, index=False)
                 f.write("\n# Linkage Matrix\n")
                 df_linkage.to_csv(f, index=False)
-            
-            messagebox.showinfo("Success", f"Dendrogram data saved to {filename}")
+
+            return filename
+
+        run_save_with_progress(
+            root, "Saving Dendrogram Data", "Saving dendrogram data...", worker_fn=worker,
+            success_message=lambda fn: f"Dendrogram data saved to {fn}")
     
     # Create button frame for dendrogram inside the plot frame using pack
     button_frame = tk.Frame(plot_frame)
@@ -632,8 +675,17 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
                        ("TIFF Image", "*.tiff"), ("SVG Vector", "*.svg"),
                        ("EPS Vector", "*.eps"), ("All Files", "*.*")]
         )
-        if filename:
-            ts_figs['multi'].savefig(filename)
+        if not filename:
+            return
+
+        fig_multi = ts_figs['multi']
+
+        def worker():
+            fig_multi.savefig(filename)
+            return filename
+
+        run_save_with_progress(
+            container, "Saving Image", "Saving image...", worker_fn=worker)
 
     def save_csv():
         if not selection_indices:
@@ -644,10 +696,19 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
         )
-        if filename:
-            cols = [column_names[i] if i < len(column_names) else f"Column {i+1}"
-                    for i in selection_indices]
-            pd.DataFrame(norm_data[:, selection_indices], columns=cols).to_csv(filename, index=False)
+        if not filename:
+            return
+
+        cols = [column_names[i] if i < len(column_names) else f"Column {i+1}"
+                for i in selection_indices]
+        data_snapshot = norm_data[:, selection_indices]
+
+        def worker():
+            pd.DataFrame(data_snapshot, columns=cols).to_csv(filename, index=False)
+            return filename
+
+        run_save_with_progress(
+            container, "Saving CSV", "Saving CSV...", worker_fn=worker)
 
     def close_window():
         for key in ('signal', 'multi'):
@@ -670,20 +731,21 @@ def load_correlation_matrix(root, canvas):
     """
     Load a correlation matrix from a CSV file and display it
     """
-    try:
-        # Open file dialog to select correlation matrix file
-        filename = askopenfilename(
-            title="Load Correlation Matrix",
-            filetypes=[
-                ("CSV files", "*.csv"),
-                ("Excel files", "*.xlsx"),
-                ("All files", "*.*")
-            ]
-        )
-        
-        if not filename:
-            return  # User cancelled
-        
+    # Open file dialog to select correlation matrix file (stays on the main thread)
+    filename = askopenfilename(
+        title="Load Correlation Matrix",
+        filetypes=[
+            ("CSV files", "*.csv"),
+            ("Excel files", "*.xlsx"),
+            ("All files", "*.*")
+        ]
+    )
+
+    if not filename:
+        return  # User cancelled
+
+    def worker(report_progress, report_error):
+        report_progress(0, 1, "Cargando...")
         # Load the correlation matrix based on file extension
         if filename.lower().endswith('.csv'):
             corr_matrix = pd.read_csv(filename, index_col=0)
@@ -692,38 +754,46 @@ def load_correlation_matrix(root, canvas):
         else:
             # Try CSV as default
             corr_matrix = pd.read_csv(filename, index_col=0)
-        
+        report_progress(1, 1, "Listo")
+        return corr_matrix
+
+    def on_complete(corr_matrix):
         # Validate that it's a square matrix (correlation matrices should be square)
         if corr_matrix.shape[0] != corr_matrix.shape[1]:
             messagebox.showerror(
-                "Invalid Matrix", 
+                "Invalid Matrix",
                 "The loaded matrix is not square. Correlation matrices must be square."
             )
             return
-        
+
         # Check if values are in valid correlation range [-1, 1]
         if (corr_matrix.min().min() < -1.1) or (corr_matrix.max().max() > 1.1):
             response = messagebox.askyesno(
-                "Warning", 
+                "Warning",
                 "The matrix contains values outside the typical correlation range [-1, 1]. Continue anyway?"
             )
             if not response:
                 return
-        
+
         # Display the correlation matrix
         size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
-        canvas, _ = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True, corr_method='Loaded Correlation')
-        
+        _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True, corr_method='Loaded Correlation')
+
         messagebox.showinfo(
-            "Matrix Loaded", 
+            "Matrix Loaded",
             f"Successfully loaded correlation matrix of size {corr_matrix.shape[0]}x{corr_matrix.shape[1]}"
         )
-        
-    except pd.errors.EmptyDataError:
-        messagebox.showerror("Error", "The selected file is empty or invalid.")
-    except pd.errors.ParserError:
-        messagebox.showerror("Error", "Could not parse the file. Please ensure it's a valid CSV or Excel file.")
-    except FileNotFoundError:
-        messagebox.showerror("Error", "The selected file was not found.")
-    except Exception as e:
-        messagebox.showerror("Error", f"An error occurred while loading the matrix:\n{str(e)}")
+
+    def on_error(exc):
+        if isinstance(exc, pd.errors.EmptyDataError):
+            messagebox.showerror("Error", "The selected file is empty or invalid.")
+        elif isinstance(exc, pd.errors.ParserError):
+            messagebox.showerror("Error", "Could not parse the file. Please ensure it's a valid CSV or Excel file.")
+        elif isinstance(exc, FileNotFoundError):
+            messagebox.showerror("Error", "The selected file was not found.")
+        else:
+            messagebox.showerror("Error", f"An error occurred while loading the matrix:\n{str(exc)}")
+
+    run_with_progress_window(
+        root, title="Load Correlation Matrix", message="Loading correlation matrix...",
+        maximum=1, worker_fn=worker, on_complete=on_complete, on_error=on_error)

@@ -11,6 +11,7 @@ from PIL import Image, ImageTk
 from skimage.filters import unsharp_mask
 from tkinter.filedialog import asksaveasfilename
 from sklearn.cluster import KMeans
+from progress_utils import run_save_with_progress
 
 def calculate_variability(img_array, method=1):
     """
@@ -911,21 +912,36 @@ class VariabilityAnalysisWindow:
         )
         
         if filename:
-            # Build 2D array (n_frames, 1 + n_clusters):
-            #   column 0 = frame indices (skipped by _load_data with [:,1:])
-            #   columns 1+ = mean time series for each selected cluster
-            time_series_list = []
-            for cluster_idx in sorted(self.selected_clusters):
-                ts = extract_time_series(self.img_array, self.final_clusters[cluster_idx])
-                time_series_list.append(ts)
+            # Snapshot plain data needed by the worker before dispatching to
+            # the background thread (self.selected_clusters/self.final_clusters
+            # are plain lists, safe to read once here on the main thread).
+            cluster_indices = sorted(self.selected_clusters)
+            img_array = self.img_array
+            final_clusters = self.final_clusters
 
-            n_frames = len(time_series_list[0])
-            frame_col = np.arange(n_frames, dtype=float).reshape(-1, 1)
-            ts_matrix = np.column_stack(time_series_list).astype(float)
-            data = np.hstack([frame_col, ts_matrix])
+            def worker():
+                # Build 2D array (n_frames, 1 + n_clusters):
+                #   column 0 = frame indices (skipped by _load_data with [:,1:])
+                #   columns 1+ = mean time series for each selected cluster
+                time_series_list = []
+                for cluster_idx in cluster_indices:
+                    ts = extract_time_series(img_array, final_clusters[cluster_idx])
+                    time_series_list.append(ts)
 
-            np.save(filename, data)
-            messagebox.showinfo("Éxito", f"Clusters guardados en {filename}")
+                n_frames = len(time_series_list[0])
+                frame_col = np.arange(n_frames, dtype=float).reshape(-1, 1)
+                ts_matrix = np.column_stack(time_series_list).astype(float)
+                data = np.hstack([frame_col, ts_matrix])
+
+                np.save(filename, data)
+                return filename
+
+            run_save_with_progress(
+                self.window,
+                title="Guardando clusters",
+                message="Guardando clusters seleccionados...",
+                worker_fn=worker,
+                success_message=lambda fn: f"Clusters guardados en {fn}")
     
     def _on_window_close(self):
         """Cerrar la ventana de análisis y liberar recursos"""
@@ -1166,12 +1182,23 @@ class VariabilityAnalysisWindow:
         )
         
         if filename:
-            import pandas as pd
-            df = pd.DataFrame(self.time_series_data).T
-            df.columns = self.cluster_labels
-            df.index.name = 'Frame'
-            df.to_csv(filename)
-            messagebox.showinfo("Éxito", f"Series temporales exportadas a {filename}")
+            time_series_data = self.time_series_data
+            cluster_labels = self.cluster_labels
+
+            def worker():
+                import pandas as pd
+                df = pd.DataFrame(time_series_data).T
+                df.columns = cluster_labels
+                df.index.name = 'Frame'
+                df.to_csv(filename)
+                return filename
+
+            run_save_with_progress(
+                self.window,
+                title="Exportando series temporales",
+                message="Exportando series temporales...",
+                worker_fn=worker,
+                success_message=lambda fn: f"Series temporales exportadas a {fn}")
     
     def export_coordinates(self):
         """Exportar coordenadas de clusters seleccionados"""
@@ -1182,20 +1209,34 @@ class VariabilityAnalysisWindow:
         )
         
         if filename:
-            with open(filename, 'w') as f:
-                f.write("# Coordenadas de Clusters Seleccionados\n")
-                f.write(f"# Método de variabilidad: {self.method_name}\n")
-                f.write(f"# Threshold usado: {self.threshold_var.get()}\n")
-                f.write(f"# Total de clusters: {len(self.selected_clusters)}\n\n")
-                
-                for cluster_idx in self.selected_clusters:
-                    cluster_points = self.final_clusters[cluster_idx]
-                    f.write(f"Cluster {cluster_idx} ({len(cluster_points)} puntos):\n")
-                    for point in cluster_points:
-                        f.write(f"{point[0]},{point[1]}\n")
-                    f.write("\n")
-            
-            messagebox.showinfo("Éxito", f"Coordenadas exportadas a {filename}")
+            # Tk variables must be read on the main thread; snapshot before
+            # dispatching to the background worker.
+            threshold = self.threshold_var.get()
+            method_name = self.method_name
+            selected_clusters = self.selected_clusters
+            final_clusters = self.final_clusters
+
+            def worker():
+                with open(filename, 'w') as f:
+                    f.write("# Coordenadas de Clusters Seleccionados\n")
+                    f.write(f"# Método de variabilidad: {method_name}\n")
+                    f.write(f"# Threshold usado: {threshold}\n")
+                    f.write(f"# Total de clusters: {len(selected_clusters)}\n\n")
+
+                    for cluster_idx in selected_clusters:
+                        cluster_points = final_clusters[cluster_idx]
+                        f.write(f"Cluster {cluster_idx} ({len(cluster_points)} puntos):\n")
+                        for point in cluster_points:
+                            f.write(f"{point[0]},{point[1]}\n")
+                        f.write("\n")
+                return filename
+
+            run_save_with_progress(
+                self.window,
+                title="Exportando coordenadas",
+                message="Exportando coordenadas...",
+                worker_fn=worker,
+                success_message=lambda fn: f"Coordenadas exportadas a {fn}")
     
     def generate_report(self):
         """Generar reporte completo del análisis"""
@@ -1210,36 +1251,55 @@ class VariabilityAnalysisWindow:
         )
         
         if filename:
-            with open(filename, 'w') as f:
-                f.write("REPORTE DE ANÁLISIS DE CLUSTERS\n")
-                f.write("=" * 50 + "\n\n")
-                
-                f.write(f"Método de variabilidad: {self.method_name}\n")
-                f.write(f"Threshold usado: {self.threshold_var.get()}\n")
-                f.write(f"Rango de tamaños: {self.min_size_var.get()} - {self.max_size_var.get()}\n")
-                f.write(f"Clusters seleccionados: {len(self.selected_clusters)}\n")
-                f.write(f"Método de correlación: {self.current_method}\n\n")
-                
-                f.write("DETALLES DE CLUSTERS:\n")
-                f.write("-" * 25 + "\n")
-                for cluster_idx in self.selected_clusters:
-                    cluster_size = len(self.final_clusters[cluster_idx])
-                    f.write(f"Cluster {cluster_idx}: {cluster_size} píxeles\n")
-                
-                f.write(f"\nMATRIZ DE CORRELACIÓN ({self.current_method}):\n")
-                f.write("-" * 35 + "\n")
-                f.write(self.current_corr_matrix.to_string())
-                f.write("\n\n")
-                
-                f.write("ESTADÍSTICAS DE CORRELACIÓN:\n")
-                f.write("-" * 30 + "\n")
-                correlations = self.current_corr_matrix.values[np.triu_indices_from(self.current_corr_matrix.values, k=1)]
-                f.write(f"Correlación promedio: {np.mean(correlations):.3f}\n")
-                f.write(f"Correlación máxima: {np.max(correlations):.3f}\n")
-                f.write(f"Correlación mínima: {np.min(correlations):.3f}\n")
-                f.write(f"Desviación estándar: {np.std(correlations):.3f}\n")
-            
-            messagebox.showinfo("Éxito", f"Reporte generado en {filename}")
+            # Tk variables must be read on the main thread; snapshot before
+            # dispatching to the background worker. Remaining values are
+            # plain attributes, safe to read once here as well.
+            threshold = self.threshold_var.get()
+            min_size = self.min_size_var.get()
+            max_size = self.max_size_var.get()
+            method_name = self.method_name
+            selected_clusters = self.selected_clusters
+            final_clusters = self.final_clusters
+            current_method = self.current_method
+            current_corr_matrix = self.current_corr_matrix
+
+            def worker():
+                with open(filename, 'w') as f:
+                    f.write("REPORTE DE ANÁLISIS DE CLUSTERS\n")
+                    f.write("=" * 50 + "\n\n")
+
+                    f.write(f"Método de variabilidad: {method_name}\n")
+                    f.write(f"Threshold usado: {threshold}\n")
+                    f.write(f"Rango de tamaños: {min_size} - {max_size}\n")
+                    f.write(f"Clusters seleccionados: {len(selected_clusters)}\n")
+                    f.write(f"Método de correlación: {current_method}\n\n")
+
+                    f.write("DETALLES DE CLUSTERS:\n")
+                    f.write("-" * 25 + "\n")
+                    for cluster_idx in selected_clusters:
+                        cluster_size = len(final_clusters[cluster_idx])
+                        f.write(f"Cluster {cluster_idx}: {cluster_size} píxeles\n")
+
+                    f.write(f"\nMATRIZ DE CORRELACIÓN ({current_method}):\n")
+                    f.write("-" * 35 + "\n")
+                    f.write(current_corr_matrix.to_string())
+                    f.write("\n\n")
+
+                    f.write("ESTADÍSTICAS DE CORRELACIÓN:\n")
+                    f.write("-" * 30 + "\n")
+                    correlations = current_corr_matrix.values[np.triu_indices_from(current_corr_matrix.values, k=1)]
+                    f.write(f"Correlación promedio: {np.mean(correlations):.3f}\n")
+                    f.write(f"Correlación máxima: {np.max(correlations):.3f}\n")
+                    f.write(f"Correlación mínima: {np.min(correlations):.3f}\n")
+                    f.write(f"Desviación estándar: {np.std(correlations):.3f}\n")
+                return filename
+
+            run_save_with_progress(
+                self.window,
+                title="Generando reporte",
+                message="Generando reporte...",
+                worker_fn=worker,
+                success_message=lambda fn: f"Reporte generado en {fn}")
     
     def show_3d_surface(self):
         """Mostrar visualización 3D de la superficie de variabilidad"""
@@ -1295,8 +1355,16 @@ class VariabilityAnalysisWindow:
                            ("All Files", "*.*")]
             )
             if filename:
-                fig.savefig(filename, dpi=300, bbox_inches='tight')
-                messagebox.showinfo("Éxito", f"Imagen 3D guardada en {filename}")
+                def worker():
+                    fig.savefig(filename, dpi=300, bbox_inches='tight')
+                    return filename
+
+                run_save_with_progress(
+                    self.window,
+                    title="Guardando imagen 3D",
+                    message="Guardando imagen 3D...",
+                    worker_fn=worker,
+                    success_message=lambda fn: f"Imagen 3D guardada en {fn}")
         
         tk.Button(control_frame, text="Guardar Imagen 3D", command=save_3d).pack(side=tk.LEFT, padx=10)
         tk.Label(control_frame, text="Usa el mouse para rotar la vista").pack(side=tk.LEFT, padx=10)
@@ -1312,8 +1380,18 @@ class VariabilityAnalysisWindow:
                            ("All Files", "*.*")]
             )
             if filename:
-                self.current_fig.savefig(filename, dpi=300, bbox_inches='tight')
-                messagebox.showinfo("Éxito", f"Imagen guardada en {filename}")
+                current_fig = self.current_fig
+
+                def worker():
+                    current_fig.savefig(filename, dpi=300, bbox_inches='tight')
+                    return filename
+
+                run_save_with_progress(
+                    self.window,
+                    title="Guardando imagen",
+                    message="Guardando imagen...",
+                    worker_fn=worker,
+                    success_message=lambda fn: f"Imagen guardada en {fn}")
 
 def show_variability_analysis(img_array, method, main_window):
     """

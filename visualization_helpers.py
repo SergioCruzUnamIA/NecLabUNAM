@@ -19,7 +19,17 @@ def set_column_listbox(listbox):
     global column_listbox
     column_listbox = listbox
 
-def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column_select=None, notebook=None):
+def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column_select=None,
+                              notebook=None, on_complete=None):
+    """Opens a data file (.csv/.npy) and plots its first/selected column.
+
+    Reading and normalizing the file can be slow for large files, so both
+    steps run on a background thread with a progress window (see
+    progress_utils.run_with_progress_window) instead of freezing the UI.
+    Because of that this function no longer returns the resulting canvas
+    directly -- pass on_complete(canvas) to be notified when the load
+    finishes (canvas is None if the user cancelled the file or ROI
+    dialog)."""
     global selected_roi_index, loaded_filename, selected_roi_name, column_listbox, column_select_callback
 
     if listbox is not None:
@@ -38,40 +48,82 @@ def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column
     )
 
     if not filename:
+        if on_complete is not None:
+            on_complete(None)
         return
 
-    loaded_filename = filename
-    column_names_list = None
+    from tkinter import messagebox
+    from progress_utils import run_with_progress_window
 
-    if filename.lower().endswith('.csv'):
-        df = pd.read_csv(filename)
-        column_names = df.columns.tolist()
-        if 'TIME' in column_names:
-            column_names.remove('TIME')
+    is_csv = filename.lower().endswith('.csv')
+
+    def read_columns_worker(report_progress, report_error):
+        report_progress(0, 1, f"Leyendo {os.path.basename(filename)}...")
+        if is_csv:
+            df = pd.read_csv(filename)
+            column_names = df.columns.tolist()
+            if 'TIME' in column_names:
+                column_names.remove('TIME')
+        else:
+            # .npy: no ROI dialog needed -- use all data columns
+            try:
+                temp_data = np.load(filename, allow_pickle=True)
+                num_columns = temp_data.shape[1] if temp_data.ndim == 2 else 1
+            except Exception:
+                num_columns = 1
+            column_names = [f"Column {i + 1}" for i in range(num_columns)]
+        report_progress(1, 1, "Listo")
+        return column_names
+
+    def after_columns_read(column_names):
+        global selected_roi_index, loaded_filename, selected_roi_name
+
+        loaded_filename = filename
         column_names_list = column_names
 
-        selected_roi_index = _show_roi_selection_dialog(window, column_names)
-        if selected_roi_index is None:
-            return
-        selected_roi_name = column_names[selected_roi_index]
-    else:
-        # .npy: no ROI dialog needed — use all data columns
-        try:
-            temp_data = np.load(filename, allow_pickle=True)
-            num_columns = temp_data.shape[1] if temp_data.ndim == 2 else 1
-        except Exception:
-            num_columns = 1
-        column_names = [f"Column {i + 1}" for i in range(num_columns)]
-        column_names_list = column_names
-        selected_roi_index = 0
-        selected_roi_name = column_names[0]
+        if is_csv:
+            selected_roi_index = _show_roi_selection_dialog(window, column_names)
+            if selected_roi_index is None:
+                if on_complete is not None:
+                    on_complete(None)
+                return
+            selected_roi_name = column_names[selected_roi_index]
+        else:
+            selected_roi_index = 0
+            selected_roi_name = column_names[0]
 
-    set_file_info(loaded_filename, selected_roi_name)
+        set_file_info(loaded_filename, selected_roi_name)
 
-    data = normalize_data(filename)
-    canvas = _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list, notebook)
+        def normalize_worker(report_progress, report_error):
+            report_progress(0, 1, "Procesando datos...")
+            data = normalize_data(filename)
+            report_progress(1, 1, "Listo")
+            return data
 
-    return canvas
+        def after_normalize(data):
+            result_canvas = _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list, notebook)
+            if on_complete is not None:
+                on_complete(result_canvas)
+
+        def on_normalize_error(exc):
+            messagebox.showerror("Error", f"No se pudo procesar el archivo:\n{exc}")
+            if on_complete is not None:
+                on_complete(None)
+
+        run_with_progress_window(
+            window, title="Cargando Datos", message="Procesando y normalizando datos...",
+            maximum=1, worker_fn=normalize_worker, on_complete=after_normalize,
+            on_error=on_normalize_error)
+
+    def on_read_error(exc):
+        messagebox.showerror("Error", f"No se pudo leer el archivo:\n{exc}")
+        if on_complete is not None:
+            on_complete(None)
+
+    run_with_progress_window(
+        window, title="Abriendo Archivo", message="Leyendo archivo...",
+        maximum=1, worker_fn=read_columns_worker, on_complete=after_columns_read,
+        on_error=on_read_error)
 
 
 def _show_roi_selection_dialog(parent, column_names):
