@@ -161,6 +161,10 @@ class NecLabApp:
         self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
+        # None = auto (per-sheet or shared-scale range, per the checkbox
+        # above); (min, max) = manual override set via "Límites de Color
+        # (Heatmap)...", applied to every sheet's heatmap image.
+        self.multi_xls_heatmap_manual_range = None
         # 'local': min of this column, within each sheet (default, previous
         # behavior). 'sheet': min across all columns of each sheet (matches
         # the heatmap's normalization). 'column_global': min of this column
@@ -1799,6 +1803,8 @@ class NecLabApp:
         def build_grafica_menu(m):
             m.add_command(label="Límites de Ejes (Gráfica Superior)...",
                           command=self._open_multi_xls_axis_limits_dialog)
+            m.add_command(label="Límites de Color (Heatmap)...",
+                          command=self._open_multi_xls_heatmap_range_dialog)
             m.add_separator()
             m.add_command(label="Save Plot Image...", state='disabled',
                           command=self._save_multi_xls_plot_image)
@@ -2314,6 +2320,78 @@ class NecLabApp:
         tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
         tk.Button(btns, text="Aplicar", command=apply_limits, width=8).pack(side='left', padx=4)
 
+    def _open_multi_xls_heatmap_range_dialog(self):
+        """Diálogo para fijar manualmente el rango de color (min/max) del
+        heatmap de 'Datos Multiples', mostrando el rango actualmente en
+        uso, o volver a autoescalado (por hoja, o compartido si 'Escala de
+        Color Compartida' está activo)."""
+        if not self.multi_xls_datasets:
+            messagebox.showinfo("Sin datos", "Carga archivos primero.")
+            return
+
+        matrices, _vmin, _vmax, _per_sheet_ranges = self._compute_multi_xls_heatmap_matrices()
+        if not matrices:
+            messagebox.showinfo("Sin datos", "No hay datos numéricos para calcular un rango.")
+            return
+
+        # Rango combinado de todas las hojas, sobre los mismos datos
+        # normalizados/suavizados que dibuja el heatmap - referencia de
+        # "rango actual" incluso cuando cada hoja usa su propia escala.
+        all_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
+        auto_min, auto_max = float(all_finite.min()), float(all_finite.max())
+
+        if self.multi_xls_heatmap_manual_range is not None:
+            cur_min, cur_max = self.multi_xls_heatmap_manual_range
+        else:
+            cur_min, cur_max = auto_min, auto_max
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Límites de Color - Heatmap")
+        dialog.geometry("320x210")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        tk.Label(dialog, text="Rango actual en uso:", font=('Arial', 9, 'bold')).grid(
+            row=0, column=0, columnspan=2, sticky='w', padx=10, pady=(12, 0))
+        tk.Label(dialog, text=f"{cur_min:.4g}  —  {cur_max:.4g}", font=('Arial', 9)).grid(
+            row=1, column=0, columnspan=2, sticky='w', padx=10, pady=(0, 10))
+
+        tk.Label(dialog, text="Min:").grid(row=2, column=0, sticky='e', padx=(10, 4))
+        min_var = tk.StringVar(value=f"{cur_min:.4g}")
+        tk.Entry(dialog, textvariable=min_var, width=12).grid(row=2, column=1, sticky='w', padx=(0, 10), pady=2)
+        tk.Label(dialog, text="Max:").grid(row=3, column=0, sticky='e', padx=(10, 4))
+        max_var = tk.StringVar(value=f"{cur_max:.4g}")
+        tk.Entry(dialog, textvariable=max_var, width=12).grid(row=3, column=1, sticky='w', padx=(0, 10), pady=2)
+
+        def apply_range():
+            try:
+                new_min, new_max = float(min_var.get()), float(max_var.get())
+            except ValueError:
+                messagebox.showerror("Valor inválido", "Min y Max deben ser números.", parent=dialog)
+                return
+            if new_min >= new_max:
+                messagebox.showerror("Rango inválido", "El mínimo debe ser menor que el máximo.", parent=dialog)
+                return
+            self.multi_xls_heatmap_manual_range = (new_min, new_max)
+            dialog.destroy()
+            self._draw_multi_xls_heatmap()
+            if self.multi_xls_current_index is not None:
+                self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+        def reset_auto():
+            self.multi_xls_heatmap_manual_range = None
+            dialog.destroy()
+            self._draw_multi_xls_heatmap()
+            if self.multi_xls_current_index is not None:
+                self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+        btns = tk.Frame(dialog)
+        btns.grid(row=4, column=0, columnspan=2, pady=18)
+        tk.Button(btns, text="Auto", command=reset_auto, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Aplicar", command=apply_range, width=8).pack(side='left', padx=4)
+
     def _on_multi_xls_show_labels_toggle(self):
         """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
         cada hoja bajo el eje X, sin tocar los nombres de la lista de datos."""
@@ -2370,6 +2448,14 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+    def _multi_xls_effective_shared_scale(self):
+        """True when every sheet's heatmap image is drawn with the same
+        color range - either because 'Escala de Color Compartida' is on,
+        or because a manual range override is set (Límites de Color). Used
+        to decide whether to reserve/draw the heatmap colorbar and to keep
+        the line plot's right margin aligned with it."""
+        return self.multi_xls_shared_scale_var.get() or self.multi_xls_heatmap_manual_range is not None
 
     def _smooth_multi_xls_signal(self, values):
         """Apply Convex Envelope smoothing to a single sheet's column values
@@ -2590,7 +2676,7 @@ class NecLabApp:
         col_name = self.multi_xls_common_columns[index]
         display_label = self.multi_xls_column_listbox.get(index)
         show_labels = self.multi_xls_show_labels_var.get()
-        reserve_colorbar = self.multi_xls_shared_scale_var.get()
+        reserve_colorbar = self._multi_xls_effective_shared_scale()
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
@@ -2775,12 +2861,15 @@ class NecLabApp:
         representa su valor dividido entre un mínimo, calculado según el
         modo elegido en el submenú 'Normalización' (ver
         _compute_multi_xls_heatmap_matrices) - el mismo modo que usa la
-        gráfica de líneas de arriba. Si 'Escala de Color Compartida' está
-        activo, todas las hojas comparten la misma escala de color; si no,
-        cada hoja usa su propio rango. Las imágenes de cada hoja se colocan
-        una junto a otra. El canvas se crea una sola vez y se reutiliza en
-        cada redibujado (ver comentario en __init__), ajustándose
-        exactamente al tamaño del panel."""
+        gráfica de líneas de arriba. Si hay un rango manual fijado
+        (multi_xls_heatmap_manual_range, ver
+        _open_multi_xls_heatmap_range_dialog), todas las hojas usan ese
+        rango; si no, y 'Escala de Color Compartida' está activo, todas las
+        hojas comparten la misma escala automática; si no, cada hoja usa su
+        propio rango automático. Las imágenes de cada hoja se colocan una
+        junto a otra. El canvas se crea una sola vez y se reutiliza en cada
+        redibujado (ver comentario en __init__), ajustándose exactamente al
+        tamaño del panel."""
         if self.multi_xls_heatmap_frame is None:
             return
 
@@ -2806,6 +2895,8 @@ class NecLabApp:
             return
 
         shared_scale = self.multi_xls_shared_scale_var.get()
+        manual_range = self.multi_xls_heatmap_manual_range
+        effective_shared = shared_scale or manual_range is not None
         matrices, vmin, vmax, per_sheet_ranges = self._compute_multi_xls_heatmap_matrices()
         if matrices is None:
             return
@@ -2842,7 +2933,9 @@ class NecLabApp:
         im = None
         for ds, matrix, sheet_range in zip(self.multi_xls_datasets, matrices, per_sheet_ranges):
             n_cols, n_samples = matrix.shape
-            if shared_scale:
+            if manual_range is not None:
+                im_vmin, im_vmax = manual_range
+            elif shared_scale:
                 im_vmin, im_vmax = vmin, vmax
             else:
                 im_vmin, im_vmax = sheet_range
@@ -2867,7 +2960,9 @@ class NecLabApp:
             'column_global': 'mínimo de cada columna (todas las hojas)',
             'all_global': 'mínimo global (todas las columnas y hojas)',
         }.get(self.multi_xls_norm_mode_var.get(), 'mínimo de cada hoja')
-        if shared_scale:
+        if manual_range is not None:
+            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc}, rango manual)')
+        elif shared_scale:
             ax.set_title(f'Todas las hojas (valor / {norm_mode_desc})')
         else:
             ax.set_title(f'Todas las hojas (valor / {norm_mode_desc}, escala individual por hoja)')
@@ -2877,10 +2972,10 @@ class NecLabApp:
         # own explicit axes carved out of the reserved right margin, instead
         # of letting fig.colorbar() shrink ax to make room for it.
         left, right, top, bottom = _multi_xls_axes_margins(
-            fig_width, fig_height, show_labels, shared_scale)
+            fig_width, fig_height, show_labels, effective_shared)
         self.multi_xls_heatmap_fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
         pos = ax.get_position()
-        if shared_scale and im is not None:
+        if effective_shared and im is not None:
             cax_left = right + _MULTI_XLS_CBAR_GAP_IN / fig_width
             cax_width = _MULTI_XLS_CBAR_WIDTH_IN / fig_width
             cax = self.multi_xls_heatmap_fig.add_axes([cax_left, pos.y0, cax_width, pos.height])
