@@ -38,6 +38,7 @@ hidden += [
     'pandas._libs.tslibs.timestamps',
     'openpyxl',
     'xlrd',
+    'xlsxwriter',
 ]
 
 # ── Data files bundled into the executable ───────────────────────────────────

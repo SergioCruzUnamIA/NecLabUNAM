@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import sys
 import threading
+import queue
 import subprocess
 import json
 import urllib.request
@@ -1169,7 +1170,7 @@ class NecLabApp:
             return
 
         if filename.lower().endswith(('.xlsx', '.xls')):
-            self._corr_df.to_excel(filename, sheet_name='Correlation')
+            self._corr_df.to_excel(filename, sheet_name='Correlation', engine='xlsxwriter')
         else:
             self._corr_df.to_csv(filename)
         messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
@@ -1610,8 +1611,11 @@ class NecLabApp:
         selection = pick_files_and_sheets(self.root)
         if not selection:
             return
+        self._load_xls_with_progress(selection, self._on_multi_xls_load_complete)
 
-        datasets = self._load_xls_with_progress(selection)
+    def _on_multi_xls_load_complete(self, datasets):
+        """Continúa donde open_multiple_xls_files lo dejó, una vez que la
+        carga en segundo plano terminó (ver _run_with_progress_window)."""
         if not datasets:
             messagebox.showwarning("Sin datos", "No se pudo cargar ninguna hoja seleccionada.")
             return
@@ -1626,44 +1630,111 @@ class NecLabApp:
         self._populate_multi_xls_columns()
         self.notebook.select(self.multi_xls_tab)
 
-    def _load_xls_with_progress(self, selection):
-        """Carga las hojas seleccionadas mostrando una barra de progreso
-        determinada por el número de hojas ya cargadas."""
+    def _run_with_progress_window(self, title, message, maximum, worker_fn,
+                                   on_complete, on_error=None):
+        """Corre 'worker_fn(report_progress, report_error)' en un hilo
+        aparte, mostrando una ventana de progreso que sigue respondiendo
+        (se puede mover, repintar, etc.) mientras tanto - en vez de
+        bloquear el hilo principal de Tk durante toda la operación, que es
+        lo que hacía que la ventana se reportara como "no responde" con
+        archivos grandes.
+
+        'worker_fn' debe llamar a report_progress(done, total, texto) para
+        actualizar la barra (opcional), y devolver su resultado, que se
+        pasa a on_complete(resultado) en el hilo principal cuando termina.
+        report_error(texto) muestra un messagebox de error sin detener el
+        hilo (para errores por-archivo que no deben abortar todo el
+        proceso). Una excepción no capturada dentro de worker_fn se pasa a
+        on_error(excepcion) (o se muestra con un messagebox genérico si
+        on_error es None), también en el hilo principal.
+
+        Tkinter no es seguro para usar desde otro hilo que no sea el
+        principal: worker_fn nunca debe tocar widgets ni variables de Tk
+        directamente, solo llamar a report_progress/report_error (que solo
+        encolan un mensaje) y trabajar con datos planos de Python/pandas."""
         progress_win = tk.Toplevel(self.root)
-        progress_win.title("Cargando Archivos")
-        progress_win.geometry("420x120")
+        progress_win.title(title)
         progress_win.transient(self.root)
         progress_win.grab_set()
         progress_win.resizable(False, False)
         progress_win.protocol("WM_DELETE_WINDOW", lambda: None)
 
-        tk.Label(progress_win, text="Cargando hojas de Excel...",
-                 font=('Arial', 11, 'bold')).pack(pady=(15, 4), padx=15, anchor='w')
-
+        tk.Label(progress_win, text=message, font=('Arial', 11, 'bold')).pack(
+            pady=(15, 4), padx=15, anchor='w')
         status_label = tk.Label(progress_win, text="Preparando...", font=('Arial', 9),
                                  fg=_C['sub'], anchor='w')
         status_label.pack(fill='x', padx=15, anchor='w')
-
-        progress_bar = ttk.Progressbar(progress_win, orient='horizontal',
-                                        length=390, mode='determinate',
-                                        maximum=max(len(selection), 1))
+        progress_bar = ttk.Progressbar(progress_win, orient='horizontal', length=390,
+                                        mode='determinate', maximum=max(maximum, 1))
         progress_bar.pack(pady=(8, 15), padx=15)
-
         progress_win.update_idletasks()
 
-        def _on_progress(done, total, filepath, sheet):
-            progress_bar['value'] = done
-            status_label.config(
-                text=f"{os.path.basename(filepath)} — {sheet}  ({done}/{total})"
-            )
-            progress_win.update_idletasks()
+        result_queue = queue.Queue()
 
-        try:
-            datasets = load_selected_sheets(selection, progress_callback=_on_progress)
-        finally:
-            progress_win.destroy()
+        def report_progress(done, total, text):
+            result_queue.put(('progress', done, total, text))
 
-        return datasets
+        def report_error(text):
+            result_queue.put(('error', text))
+
+        def run():
+            try:
+                result = worker_fn(report_progress, report_error)
+                result_queue.put(('done', result))
+            except Exception as exc:
+                result_queue.put(('exception', exc))
+
+        threading.Thread(target=run, daemon=True).start()
+
+        def poll():
+            try:
+                while True:
+                    item = result_queue.get_nowait()
+                    kind = item[0]
+                    if kind == 'progress':
+                        _, done, total, text = item
+                        progress_bar['maximum'] = max(total, 1)
+                        progress_bar['value'] = done
+                        status_label.config(text=text)
+                    elif kind == 'error':
+                        messagebox.showerror("Error", item[1], parent=progress_win)
+                    elif kind == 'done':
+                        progress_win.destroy()
+                        on_complete(item[1])
+                        return
+                    elif kind == 'exception':
+                        progress_win.destroy()
+                        if on_error:
+                            on_error(item[1])
+                        else:
+                            messagebox.showerror("Error", str(item[1]))
+                        return
+            except queue.Empty:
+                pass
+            progress_win.after(50, poll)
+
+        progress_win.after(50, poll)
+
+    def _load_xls_with_progress(self, selection, on_complete):
+        """Carga las hojas seleccionadas en un hilo aparte (ver
+        _run_with_progress_window), mostrando una barra de progreso que
+        sigue respondiendo mientras se leen archivos grandes. Llama a
+        on_complete(datasets) en el hilo principal cuando termina."""
+        def worker(report_progress, report_error):
+            def _on_progress(done, total, filepath, sheet):
+                report_progress(done, total,
+                                 f"{os.path.basename(filepath)} — {sheet}  ({done}/{total})")
+
+            def _on_error(filepath, sheet, exc):
+                report_error(
+                    f"No se pudo cargar la hoja '{sheet}' de '{os.path.basename(filepath)}':\n{exc}")
+
+            return load_selected_sheets(
+                selection, progress_callback=_on_progress, error_callback=_on_error)
+
+        self._run_with_progress_window(
+            title="Cargando Archivos", message="Cargando hojas de Excel...",
+            maximum=len(selection), worker_fn=worker, on_complete=on_complete)
 
     def _create_multi_xls_layout(self):
         """Construye la pestaña 'Datos Multiples': un menú local ('Vista',
@@ -1734,8 +1805,8 @@ class NecLabApp:
             m.add_command(label="Save Heatmap Image...", state='disabled',
                           command=self._save_multi_xls_heatmap_image)
             m.add_separator()
-            m.add_command(label="Save Plotted Points (CSV/XLSX)...", state='disabled',
-                          command=self._save_multi_xls_plot_points)
+            m.add_command(label="Save Smoothed Data (XLSX, Multiple Sheets)...", state='disabled',
+                          command=self._save_multi_xls_smoothed_data)
 
         def build_datos_menu(m):
             m.add_command(label="Editar Clasificaciones...",
@@ -1946,7 +2017,7 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
             self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
-            self.multi_xls_menu_grafica.entryconfigure("Save Plotted Points (CSV/XLSX)...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Smoothed Data (XLSX, Multiple Sheets)...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
             self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
@@ -2323,9 +2394,8 @@ class NecLabApp:
         """Para cada hoja cargada que tenga la columna 'col_name', devuelve
         (label, values) ya interpolados, normalizados y suavizados - el
         mismo procesamiento que dibuja la gráfica superior, factorizado
-        aparte para que 'Save Plotted Points' exporte exactamente lo que se
-        ve. El divisor de la normalización depende de
-        multi_xls_norm_mode_var:
+        aparte para que el caché lo pueda reutilizar. El divisor de la
+        normalización depende de multi_xls_norm_mode_var:
         - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
           usa su propio mínimo).
         - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
@@ -2815,38 +2885,78 @@ class NecLabApp:
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
-    def _save_multi_xls_plot_points(self):
-        """Guarda, en un archivo .csv o .xlsx, los puntos finales (ya
-        interpolados, normalizados y suavizados) que se están graficando
-        actualmente en la gráfica superior de 'Datos Multiples' - una
-        columna por hoja cargada."""
-        if self.multi_xls_current_column is None:
-            messagebox.showwarning("Sin Datos", "Selecciona una columna primero.")
-            return
-
-        series = self._compute_multi_xls_series(self.multi_xls_current_column)
-        if not series:
-            messagebox.showwarning("Sin Datos", "No hay puntos para guardar.")
+    def _save_multi_xls_smoothed_data(self):
+        """Guarda, en un solo archivo .xlsx, todas las columnas comunes ya
+        interpoladas y - si 'Smoothing' está activo - suavizadas con Convex
+        Envelope, para cada hoja cargada. Los datos de cada hoja se apilan
+        uno debajo del otro en una sola hoja de cálculo, separados por 20
+        filas en blanco, en vez de una hoja de Excel distinta por cada una.
+        A diferencia de lo que se ve en la gráfica superior, esto exporta
+        todas las columnas (no solo la seleccionada) y sin normalizar, en
+        su escala original. El procesamiento y guardado corren en un hilo
+        aparte (ver _run_with_progress_window) para que la ventana de
+        progreso no se quede sin responder con archivos grandes."""
+        if not self.multi_xls_datasets or not self.multi_xls_common_columns:
+            messagebox.showwarning("Sin Datos", "Carga datos primero.")
             return
 
         from tkinter.filedialog import asksaveasfilename
-        import pandas as pd
 
         filename = asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
-            title="Save Plotted Points"
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All Files", "*.*")],
+            title="Save Smoothed Data"
         )
         if not filename:
             return
 
-        df = pd.DataFrame({label: pd.Series(values) for label, values in series})
-        df.index.name = 'Sample'
-        if filename.lower().endswith(('.xlsx', '.xls')):
-            df.to_excel(filename)
-        else:
-            df.to_csv(filename)
-        messagebox.showinfo("Saved", f"Plotted points saved to:\n{filename}")
+        # Snapshot everything the worker thread needs up front, since Tk
+        # widgets/variables aren't safe to read from a background thread -
+        # the worker only ever touches these plain Python/pandas values.
+        datasets = list(self.multi_xls_datasets)
+        common_columns = list(self.multi_xls_common_columns)
+        smoothing_on = self.multi_xls_smoothing_var.get()
+        try:
+            smoothing_points = self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            smoothing_points = None
+
+        def worker(report_progress, report_error):
+            import pandas as pd
+
+            gap_rows = 20
+            n_steps = len(datasets) + 1  # +1 for the final write step
+            blocks = []
+            for i, ds in enumerate(datasets):
+                report_progress(i, n_steps, f"Procesando {ds['label']}  ({i + 1}/{len(datasets)})")
+                out_cols = {}
+                for col_name in common_columns:
+                    if col_name not in ds['df'].columns:
+                        continue
+                    values = ds['df'][col_name].to_numpy(dtype=float)
+                    values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+                    if smoothing_on:
+                        from peak_functions import _convex_envelope_detrend_signal
+                        values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
+                    out_cols[col_name] = values
+                blocks.append(pd.DataFrame(out_cols))
+
+            report_progress(len(datasets), n_steps, "Guardando archivo...")
+            stacked = []
+            for i, block in enumerate(blocks):
+                stacked.append(block)
+                if i < len(blocks) - 1:
+                    stacked.append(pd.DataFrame(np.nan, index=range(gap_rows), columns=block.columns))
+            combined = pd.concat(stacked, ignore_index=True)
+            combined.to_excel(filename, index=False, header=False, engine='xlsxwriter')
+            return filename
+
+        self._run_with_progress_window(
+            title="Guardando Datos", message="Guardando datos suavizados...",
+            maximum=len(datasets) + 1, worker_fn=worker,
+            on_complete=lambda fn: messagebox.showinfo("Saved", f"Data saved to:\n{fn}"),
+            on_error=lambda exc: messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{exc}"),
+        )
 
     def _save_multi_xls_classifications(self):
         """Guarda, para cada columna de datos y cada hoja cargada, la
@@ -2891,7 +3001,7 @@ class NecLabApp:
         if filename.lower().endswith('.csv'):
             df.to_csv(filename)
         else:
-            df.to_excel(filename)
+            df.to_excel(filename, engine='xlsxwriter')
 
         messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
 
