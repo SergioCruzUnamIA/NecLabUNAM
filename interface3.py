@@ -1734,8 +1734,8 @@ class NecLabApp:
             m.add_command(label="Save Heatmap Image...", state='disabled',
                           command=self._save_multi_xls_heatmap_image)
             m.add_separator()
-            m.add_command(label="Save Plotted Points (CSV/XLSX)...", state='disabled',
-                          command=self._save_multi_xls_plot_points)
+            m.add_command(label="Save Smoothed Data (XLSX, Multiple Sheets)...", state='disabled',
+                          command=self._save_multi_xls_smoothed_data)
 
         def build_datos_menu(m):
             m.add_command(label="Editar Clasificaciones...",
@@ -1946,7 +1946,7 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
             self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
-            self.multi_xls_menu_grafica.entryconfigure("Save Plotted Points (CSV/XLSX)...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Smoothed Data (XLSX, Multiple Sheets)...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
             self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
@@ -2323,9 +2323,8 @@ class NecLabApp:
         """Para cada hoja cargada que tenga la columna 'col_name', devuelve
         (label, values) ya interpolados, normalizados y suavizados - el
         mismo procesamiento que dibuja la gráfica superior, factorizado
-        aparte para que 'Save Plotted Points' exporte exactamente lo que se
-        ve. El divisor de la normalización depende de
-        multi_xls_norm_mode_var:
+        aparte para que el caché lo pueda reutilizar. El divisor de la
+        normalización depende de multi_xls_norm_mode_var:
         - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
           usa su propio mínimo).
         - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
@@ -2815,38 +2814,60 @@ class NecLabApp:
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
-    def _save_multi_xls_plot_points(self):
-        """Guarda, en un archivo .csv o .xlsx, los puntos finales (ya
-        interpolados, normalizados y suavizados) que se están graficando
-        actualmente en la gráfica superior de 'Datos Multiples' - una
-        columna por hoja cargada."""
-        if self.multi_xls_current_column is None:
-            messagebox.showwarning("Sin Datos", "Selecciona una columna primero.")
-            return
+    @staticmethod
+    def _safe_excel_sheet_name(name, used_names):
+        """Sanea 'name' para usarlo como nombre de hoja de Excel (máx. 31
+        caracteres, sin : \\ / ? * [ ]) y evita colisiones con nombres ya
+        usados en el mismo archivo agregando un sufijo numérico."""
+        invalid = set(':\\/?*[]')
+        cleaned = ''.join(c for c in name if c not in invalid).strip() or 'Sheet'
+        cleaned = cleaned[:31]
+        base, candidate, i = cleaned, cleaned, 1
+        while candidate in used_names:
+            suffix = f'_{i}'
+            candidate = base[:31 - len(suffix)] + suffix
+            i += 1
+        used_names.add(candidate)
+        return candidate
 
-        series = self._compute_multi_xls_series(self.multi_xls_current_column)
-        if not series:
-            messagebox.showwarning("Sin Datos", "No hay puntos para guardar.")
+    def _save_multi_xls_smoothed_data(self):
+        """Guarda, en un archivo .xlsx con una hoja por cada archivo/hoja
+        cargado (mismo formato que al cargar los datos), todas las columnas
+        comunes ya interpoladas y - si 'Smoothing' está activo - suavizadas
+        con Convex Envelope. A diferencia de lo que se ve en la gráfica
+        superior, esto exporta todas las columnas (no solo la seleccionada)
+        y sin normalizar, en su escala original."""
+        if not self.multi_xls_datasets or not self.multi_xls_common_columns:
+            messagebox.showwarning("Sin Datos", "Carga datos primero.")
             return
 
         from tkinter.filedialog import asksaveasfilename
         import pandas as pd
 
         filename = asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
-            title="Save Plotted Points"
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All Files", "*.*")],
+            title="Save Smoothed Data"
         )
         if not filename:
             return
 
-        df = pd.DataFrame({label: pd.Series(values) for label, values in series})
-        df.index.name = 'Sample'
-        if filename.lower().endswith(('.xlsx', '.xls')):
-            df.to_excel(filename)
-        else:
-            df.to_csv(filename)
-        messagebox.showinfo("Saved", f"Plotted points saved to:\n{filename}")
+        used_sheet_names = set()
+        with pd.ExcelWriter(filename) as writer:
+            for ds in self.multi_xls_datasets:
+                out_cols = {}
+                for col_name in self.multi_xls_common_columns:
+                    if col_name not in ds['df'].columns:
+                        continue
+                    values = ds['df'][col_name].to_numpy(dtype=float)
+                    values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+                    values = self._smooth_multi_xls_signal(values)
+                    out_cols[col_name] = values
+                sheet_df = pd.DataFrame(out_cols)
+                sheet_name = self._safe_excel_sheet_name(ds['label'], used_sheet_names)
+                sheet_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+
+        messagebox.showinfo("Saved", f"Data saved to:\n{filename}")
 
     def _save_multi_xls_classifications(self):
         """Guarda, para cada columna de datos y cada hoja cargada, la
