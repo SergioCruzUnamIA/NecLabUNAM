@@ -211,125 +211,32 @@ def elliptic_envelope_peak(norm_data, roi_index, main_window=None, canvas=None, 
 
     return draw_canvas(pico_norm_data, res, y_res, plot_mode, main_window, canvas, target_frame=target_frame)
 
-def _lower_convex_hull(x, y):
-    """Vertices of the lower convex hull of points (x, y) via a monotone chain."""
-    def cross(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    hull = []
-    for p in zip(x, y):
-        while len(hull) >= 2 and cross(hull[-2], hull[-1], p) <= 0:
-            hull.pop()
-        hull.append(p)
-    return np.array([p[0] for p in hull]), np.array([p[1] for p in hull])
-
-
-def _collect_genuine_lowest_points(y, window_frac=0.25, overlap=0.5):
-    """Pool the lower-convex-hull vertices found in overlapping windows.
-
-    A hull vertex is only ever a point that is not exceeded by the line
-    between its neighbors, so a point from inside a peak can never qualify --
-    this is what makes the pooled set trustworthy "lowest points" to build a
-    baseline from.
-    """
-    n = len(y)
-    x = np.arange(n)
-    window = max(20, int(n * window_frac))
-    stride = max(1, int(window * (1 - overlap)))
-
-    pts = {}
-    start = 0
-    while start < n:
-        end = min(start + window, n)
-        hull_x, hull_y = _lower_convex_hull(x[start:end], y[start:end])
-        for xi, yi in zip(hull_x, hull_y):
-            if xi not in pts or yi < pts[xi]:
-                pts[xi] = yi
-        if end == n:
-            break
-        start += stride
-
-    xs = np.array(sorted(pts.keys()))
-    ys = np.array([pts[k] for k in xs])
-    return xs, ys
-
-
-def _pick_k_lowest_points(cand_x, cand_y, n, k):
-    """Keep the lowest candidate point in each of k equal time-bins (the
-    nearest candidate if a bin is empty), so the chosen points stay spread
-    across the whole recording instead of clustering in one region."""
-    edges = np.linspace(0, n, k + 1)
-    chosen_x, chosen_y = [], []
-    for i in range(k):
-        lo, hi = edges[i], edges[i + 1]
-        mask = (cand_x >= lo) & (cand_x < hi if i < k - 1 else cand_x <= hi)
-        if mask.any():
-            sub_x, sub_y = cand_x[mask], cand_y[mask]
-            j = np.argmin(sub_y)
-            chosen_x.append(sub_x[j])
-            chosen_y.append(sub_y[j])
-        else:
-            center = (lo + hi) / 2
-            j = np.argmin(np.abs(cand_x - center))
-            chosen_x.append(cand_x[j])
-            chosen_y.append(cand_y[j])
-
-    # Without an anchor near the very start/end, np.interp flat-extrapolates
-    # the baseline from the nearest chosen point, silently absorbing any real
-    # trend at the edges into the "after" signal instead of the baseline.
-    # Anchor each edge with the lowest genuine candidate within a small
-    # boundary window -- not simply the raw edge sample -- so a single noisy
-    # point at x=0 or x=n-1 can't single-handedly set the baseline.
-    boundary = max(1, n // 10)
-    if min(chosen_x) > boundary:
-        left_mask = cand_x < boundary
-        if left_mask.any():
-            j = np.argmin(cand_y[left_mask])
-            chosen_x.append(cand_x[left_mask][j])
-            chosen_y.append(cand_y[left_mask][j])
-    if max(chosen_x) < (n - 1) - boundary:
-        right_mask = cand_x > (n - 1) - boundary
-        if right_mask.any():
-            j = np.argmin(cand_y[right_mask])
-            chosen_x.append(cand_x[right_mask][j])
-            chosen_y.append(cand_y[right_mask][j])
-
-    order = np.argsort(chosen_x)
-    cx = np.array(chosen_x)[order]
-    cy = np.array(chosen_y)[order]
-    cx, uniq_idx = np.unique(cx, return_index=True)
-    return cx, cy[uniq_idx]
-
-
 def convex_envelope_lowest_points(data_sel, n_points=6):
-    """Return the (x, y) genuine lowest points used to build the Convex
-    Envelope baseline for a 1-D signal -- exposed separately so callers can
-    plot them alongside the signal."""
+    """Return the (x, y) of the signal's single lowest point -- the only
+    point Convex Envelope smoothing actually subtracts -- exposed
+    separately so callers can plot it alongside the signal. n_points is
+    accepted for backwards compatibility with callers/UI but has no effect:
+    there is always exactly one baseline point (the minimum)."""
     y = np.asarray(data_sel, dtype=float)
-    n = len(y)
-    cand_x, cand_y = _collect_genuine_lowest_points(y)
-    k = max(2, min(n_points, len(cand_x)))
-    return _pick_k_lowest_points(cand_x, cand_y, n, k)
+    finite = np.isfinite(y)
+    if not finite.any():
+        return np.array([]), np.array([])
+    idx = np.flatnonzero(finite)[np.argmin(y[finite])]
+    return np.array([idx]), np.array([y[idx]])
 
 
 def _convex_envelope_detrend_signal(data_sel, n_points=6):
-    """De-trend by subtracting a baseline built from a handful of the
-    signal's genuine lowest points (found via local convexity, so none of
-    them can fall inside a peak), connected piecewise-linearly.
-
-    Using few, well-spread key points -- rather than one straight line --
-    lets each flat, non-peak segment settle near its own level instead of
-    being bridged by a single tilted line, while leaving peaks untouched.
-    Subtraction (rather than dividing by the baseline) keeps this numerically
-    stable even when the signal's lowest points are close to zero.
+    """Level the signal by subtracting its own minimum, so the lowest point
+    sits at 0 and every other point shifts down by that same constant --
+    the shape and relative differences between points are left completely
+    untouched, only the vertical reference changes. n_points is accepted
+    for backwards compatibility with callers/UI but has no effect.
     """
     y = np.asarray(data_sel, dtype=float)
-    x = np.arange(len(y))
-
-    px, py = convex_envelope_lowest_points(y, n_points=n_points)
-
-    baseline = np.interp(x, px, py)
-    return y - baseline
+    finite = y[np.isfinite(y)]
+    if finite.size == 0:
+        return y
+    return y - finite.min()
 
 
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,
