@@ -134,7 +134,7 @@ def pick_files_and_sheets(parent):
     return _select_sheets_dialog(parent, file_sheet_map)
 
 
-def load_selected_sheets(selection, progress_callback=None):
+def load_selected_sheets(selection, progress_callback=None, error_callback=None):
     """
     Carga cada hoja (filepath, sheet_name) de 'selection' en un dataset:
         {'file': filepath, 'sheet': sheet_name, 'label': 'archivo - hoja',
@@ -142,6 +142,12 @@ def load_selected_sheets(selection, progress_callback=None):
 
     progress_callback(done, total, filepath, sheet_name), si se da, se llama
     después de cargar cada hoja para poder actualizar una barra de progreso.
+
+    error_callback(filepath, sheet_name, exception), si se da, se llama en
+    vez de mostrar el messagebox de error directamente - para cuando esta
+    función corre en un hilo aparte del principal (donde no es seguro crear
+    ventanas de Tk directamente) y quien llama prefiere reenviar el error al
+    hilo principal él mismo.
     """
     datasets = []
     total = len(selection)
@@ -149,10 +155,13 @@ def load_selected_sheets(selection, progress_callback=None):
         try:
             df = _load_sheet_dataframe(filepath, sheet)
         except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"No se pudo cargar la hoja '{sheet}' de '{os.path.basename(filepath)}':\n{e}"
-            )
+            if error_callback:
+                error_callback(filepath, sheet, e)
+            else:
+                messagebox.showerror(
+                    "Error",
+                    f"No se pudo cargar la hoja '{sheet}' de '{os.path.basename(filepath)}':\n{e}"
+                )
             df = None
 
         if df is not None and not df.empty:
