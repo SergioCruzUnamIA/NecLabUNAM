@@ -2886,14 +2886,15 @@ class NecLabApp:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
     def _save_multi_xls_smoothed_data(self):
-        """Guarda, en un solo archivo .xlsx, todas las columnas comunes ya
-        interpoladas y - si 'Smoothing' está activo - suavizadas con Convex
-        Envelope, para cada hoja cargada. Los datos de cada hoja se apilan
-        uno debajo del otro en una sola hoja de cálculo, separados por 20
-        filas en blanco, en vez de una hoja de Excel distinta por cada una.
-        A diferencia de lo que se ve en la gráfica superior, esto exporta
-        todas las columnas (no solo la seleccionada) y sin normalizar, en
-        su escala original. El procesamiento y guardado corren en un hilo
+        """Guarda, en un solo archivo .xlsx, todas las columnas comunes con
+        exactamente el mismo procesamiento que se ve en la gráfica superior
+        (interpoladas, normalizadas según 'multi_xls_norm_mode_var' y - si
+        'Smoothing' está activo - suavizadas con Convex Envelope), para cada
+        hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
+        una sola hoja de cálculo, separados por 20 filas en blanco, en vez de
+        una hoja de Excel distinta por cada una. A diferencia de la gráfica,
+        que solo muestra la columna seleccionada, esto exporta todas las
+        columnas comunes. El procesamiento y guardado corren en un hilo
         aparte (ver _run_with_progress_window) para que la ventana de
         progreso no se quede sin responder con archivos grandes."""
         if not self.multi_xls_datasets or not self.multi_xls_common_columns:
@@ -2915,6 +2916,7 @@ class NecLabApp:
         # the worker only ever touches these plain Python/pandas values.
         datasets = list(self.multi_xls_datasets)
         common_columns = list(self.multi_xls_common_columns)
+        norm_mode = self.multi_xls_norm_mode_var.get()
         smoothing_on = self.multi_xls_smoothing_var.get()
         try:
             smoothing_points = self.multi_xls_smoothing_points_var.get()
@@ -2926,15 +2928,60 @@ class NecLabApp:
 
             gap_rows = 20
             n_steps = len(datasets) + 1  # +1 for the final write step
+
+            # Precompute the same divisors _compute_multi_xls_series uses,
+            # so the exported values match the plot exactly for every
+            # normalization mode - not just the column currently on screen.
+            column_global_min = {}
+            if norm_mode == 'column_global':
+                for col_name in common_columns:
+                    pooled = []
+                    for ds in datasets:
+                        if col_name in ds['df'].columns:
+                            v = ds['df'][col_name].to_numpy(dtype=float)
+                            pooled.append(v[np.isfinite(v)])
+                    if pooled:
+                        pooled = np.concatenate(pooled)
+                        if pooled.size:
+                            column_global_min[col_name] = pooled.min()
+
+            all_global_min = None
+            if norm_mode == 'all_global':
+                pooled = [ds['df'].to_numpy(dtype=float) for ds in datasets]
+                finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
+                if finite.size:
+                    all_global_min = finite.min()
+
             blocks = []
             for i, ds in enumerate(datasets):
                 report_progress(i, n_steps, f"Procesando {ds['label']}  ({i + 1}/{len(datasets)})")
+
+                sheet_min = None
+                if norm_mode == 'sheet':
+                    all_values = ds['df'].to_numpy(dtype=float)
+                    finite = all_values[np.isfinite(all_values)]
+                    sheet_min = finite.min() if finite.size else None
+
                 out_cols = {}
                 for col_name in common_columns:
                     if col_name not in ds['df'].columns:
                         continue
                     values = ds['df'][col_name].to_numpy(dtype=float)
                     values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+
+                    if norm_mode == 'sheet':
+                        divisor = sheet_min
+                    elif norm_mode == 'column_global':
+                        divisor = column_global_min.get(col_name)
+                    elif norm_mode == 'all_global':
+                        divisor = all_global_min
+                    else:  # 'local'
+                        finite = values[np.isfinite(values)]
+                        divisor = finite.min() if finite.size else None
+
+                    if divisor is not None and divisor != 0:
+                        values = values / divisor
+
                     if smoothing_on:
                         from peak_functions import _convex_envelope_detrend_signal
                         values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
