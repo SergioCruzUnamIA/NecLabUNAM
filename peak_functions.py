@@ -322,6 +322,10 @@ def _convex_envelope_detrend_signal(data_sel, n_points=6):
     being bridged by a single tilted line, while leaving peaks untouched.
     Subtraction (rather than dividing by the baseline) keeps this numerically
     stable even when the signal's lowest points are close to zero.
+
+    The signal's own lowest point (the minimum of the baseline points used)
+    is added back after subtraction, so the result keeps sitting near the
+    original floor level instead of collapsing to zero.
     """
     y = np.asarray(data_sel, dtype=float)
     x = np.arange(len(y))
@@ -329,7 +333,7 @@ def _convex_envelope_detrend_signal(data_sel, n_points=6):
     px, py = convex_envelope_lowest_points(y, n_points=n_points)
 
     baseline = np.interp(x, px, py)
-    return y - baseline
+    return y - baseline + py.min()
 
 
 def peak_caller(data, roi_index, rise_percent, fall_percent, max_lookback, max_lookahead,
