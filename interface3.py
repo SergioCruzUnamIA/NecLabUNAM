@@ -2322,10 +2322,12 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
 
     def _on_multi_xls_smoothing_toggle(self):
-        """Redibuja la gráfica superior con el smoothing Convex Envelope
-        aplicado (o removido), o con el número de puntos actualizado."""
+        """Redibuja ambas gráficas (línea y heatmap) con el smoothing
+        Convex Envelope aplicado (o removido), o con el número de puntos
+        actualizado."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
+        self._draw_multi_xls_heatmap()
 
     def _open_multi_xls_smoothing_points_dialog(self):
         """Diálogo para ajustar el número de puntos usado por el smoothing
@@ -2380,6 +2382,27 @@ class NecLabApp:
             return values
         from peak_functions import _convex_envelope_detrend_signal
         return _convex_envelope_detrend_signal(values, n_points=n_points)
+
+    def _smooth_multi_xls_matrix(self, m):
+        """Apply _smooth_multi_xls_signal to every data column of a
+        normalized sheet matrix (samples x columns), for the heatmap - so
+        it matches the top line plot when 'Smoothing' is on. NaNs (missing
+        samples) are interpolated before smoothing, since the Convex
+        Envelope algorithm needs a finite series, then restored afterward."""
+        if not self.multi_xls_smoothing_var.get():
+            return m
+        import pandas as pd
+        out = np.array(m, dtype=float, copy=True)
+        for c in range(m.shape[1]):
+            col = m[:, c]
+            nan_mask = ~np.isfinite(col)
+            if nan_mask.all():
+                continue
+            filled = pd.Series(col).interpolate(limit_direction='both').to_numpy() if nan_mask.any() else col
+            smoothed = self._smooth_multi_xls_signal(filled)
+            smoothed[nan_mask] = np.nan
+            out[:, c] = smoothed
+        return out
 
     def _on_multi_xls_norm_mode_toggle(self):
         """Redibuja ambas gráficas con el modo de normalización elegido:
@@ -2667,13 +2690,23 @@ class NecLabApp:
           agrupando todas las hojas cargadas.
         - 'all_global': un solo mínimo para absolutamente todo lo cargado.
 
-        Cacheado por (datasets, modo de normalización, escala compartida) -
-        nada de esto cambia con el tamaño del panel, así que un redibujado
-        disparado solo por resize reutiliza el resultado en vez de
-        reprocesar todas las hojas."""
+        Si 'Smoothing' está activo, cada fila (columna de datos) se pasa
+        además por el mismo Convex Envelope que usa la gráfica de líneas
+        de arriba (_smooth_multi_xls_signal), para que el heatmap
+        coincida con lo que muestra esa gráfica.
+
+        Cacheado por (datasets, modo de normalización, escala compartida,
+        smoothing, puntos de smoothing) - nada de esto cambia con el
+        tamaño del panel, así que un redibujado disparado solo por resize
+        reutiliza el resultado en vez de reprocesar todas las hojas."""
         mode = self.multi_xls_norm_mode_var.get()
         shared_scale = self.multi_xls_shared_scale_var.get()
-        cache_key = (id(self.multi_xls_datasets), mode, shared_scale)
+        smoothing_on = self.multi_xls_smoothing_var.get()
+        try:
+            smoothing_points = self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            smoothing_points = None
+        cache_key = (id(self.multi_xls_datasets), mode, shared_scale, smoothing_on, smoothing_points)
         if self._multi_xls_heatmap_matrices_cache_key == cache_key:
             return self._multi_xls_heatmap_matrices_cache
 
@@ -2692,7 +2725,7 @@ class NecLabApp:
                         col_mins = np.where(np.isfinite(m), m, np.nan)
                         col_mins = np.nanmin(col_mins, axis=0, keepdims=True)
                     col_mins = np.where(np.isfinite(col_mins) & (col_mins != 0), col_mins, 1.0)
-                    matrices.append((m / col_mins).T)
+                    matrices.append(self._smooth_multi_xls_matrix(m / col_mins).T)
             elif mode == 'column_global':
                 # Each data column (by position) normalized against the
                 # minimum of that same column position, pooled across
@@ -2708,16 +2741,16 @@ class NecLabApp:
                             pooled_min[c] = v if np.isnan(pooled_min[c]) else min(pooled_min[c], v)
                 pooled_min = np.where(np.isfinite(pooled_min) & (pooled_min != 0), pooled_min, 1.0)
                 for m in raw_matrices:
-                    matrices.append((m / pooled_min[:m.shape[1]]).T)
+                    matrices.append(self._smooth_multi_xls_matrix(m / pooled_min[:m.shape[1]]).T)
             elif mode == 'all_global':
                 all_min = finite_vals.min()
                 if all_min == 0:
                     all_min = 1.0
-                matrices = [(m / all_min).T for m in raw_matrices]
+                matrices = [self._smooth_multi_xls_matrix(m / all_min).T for m in raw_matrices]
             else:  # 'sheet' (default / previous behavior)
                 for m in raw_matrices:
                     sheet_min = float(m[np.isfinite(m)].min())
-                    matrices.append((m / sheet_min).T)
+                    matrices.append(self._smooth_multi_xls_matrix(m / sheet_min).T)
 
             per_sheet_ranges = []
             for m in matrices:
