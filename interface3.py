@@ -2814,29 +2814,15 @@ class NecLabApp:
         if filename:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
-    @staticmethod
-    def _safe_excel_sheet_name(name, used_names):
-        """Sanea 'name' para usarlo como nombre de hoja de Excel (máx. 31
-        caracteres, sin : \\ / ? * [ ]) y evita colisiones con nombres ya
-        usados en el mismo archivo agregando un sufijo numérico."""
-        invalid = set(':\\/?*[]')
-        cleaned = ''.join(c for c in name if c not in invalid).strip() or 'Sheet'
-        cleaned = cleaned[:31]
-        base, candidate, i = cleaned, cleaned, 1
-        while candidate in used_names:
-            suffix = f'_{i}'
-            candidate = base[:31 - len(suffix)] + suffix
-            i += 1
-        used_names.add(candidate)
-        return candidate
-
     def _save_multi_xls_smoothed_data(self):
-        """Guarda, en un archivo .xlsx con una hoja por cada archivo/hoja
-        cargado (mismo formato que al cargar los datos), todas las columnas
-        comunes ya interpoladas y - si 'Smoothing' está activo - suavizadas
-        con Convex Envelope. A diferencia de lo que se ve en la gráfica
-        superior, esto exporta todas las columnas (no solo la seleccionada)
-        y sin normalizar, en su escala original."""
+        """Guarda, en un solo archivo .xlsx, todas las columnas comunes ya
+        interpoladas y - si 'Smoothing' está activo - suavizadas con Convex
+        Envelope, para cada hoja cargada. Los datos de cada hoja se apilan
+        uno debajo del otro en una sola hoja de cálculo, separados por 20
+        filas en blanco, en vez de una hoja de Excel distinta por cada una.
+        A diferencia de lo que se ve en la gráfica superior, esto exporta
+        todas las columnas (no solo la seleccionada) y sin normalizar, en
+        su escala original."""
         if not self.multi_xls_datasets or not self.multi_xls_common_columns:
             messagebox.showwarning("Sin Datos", "Carga datos primero.")
             return
@@ -2852,20 +2838,26 @@ class NecLabApp:
         if not filename:
             return
 
-        used_sheet_names = set()
-        with pd.ExcelWriter(filename) as writer:
-            for ds in self.multi_xls_datasets:
-                out_cols = {}
-                for col_name in self.multi_xls_common_columns:
-                    if col_name not in ds['df'].columns:
-                        continue
-                    values = ds['df'][col_name].to_numpy(dtype=float)
-                    values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
-                    values = self._smooth_multi_xls_signal(values)
-                    out_cols[col_name] = values
-                sheet_df = pd.DataFrame(out_cols)
-                sheet_name = self._safe_excel_sheet_name(ds['label'], used_sheet_names)
-                sheet_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+        gap_rows = 20
+        blocks = []
+        for ds in self.multi_xls_datasets:
+            out_cols = {}
+            for col_name in self.multi_xls_common_columns:
+                if col_name not in ds['df'].columns:
+                    continue
+                values = ds['df'][col_name].to_numpy(dtype=float)
+                values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+                values = self._smooth_multi_xls_signal(values)
+                out_cols[col_name] = values
+            blocks.append(pd.DataFrame(out_cols))
+
+        stacked = []
+        for i, block in enumerate(blocks):
+            stacked.append(block)
+            if i < len(blocks) - 1:
+                stacked.append(pd.DataFrame(np.nan, index=range(gap_rows), columns=block.columns))
+        combined = pd.concat(stacked, ignore_index=True)
+        combined.to_excel(filename, index=False, header=False)
 
         messagebox.showinfo("Saved", f"Data saved to:\n{filename}")
 
