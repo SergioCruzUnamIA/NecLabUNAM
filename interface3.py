@@ -2392,12 +2392,14 @@ class NecLabApp:
 
     def _compute_multi_xls_series(self, col_name):
         """Para cada hoja cargada que tenga la columna 'col_name', devuelve
-        (label, values) ya interpolados, normalizados y suavizados - el
+        (label, values) ya interpolados, suavizados y normalizados - el
         mismo procesamiento que dibuja la gráfica superior, factorizado
-        aparte para que el caché lo pueda reutilizar. El divisor de la
-        normalización depende de multi_xls_norm_mode_var:
-        - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
-          usa su propio mínimo).
+        aparte para que el caché lo pueda reutilizar. El smoothing (si está
+        activo) se aplica antes de la normalización, así que el divisor de
+        modo 'local' se calcula sobre la señal ya suavizada. El divisor de
+        la normalización depende de multi_xls_norm_mode_var:
+        - 'local': mínimo de esa columna (ya suavizada), dentro de cada
+          hoja (cada hoja usa su propio mínimo).
         - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
           cada hoja (mismo criterio que el heatmap).
         - 'column_global': mínimo de esa columna, agrupando todas las
@@ -2450,6 +2452,8 @@ class NecLabApp:
             if len(values) == 0:
                 continue
 
+            values = self._smooth_multi_xls_signal(values)
+
             if mode == 'sheet':
                 all_values = ds['df'].to_numpy(dtype=float)
                 finite = all_values[np.isfinite(all_values)]
@@ -2464,7 +2468,6 @@ class NecLabApp:
 
             if divisor is not None and divisor != 0:
                 values = values / divisor
-            values = self._smooth_multi_xls_signal(values)
             series.append((ds['label'], values))
 
         self._multi_xls_series_cache_key = cache_key
@@ -2888,9 +2891,9 @@ class NecLabApp:
     def _save_multi_xls_smoothed_data(self):
         """Guarda, en un solo archivo .xlsx, todas las columnas comunes con
         exactamente el mismo procesamiento que se ve en la gráfica superior
-        (interpoladas, normalizadas según 'multi_xls_norm_mode_var' y - si
-        'Smoothing' está activo - suavizadas con Convex Envelope), para cada
-        hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
+        (interpoladas, suavizadas con Convex Envelope - si 'Smoothing' está
+        activo - y luego normalizadas según 'multi_xls_norm_mode_var'), para
+        cada hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
         una sola hoja de cálculo, separados por 20 filas en blanco, en vez de
         una hoja de Excel distinta por cada una. A diferencia de la gráfica,
         que solo muestra la columna seleccionada, esto exporta todas las
@@ -2969,6 +2972,10 @@ class NecLabApp:
                     values = ds['df'][col_name].to_numpy(dtype=float)
                     values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
 
+                    if smoothing_on:
+                        from peak_functions import _convex_envelope_detrend_signal
+                        values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
+
                     if norm_mode == 'sheet':
                         divisor = sheet_min
                     elif norm_mode == 'column_global':
@@ -2982,9 +2989,6 @@ class NecLabApp:
                     if divisor is not None and divisor != 0:
                         values = values / divisor
 
-                    if smoothing_on:
-                        from peak_functions import _convex_envelope_detrend_signal
-                        values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
                     out_cols[col_name] = values
                 blocks.append(pd.DataFrame(out_cols))
 
