@@ -16,3 +16,7 @@ dependencies:
   - scipy
   - openpyxl
   - xlrd
+  - xlsxwriter
+  - pip
+  - pip:
+      - customtkinter
