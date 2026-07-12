@@ -141,13 +141,10 @@ class NecLabApp:
         self.smoothing_points_var = tk.IntVar(value=2)
         self.show_smoothing_points_var = tk.BooleanVar(value=True)
         self._mouse_click = False       # flag to suppress double-redraw on mouse click
-        self.btn_save_data = None
-        self.btn_save_corr = None
-        self.btn_save_peaks = None
         self.peak_method_combo = None
-        self.smoothing_check = None
         self.smoothing_points_spinbox = None
-        self.show_smoothing_points_check = None
+        self.data_menu_vista = None
+        self.data_menu_guardar = None
         self.peak_method_params = {}  # saved params per method name
         self.plot_mid_frame = None
         self._mid_fig = None
@@ -531,14 +528,53 @@ class NecLabApp:
     
     def _create_data_visualization_layout(self):
         """Crea el layout para visualización de datos."""
-        Grid.rowconfigure(self.data_tab, 0, weight=1)
+        Grid.rowconfigure(self.data_tab, 0, weight=0)
+        Grid.rowconfigure(self.data_tab, 1, weight=1)
         Grid.columnconfigure(self.data_tab, 0, weight=0)
         Grid.columnconfigure(self.data_tab, 1, weight=1)
+
+        # Local menu bar, docked at the top of the tab (same pattern as the
+        # Datos Multiples tab's local menubar), grouping the Smoothing/Show
+        # points/Show Labels checkboxes and the Save Data/Correlation/Peaks
+        # actions that used to be stacked individually in the sidebar.
+        menubar = tk.Frame(self.data_tab, bg='#f5f5f5', height=26,
+                           highlightbackground=_C['border'], highlightthickness=1)
+        menubar.grid(row=0, column=0, columnspan=2, sticky='ew')
+        menubar.grid_propagate(False)
+
+        def add_tab_menu(label, build):
+            mb = tk.Menubutton(menubar, text=label, font=('Segoe UI', 9),
+                                bg='#f5f5f5', activebackground='#dbeafe',
+                                relief='flat', bd=0, padx=8, pady=3)
+            menu = tk.Menu(mb, tearoff=0, font=('Segoe UI', 9))
+            build(menu)
+            mb['menu'] = menu
+            mb.pack(side='left')
+            return menu
+
+        def build_vista_menu(m):
+            m.add_checkbutton(label="Smoothing", variable=self.smoothing_var,
+                               command=self._on_smoothing_toggle, state='disabled')
+            m.add_checkbutton(label="Show points", variable=self.show_smoothing_points_var,
+                               command=self._on_smoothing_toggle, state='disabled')
+            m.add_separator()
+            m.add_checkbutton(label="Show Labels (Correlación)", variable=self.show_corr_labels_var,
+                               command=self._update_correlation_display)
+
+        def build_guardar_menu(m):
+            m.add_command(label="Save Data Image...", command=self._save_data_image, state='disabled')
+            m.add_command(label="Save Correlation...", command=self._save_correlation_image, state='disabled')
+            m.add_separator()
+            m.add_command(label="Save Correlation Data...", command=self._save_correlation_data, state='disabled')
+            m.add_command(label="Save Peaks CSV...", command=self._save_peaks_csv, state='disabled')
+
+        self.data_menu_vista = add_tab_menu("Vista", build_vista_menu)
+        self.data_menu_guardar = add_tab_menu("Guardar", build_guardar_menu)
 
         # ── Sidebar ──────────────────────────────────────────────────────────
         sidebar_frame = tk.Frame(self.data_tab, bg=_C['panel'], width=250,
                                  highlightbackground=_C['border'], highlightthickness=1)
-        sidebar_frame.grid(row=0, column=0, sticky='nsew', padx=(8, 0), pady=8)
+        sidebar_frame.grid(row=1, column=0, sticky='nsew', padx=(8, 0), pady=8)
         sidebar_frame.grid_propagate(False)
         sidebar_frame.columnconfigure(0, weight=1)
 
@@ -598,26 +634,8 @@ class NecLabApp:
         smooth_frame.columnconfigure(0, weight=1)
         row += 1
 
-        self.smoothing_check = tk.Checkbutton(
-            smooth_frame, text="Smoothing", variable=self.smoothing_var,
-            command=self._on_smoothing_toggle,
-            bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
-            activebackground=_C['panel'], selectcolor=_C['panel'],
-            state=DISABLED
-        )
-        self.smoothing_check.grid(row=0, column=0, sticky='w')
-
-        self.show_smoothing_points_check = tk.Checkbutton(
-            smooth_frame, text="Show points", variable=self.show_smoothing_points_var,
-            command=self._on_smoothing_toggle,
-            bg=_C['panel'], fg=_C['text'], font=('Arial', 10),
-            activebackground=_C['panel'], selectcolor=_C['panel'],
-            state=DISABLED
-        )
-        self.show_smoothing_points_check.grid(row=0, column=1, sticky='e')
-
         points_frame = tk.Frame(smooth_frame, bg=_C['panel'])
-        points_frame.grid(row=1, column=0, sticky='w')
+        points_frame.grid(row=0, column=0, sticky='w')
         tk.Label(points_frame, text="Points:", bg=_C['panel'],
                  fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
         self.smoothing_points_spinbox = ttk.Spinbox(
@@ -635,15 +653,8 @@ class NecLabApp:
             sidebar_frame, textvariable=self.corr_method_var,
             values=['pearson', 'kendall', 'spearman'], state='readonly', width=15
         )
-        corr_method_combo.grid(row=row, column=0, padx=10, pady=(2, 2), sticky='w')
+        corr_method_combo.grid(row=row, column=0, padx=10, pady=(2, 8), sticky='w')
         corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
-        row += 1
-
-        tk.Checkbutton(sidebar_frame, text="Show Labels", variable=self.show_corr_labels_var,
-                       command=self._update_correlation_display,
-                       bg=_C['panel'], fg=_C['text'], selectcolor=_C['card'],
-                       activebackground=_C['panel'], font=('Arial', 9)).grid(
-            row=row, column=0, sticky='w', padx=10, pady=(0, 4))
         row += 1
 
         # ── Selection ──
@@ -685,55 +696,14 @@ class NecLabApp:
             border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
             state='disabled', command=self._remove_from_selection
         )
-        self.btn_remove_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 4))
+        self.btn_remove_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 10))
         row += 1
-
-        # ── Save buttons ──
-        tk.Frame(sidebar_frame, bg=_C['border'], height=1).grid(
-            row=row, column=0, sticky='ew', padx=10, pady=4
-        )
-        row += 1
-
-        self.btn_save_data = ctk.CTkButton(
-            sidebar_frame, text="Save Data Image", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_data_image
-        )
-        self.btn_save_data.grid(row=row, column=0, sticky='ew', padx=10, pady=(2, 2))
-        row += 1
-
-        self.btn_save_corr = ctk.CTkButton(
-            sidebar_frame, text="Save Correlation", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_correlation_image
-        )
-        self.btn_save_corr.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
-        row += 1
-
-        self.btn_save_corr_data = ctk.CTkButton(
-            sidebar_frame, text="Save Correlation Data", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_correlation_data
-        )
-        self.btn_save_corr_data.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
-        row += 1
-
-        self.btn_save_peaks = ctk.CTkButton(
-            sidebar_frame, text="Save Peaks CSV", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._save_peaks_csv
-        )
-        self.btn_save_peaks.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 10))
 
         # Right side - main plot area
         self.main_plot_frame = tk.Frame(self.data_tab, bg=_C['panel'],
                                          highlightbackground=_C['border'],
                                          highlightthickness=1)
-        self.main_plot_frame.grid(row=0, column=1, sticky='nsew', padx=8, pady=8)
+        self.main_plot_frame.grid(row=1, column=1, sticky='nsew', padx=8, pady=8)
 
         tk.Label(self.main_plot_frame, text="Load a data file to start",
                  font=('Arial', 18), bg=_C['panel'], fg=_C['sub']).pack(
@@ -813,8 +783,8 @@ class NecLabApp:
                 text="Add 2+ columns to Selection to see correlation",
                 font=('Arial', 12), bg=_C['panel'], fg=_C['sub']
             ).pack(fill=tk.BOTH, expand=True)
-            if hasattr(self, 'btn_save_corr_data'):
-                self.btn_save_corr_data.configure(state='disabled')
+            if self.data_menu_guardar is not None:
+                self.data_menu_guardar.entryconfigure("Save Correlation Data...", state='disabled')
             return
 
         import pandas as pd
@@ -825,8 +795,8 @@ class NecLabApp:
         df = pd.DataFrame(data_sel, columns=col_labels)
         corr = df.corr(method=method)
         self._corr_df = corr
-        if hasattr(self, 'btn_save_corr_data'):
-            self.btn_save_corr_data.configure(state='normal')
+        if self.data_menu_guardar is not None:
+            self.data_menu_guardar.entryconfigure("Save Correlation Data...", state='normal')
 
         self._corr_fig, ax = plt.subplots()
         cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
@@ -1197,12 +1167,12 @@ class NecLabApp:
         if self.loaded_data is not None:
             self.btn_add_sel.configure(state='normal')
             self.btn_remove_sel.configure(state='normal')
-            self.btn_save_data.configure(state='normal')
-            self.btn_save_corr.configure(state='normal')
-            self.btn_save_peaks.configure(state='normal')
+            self.data_menu_guardar.entryconfigure("Save Data Image...", state='normal')
+            self.data_menu_guardar.entryconfigure("Save Correlation...", state='normal')
+            self.data_menu_guardar.entryconfigure("Save Peaks CSV...", state='normal')
             self.peak_method_combo.config(state='readonly')
-            self.smoothing_check.configure(state='normal')
-            self.show_smoothing_points_check.configure(state='normal')
+            self.data_menu_vista.entryconfigure("Smoothing", state='normal')
+            self.data_menu_vista.entryconfigure("Show points", state='normal')
             self.menu_visual.entryconfig(
                 "Dendograma",
                 command=self._run_dendogram_on_selection,
