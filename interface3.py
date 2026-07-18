@@ -15,6 +15,7 @@ from PIL import Image, ImageTk, ImageOps
 import numpy as np
 from functools import partial
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import sys
 import threading
@@ -44,6 +45,12 @@ _MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
 _MULTI_XLS_BOTTOM_IN_NOLABELS = 0.22  # no labels: just the tick marks
 _MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
 _MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
+
+# 'jet' with black prepended at the very bottom of the range, so the lowest
+# values in the Datos Multiples heatmap render as black instead of jet's dark
+# blue - a smooth gradient (black -> blue -> cyan -> green -> yellow -> red).
+_MULTI_XLS_HEATMAP_CMAP = mcolors.LinearSegmentedColormap.from_list(
+    'jet_black', np.vstack(([[0, 0, 0, 1]], plt.cm.jet(np.linspace(0, 1, 256)))))
 
 
 def _multi_xls_axes_margins(fig_width, fig_height, show_labels, reserve_colorbar):
@@ -2909,7 +2916,7 @@ class NecLabApp:
                 im_vmin, im_vmax = vmin, vmax
             else:
                 im_vmin, im_vmax = sheet_range
-            im = ax.imshow(matrix, aspect='auto', cmap='jet', vmin=im_vmin, vmax=im_vmax,
+            im = ax.imshow(matrix, aspect='auto', cmap=_MULTI_XLS_HEATMAP_CMAP, vmin=im_vmin, vmax=im_vmax,
                            extent=(offset, offset + n_samples, n_cols, 0))
             if offset > 0:
                 ax.axvline(offset, color='white', linewidth=1.5)
