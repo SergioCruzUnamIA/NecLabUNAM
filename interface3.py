@@ -162,12 +162,11 @@ class NecLabApp:
         # above); (min, max) = manual override set via "Límites de Color
         # (Heatmap)...", applied to every sheet's heatmap image.
         self.multi_xls_heatmap_manual_range = None
-        # 'local': min of this column, within each sheet. 'sheet': min
-        # across all columns of each sheet (matches the heatmap's
+        # 'local': min of this column, within each sheet (default). 'sheet':
+        # min across all columns of each sheet (matches the heatmap's
         # normalization). 'column_global': min of this column pooled across
-        # every loaded sheet, so all sheets share one divisor (default, so
-        # a column is directly comparable across every loaded file).
-        self.multi_xls_norm_mode_var = tk.StringVar(value='column_global')
+        # every loaded sheet, so all sheets share one divisor.
+        self.multi_xls_norm_mode_var = tk.StringVar(value='local')
         self.multi_xls_xlim = None
         self.multi_xls_ylim = None
         self.multi_xls_plot_frame = None
