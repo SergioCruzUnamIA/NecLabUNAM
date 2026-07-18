@@ -157,7 +157,7 @@ class NecLabApp:
         self.multi_xls_show_labels_var = tk.BooleanVar(value=False)
         self.multi_xls_smoothing_var = tk.BooleanVar(value=True)
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
-        self.multi_xls_shared_scale_var = tk.BooleanVar(value=False)
+        self.multi_xls_shared_scale_var = tk.BooleanVar(value=True)
         # None = auto (per-sheet or shared-scale range, per the checkbox
         # above); (min, max) = manual override set via "Límites de Color
         # (Heatmap)...", applied to every sheet's heatmap image.
