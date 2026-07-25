@@ -10,8 +10,19 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 
+_CSV_PSEUDO_SHEET = '(CSV)'
+
+
+def _is_csv_file(filepath):
+    return filepath.lower().endswith('.csv')
+
+
 def _read_sheet_names(filepath):
-    """Devuelve la lista de nombres de hojas (tabs) de un archivo Excel."""
+    """Devuelve la lista de nombres de hojas (tabs) de un archivo Excel. Un
+    archivo .csv no tiene hojas, así que se le asigna una única hoja
+    "pseudo" para que encaje en el mismo flujo de selección."""
+    if _is_csv_file(filepath):
+        return [_CSV_PSEUDO_SHEET]
     xl = pd.ExcelFile(filepath)
     return xl.sheet_names
 
@@ -92,12 +103,16 @@ def _select_sheets_dialog(parent, file_sheet_map):
 
 
 def _load_sheet_dataframe(filepath, sheet_name):
-    """Lee una hoja de Excel sin fila de encabezado: las hojas no tienen
-    nombres de columna, así que cada columna es una serie de datos
-    identificada únicamente por su posición (0, 1, 2, ...). Como todas las
-    hojas tienen el mismo número de columnas, esa posición es lo que hace
-    corresponder una columna de una hoja con la misma columna en otra."""
-    df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
+    """Lee una hoja de Excel (o un archivo .csv, tratado como su única
+    "hoja") sin fila de encabezado: no se asumen nombres de columna, así que
+    cada columna es una serie de datos identificada únicamente por su
+    posición (0, 1, 2, ...). Como todos los archivos cargados deben tener el
+    mismo número de columnas, esa posición es lo que hace corresponder una
+    columna de un archivo/hoja con la misma columna en otro."""
+    if _is_csv_file(filepath):
+        df = pd.read_csv(filepath, header=None)
+    else:
+        df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
     df = df.apply(pd.to_numeric, errors='coerce')
     df.columns = [str(c) for c in df.columns]
     return df
@@ -113,8 +128,9 @@ def pick_files_and_sheets(parent):
     """
     filenames = filedialog.askopenfilenames(
         parent=parent,
-        title="Abrir Multiples Archivos (.xls)",
-        filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+        title="Abrir Multiples Archivos (.xls / .csv)",
+        filetypes=[("Excel/CSV files", "*.xlsx *.xls *.csv"), ("Excel files", "*.xlsx *.xls"),
+                   ("CSV files", "*.csv"), ("All files", "*.*")]
     )
     if not filenames:
         return None

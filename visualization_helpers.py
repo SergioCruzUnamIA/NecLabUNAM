@@ -34,7 +34,8 @@ def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column
         parent=window,
         title="Open File",
         initialdir=project_root,
-        filetypes=[("Data files", "*.npy;*.csv"), ("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")]
+        filetypes=[("Data files", "*.npy;*.csv;*.xlsx;*.xls"), ("Numpy files", "*.npy"),
+                   ("CSV files", "*.csv"), ("Excel files", "*.xlsx;*.xls"), ("All files", "*.*")]
     )
 
     if not filename:
@@ -42,9 +43,35 @@ def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column
 
     loaded_filename = filename
     column_names_list = None
+    sheet_name = None
 
     if filename.lower().endswith('.csv'):
         df = pd.read_csv(filename)
+        column_names = df.columns.tolist()
+        if 'TIME' in column_names:
+            column_names.remove('TIME')
+        column_names_list = column_names
+
+        selected_roi_index = _show_roi_selection_dialog(window, column_names)
+        if selected_roi_index is None:
+            return
+        selected_roi_name = column_names[selected_roi_index]
+    elif filename.lower().endswith(('.xlsx', '.xls')):
+        try:
+            sheet_names = pd.ExcelFile(filename).sheet_names
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"No se pudo leer el archivo Excel:\n{e}")
+            return
+
+        if len(sheet_names) > 1:
+            sheet_name = _show_sheet_selection_dialog(window, sheet_names)
+            if sheet_name is None:
+                return
+        else:
+            sheet_name = sheet_names[0]
+
+        df = pd.read_excel(filename, sheet_name=sheet_name)
         column_names = df.columns.tolist()
         if 'TIME' in column_names:
             column_names.remove('TIME')
@@ -68,7 +95,7 @@ def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column
 
     set_file_info(loaded_filename, selected_roi_name)
 
-    data = normalize_data(filename)
+    data = normalize_data(filename, sheet_name=sheet_name)
     canvas = _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list, notebook)
 
     return canvas
@@ -142,8 +169,70 @@ def _show_roi_selection_dialog(parent, column_names):
     
     # Wait for dialog to close
     parent.wait_window(dialog)
-    
+
     return selected_index
+
+
+def _show_sheet_selection_dialog(parent, sheet_names):
+    """
+    Show a dialog for the user to select which sheet of an Excel workbook to load.
+    Returns the selected sheet name or None if cancelled.
+    """
+    dialog = Toplevel(parent)
+    dialog.title("Select Sheet")
+    dialog.geometry("400x500")
+    dialog.transient(parent)
+    dialog.grab_set()
+
+    selected_sheet = None
+
+    Label(dialog, text="Select which sheet to load:", font=('Arial', 12, 'bold')).pack(pady=10)
+
+    list_frame = Frame(dialog)
+    list_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
+
+    scrollbar = Scrollbar(list_frame)
+    scrollbar.pack(side=RIGHT, fill=Y)
+
+    listbox = Listbox(list_frame, yscrollcommand=scrollbar.set, font=('Arial', 10))
+    listbox.pack(side=LEFT, fill=BOTH, expand=True)
+    scrollbar.config(command=listbox.yview)
+
+    for name in sheet_names:
+        listbox.insert(END, name)
+
+    listbox.selection_set(0)
+    listbox.activate(0)
+
+    def on_ok():
+        nonlocal selected_sheet
+        selection = listbox.curselection()
+        if selection:
+            selected_sheet = sheet_names[selection[0]]
+            dialog.destroy()
+        else:
+            from tkinter import messagebox
+            messagebox.showwarning("No Selection", "Please select a sheet")
+
+    def on_cancel():
+        nonlocal selected_sheet
+        selected_sheet = None
+        dialog.destroy()
+
+    def on_double_click(event):
+        on_ok()
+
+    listbox.bind('<Double-Button-1>', on_double_click)
+
+    button_frame = Frame(dialog)
+    button_frame.pack(pady=10)
+
+    Button(button_frame, text="OK", command=on_ok, width=10).pack(side=LEFT, padx=5)
+    Button(button_frame, text="Cancel", command=on_cancel, width=10).pack(side=LEFT, padx=5)
+
+    parent.wait_window(dialog)
+
+    return selected_sheet
 
 
 def _plot_data_with_menu(data, window, canvas, menu_picos, column_names_list=None, notebook=None):

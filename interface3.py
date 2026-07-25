@@ -269,7 +269,7 @@ class NecLabApp:
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Abrir Datos (.npy / .csv)',
+            label='Abrir Datos (.npy / .csv / .xlsx)',
             command=self.open_visualization_data,
             state=NORMAL
         )
@@ -280,7 +280,7 @@ class NecLabApp:
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Abrir Multiples Archivos (.xls)',
+            label='Abrir Multiples Archivos (.xls / .csv)',
             command=self.open_multiple_xls_files,
             state=NORMAL
         )
@@ -1194,7 +1194,7 @@ class NecLabApp:
             self._run_peak_on_column()
     
     def _save_peaks_csv(self):
-        """Run peak detection on every selection column and save peak indices to CSV."""
+        """Run peak detection on every selection column and save peak indices to a CSV or Excel file."""
         method = self.peak_method_var.get()
         if method == 'None':
             messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
@@ -1214,7 +1214,7 @@ class NecLabApp:
 
         filename = asksaveasfilename(
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
             title="Save Peaks CSV"
         )
         if not filename:
@@ -1230,7 +1230,11 @@ class NecLabApp:
             flags[peaks] = 1
             data_dict[col_name] = flags
 
-        pd.DataFrame(data_dict).to_csv(filename, index=False)
+        df_peaks = pd.DataFrame(data_dict)
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            df_peaks.to_excel(filename, index=False, engine='xlsxwriter')
+        else:
+            df_peaks.to_csv(filename, index=False)
         messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _run_dendogram_on_selection(self):
@@ -1537,7 +1541,7 @@ class NecLabApp:
             self.dendo_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
     def _dendo_save_csv(self):
-        """Save dendrogram clustering data (labels + linkage matrix) to CSV."""
+        """Save dendrogram clustering data (labels + linkage matrix) to a CSV or Excel file."""
         if self.loaded_data is None:
             return
         from corr_dendo_functions import AgglomerativeClustering
@@ -1551,7 +1555,7 @@ class NecLabApp:
 
         filename = asksaveasfilename(
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
             title="Save Dendrogram CSV"
         )
         if not filename:
@@ -1572,11 +1576,16 @@ class NecLabApp:
         ]
         df_linkage = pd.DataFrame(linkage_rows)
 
-        with open(filename, 'w', newline='') as f:
-            f.write("# Cluster Labels\n")
-            df_labels.to_csv(f, index=False)
-            f.write("\n# Linkage Matrix\n")
-            df_linkage.to_csv(f, index=False)
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
+                df_labels.to_excel(writer, sheet_name='Cluster_Labels', index=False)
+                df_linkage.to_excel(writer, sheet_name='Linkage_Matrix', index=False)
+        else:
+            with open(filename, 'w', newline='') as f:
+                f.write("# Cluster Labels\n")
+                df_labels.to_csv(f, index=False)
+                f.write("\n# Linkage Matrix\n")
+                df_linkage.to_csv(f, index=False)
 
         messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
 
@@ -1587,8 +1596,9 @@ class NecLabApp:
     # ==================== DATOS MULTIPLES (XLS) TAB ====================
 
     def open_multiple_xls_files(self):
-        """Abre múltiples archivos .xls/.xlsx, deja elegir qué hojas cargar,
-        y muestra sus columnas de datos en la pestaña 'Datos Multiples'."""
+        """Abre múltiples archivos .xls/.xlsx/.csv, deja elegir qué hojas cargar
+        (un .csv cuenta como su única hoja), y muestra sus columnas de datos
+        en la pestaña 'Datos Multiples'."""
         selection = pick_files_and_sheets(self.root)
         if not selection:
             return
@@ -1788,7 +1798,7 @@ class NecLabApp:
             m.add_command(label="Save Heatmap Image...", state='disabled',
                           command=self._save_multi_xls_heatmap_image)
             m.add_separator()
-            m.add_command(label="Save Smoothed Data (XLSX, Multiple Sheets)...", state='disabled',
+            m.add_command(label="Save Smoothed Data (XLSX/CSV)...", state='disabled',
                           command=self._save_multi_xls_smoothed_data)
 
         def build_datos_menu(m):
@@ -2000,7 +2010,7 @@ class NecLabApp:
         if self.multi_xls_datasets:
             self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
             self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
-            self.multi_xls_menu_grafica.entryconfigure("Save Smoothed Data (XLSX, Multiple Sheets)...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Smoothed Data (XLSX/CSV)...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
             self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
@@ -2991,17 +3001,17 @@ class NecLabApp:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
     def _save_multi_xls_smoothed_data(self):
-        """Guarda, en un solo archivo .xlsx, todas las columnas comunes con
+        """Guarda, en un solo archivo .xlsx o .csv, todas las columnas comunes con
         exactamente el mismo procesamiento que se ve en la gráfica superior
         (interpoladas, normalizadas según 'multi_xls_norm_mode_var' y - si
         'Smoothing' está activo - suavizadas con Convex Envelope), para cada
         hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
-        una sola hoja de cálculo, separados por 20 filas en blanco, en vez de
-        una hoja de Excel distinta por cada una. A diferencia de la gráfica,
-        que solo muestra la columna seleccionada, esto exporta todas las
-        columnas comunes. El procesamiento y guardado corren en un hilo
-        aparte (ver _run_with_progress_window) para que la ventana de
-        progreso no se quede sin responder con archivos grandes."""
+        una sola hoja de cálculo (o un único CSV), separados por 20 filas en
+        blanco, en vez de una hoja de Excel distinta por cada una. A
+        diferencia de la gráfica, que solo muestra la columna seleccionada,
+        esto exporta todas las columnas comunes. El procesamiento y guardado
+        corren en un hilo aparte (ver _run_with_progress_window) para que la
+        ventana de progreso no se quede sin responder con archivos grandes."""
         if not self.multi_xls_datasets or not self.multi_xls_common_columns:
             messagebox.showwarning("Sin Datos", "Carga datos primero.")
             return
@@ -3010,7 +3020,7 @@ class NecLabApp:
 
         filename = asksaveasfilename(
             defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx"), ("All Files", "*.*")],
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All Files", "*.*")],
             title="Save Smoothed Data"
         )
         if not filename:
@@ -3100,7 +3110,10 @@ class NecLabApp:
                 if i < len(blocks) - 1:
                     stacked.append(pd.DataFrame(np.nan, index=range(gap_rows), columns=block.columns))
             combined = pd.concat(stacked, ignore_index=True)
-            combined.to_excel(filename, index=False, header=False, engine='xlsxwriter')
+            if filename.lower().endswith('.csv'):
+                combined.to_csv(filename, index=False, header=False)
+            else:
+                combined.to_excel(filename, index=False, header=False, engine='xlsxwriter')
             return filename
 
         self._run_with_progress_window(

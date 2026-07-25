@@ -1154,23 +1154,26 @@ class VariabilityAnalysisWindow:
         self.current_method = method_name
     
     def export_time_series(self):
-        """Exportar series temporales a CSV"""
+        """Exportar series temporales a un archivo CSV o Excel"""
         if not hasattr(self, 'time_series_data') or not self.time_series_data:
             messagebox.showwarning("Advertencia", "No hay datos para exportar")
             return
-        
+
         filename = asksaveasfilename(
             initialfile='series_temporales_clusters.csv',
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")]
         )
-        
+
         if filename:
             import pandas as pd
             df = pd.DataFrame(self.time_series_data).T
             df.columns = self.cluster_labels
             df.index.name = 'Frame'
-            df.to_csv(filename)
+            if filename.lower().endswith(('.xlsx', '.xls')):
+                df.to_excel(filename, engine='xlsxwriter')
+            else:
+                df.to_csv(filename)
             messagebox.showinfo("Éxito", f"Series temporales exportadas a {filename}")
     
     def export_coordinates(self):

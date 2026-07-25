@@ -143,18 +143,21 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
         method_str = f"_{corr_method}" if corr_method else ""
         return f"correlation{method_str}{extension}"
     
-    # Add save button for correlation matrix CSV
+    # Add save button for correlation matrix CSV/Excel
     def _save_correlation_csv():
         default_name = get_default_correlation_name('.csv')
         from tkinter import filedialog
         filename = filedialog.asksaveasfilename(
             initialfile=default_name,
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
             title="Save Correlation Matrix"
         )
         if filename:
-            corr_func.to_csv(filename, header=True, index=True)
+            if filename.lower().endswith(('.xlsx', '.xls')):
+                corr_func.to_excel(filename, header=True, index=True, engine='xlsxwriter')
+            else:
+                corr_func.to_csv(filename, header=True, index=True)
     
     def _save_correlation_image():
         default_name = get_default_correlation_name('.png')
@@ -344,15 +347,15 @@ def plot_dendogram(data, root, canvas):
             fig.savefig(filename)
     
     def _save_dendrogram_csv():
-        """Save dendrogram clustering data to CSV"""
+        """Save dendrogram clustering data to a CSV or Excel file"""
         default_name = get_default_dendogram_name('.csv')
         filename = asksaveasfilename(
             initialfile=default_name,
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
             title="Save Dendrogram Data"
         )
-        
+
         if filename:
             # Create DataFrame with clustering information
             # Include cluster labels and linkage information
@@ -360,9 +363,9 @@ def plot_dendogram(data, root, canvas):
                 'Sample_Index': list(range(len(clustering.labels_))),
                 'Cluster_Label': clustering.labels_
             }
-            
+
             df = pd.DataFrame(df_data)
-            
+
             # Add linkage matrix information as separate section
             linkage_data = []
             for i, (child1, child2) in enumerate(clustering.children_):
@@ -372,16 +375,21 @@ def plot_dendogram(data, root, canvas):
                     'Child_2': int(child2),
                     'Distance': clustering.distances_[i]
                 })
-            
+
             df_linkage = pd.DataFrame(linkage_data)
-            
-            # Save both dataframes to CSV
-            with open(filename, 'w', newline='') as f:
-                f.write("# Cluster Labels\n")
-                df.to_csv(f, index=False)
-                f.write("\n# Linkage Matrix\n")
-                df_linkage.to_csv(f, index=False)
-            
+
+            if filename.lower().endswith(('.xlsx', '.xls')):
+                with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, sheet_name='Cluster_Labels', index=False)
+                    df_linkage.to_excel(writer, sheet_name='Linkage_Matrix', index=False)
+            else:
+                # Save both dataframes to CSV
+                with open(filename, 'w', newline='') as f:
+                    f.write("# Cluster Labels\n")
+                    df.to_csv(f, index=False)
+                    f.write("\n# Linkage Matrix\n")
+                    df_linkage.to_csv(f, index=False)
+
             messagebox.showinfo("Success", f"Dendrogram data saved to {filename}")
     
     # Create button frame for dendrogram inside the plot frame using pack
@@ -642,12 +650,16 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
         filename = asksaveasfilename(
             initialfile=get_default_name('.csv'),
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All Files", "*.*")]
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")]
         )
         if filename:
             cols = [column_names[i] if i < len(column_names) else f"Column {i+1}"
                     for i in selection_indices]
-            pd.DataFrame(norm_data[:, selection_indices], columns=cols).to_csv(filename, index=False)
+            df_out = pd.DataFrame(norm_data[:, selection_indices], columns=cols)
+            if filename.lower().endswith(('.xlsx', '.xls')):
+                df_out.to_excel(filename, index=False, engine='xlsxwriter')
+            else:
+                df_out.to_csv(filename, index=False)
 
     def close_window():
         for key in ('signal', 'multi'):
@@ -688,7 +700,15 @@ def load_correlation_matrix(root, canvas):
         if filename.lower().endswith('.csv'):
             corr_matrix = pd.read_csv(filename, index_col=0)
         elif filename.lower().endswith(('.xlsx', '.xls')):
-            corr_matrix = pd.read_excel(filename, index_col=0)
+            sheet_names = pd.ExcelFile(filename).sheet_names
+            sheet_name = sheet_names[0]
+            if len(sheet_names) > 1:
+                from visualization_helpers import _show_sheet_selection_dialog
+                chosen = _show_sheet_selection_dialog(root, sheet_names)
+                if chosen is None:
+                    return  # User cancelled sheet selection
+                sheet_name = chosen
+            corr_matrix = pd.read_excel(filename, sheet_name=sheet_name, index_col=0)
         else:
             # Try CSV as default
             corr_matrix = pd.read_csv(filename, index_col=0)

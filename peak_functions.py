@@ -67,28 +67,41 @@ def _is_npy_file(filename):
 def _is_csv_file(filename):
     return filename.lower().endswith('.csv')
 
-def _load_data(data):
+def _is_excel_file(filename):
+    return filename.lower().endswith(('.xlsx', '.xls'))
+
+def _load_data(data, sheet_name=None):
     if _is_npy_file(data):
         numpy_data = np.load(data, allow_pickle=True)
         rs = np.random.RandomState(0)
         data_ = numpy_data[:,1:]
         return data_
-    
+
     elif _is_csv_file(data):
         df = pd.read_csv(data)
         # Skip first column (assumed to be time/index)
         numpy_data = df.iloc[:, 1:].values
-        
+
         imputer = SimpleImputer(strategy='mean')
         numpy_data = imputer.fit_transform(numpy_data)
-        
+
         rs = np.random.RandomState(0)
         data_ = numpy_data
         return data_
-    
+
+    elif _is_excel_file(data):
+        df = pd.read_excel(data, sheet_name=sheet_name if sheet_name is not None else 0)
+        # Skip first column (assumed to be time/index), same convention as CSV
+        numpy_data = df.iloc[:, 1:].values
+
+        imputer = SimpleImputer(strategy='mean')
+        numpy_data = imputer.fit_transform(numpy_data)
+
+        return numpy_data
+
     else:
-        raise ValueError("Archivo no soportado. Por favor, use un archivo .npy o .csv")
-    
+        raise ValueError("Archivo no soportado. Por favor, use un archivo .npy, .csv o .xlsx/.xls")
+
 def _normalize_data_helper(data):
     norm_data = np.zeros(data.shape) # crea un arreglo con zeros en la forma de los datos
     for i in range(data.shape[1]): 
@@ -185,8 +198,8 @@ def show_parameter_dialog(parent, title, params):
         return None
     return result
 
-def normalize_data(data):
-    data = _load_data(data)
+def normalize_data(data, sheet_name=None):
+    data = _load_data(data, sheet_name=sheet_name)
     normalized_data = _normalize_data_helper(data)
     return normalized_data
 
@@ -1001,31 +1014,35 @@ def save():
         plt.savefig(filename, dpi=300, bbox_inches='tight')
 
 def save_peaks_csv(peaks, time_data, signal_data):
-    """Save peaks data to CSV file"""
+    """Save peaks data to a CSV or Excel file"""
     default_name = get_default_save_name("_peaks.csv")
-    
+
     filename = asksaveasfilename(
         initialfile=default_name,
         defaultextension=".csv",
         filetypes=[
             ("CSV files", "*.csv"),
+            ("Excel files", "*.xlsx"),
             ("All Files", "*.*")
         ],
         title="Save Peaks Data"
     )
-    
+
     if filename:
         # Create DataFrame with peak information
         peak_indices = peaks
         peak_times = time_data[peak_indices] if time_data is not None else peak_indices
         peak_values = signal_data[peak_indices]
-        
+
         df = pd.DataFrame({
             'Peak_Index': peak_indices,
             'Time': peak_times,
             'Signal_Value': peak_values
         })
-        
-        df.to_csv(filename, index=False)
+
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            df.to_excel(filename, index=False, engine='xlsxwriter')
+        else:
+            df.to_csv(filename, index=False)
         from tkinter import messagebox
         messagebox.showinfo("Success", f"Peaks saved to {os.path.basename(filename)}")
