@@ -7,6 +7,7 @@ on:
     branches:
       - 'claude/smoothing-normalization-analysis-6w26xx'
       - 'claude/visualizacion-datos-tab-menu-pxdelm'
+      - 'claude/csv-xls-sheet-selection-54rlhx'
   workflow_dispatch:  # allow manual runs from GitHub Actions UI
 
 jobs:
