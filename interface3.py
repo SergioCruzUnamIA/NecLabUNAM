@@ -1321,19 +1321,25 @@ class NecLabApp:
 
         paned.add(sidebar, weight=0)
         paned.add(right_paned, weight=1)
-        # Give the sidebar a sensible starting width (same as the old fixed
-        # width); the user can drag the sash to resize it from here.
-        self.root.after(50, lambda: paned.sashpos(0, 250))
+
+        # Size the sidebar to fit its widest label/button exactly - no more
+        # (wasted space) and no less (clipped text) - instead of a fixed
+        # width unrelated to what's actually in it. "Remove from Selection"
+        # is normally the widest control; "Column 999" stands in for column
+        # names, which are only ever a couple of digits long.
+        sidebar_content_w = max(
+            tkfont.Font(family='Arial', size=10).measure('Column 999'),
+            tkfont.Font(family='Arial', size=11).measure('Remove from Selection'),
+        ) + 50
+        self.root.after(50, lambda: paned.sashpos(0, sidebar_content_w))
 
         # ttk.PanedWindow has no built-in minsize per pane, so enforce one by
         # snapping the sash back whenever the sidebar is dragged narrower
-        # than what "Column 999" needs to display without truncating.
-        sidebar_min_w = tkfont.Font(family='Arial', size=10).measure('Column 999') + 60
-
+        # than that same content width (the user can still drag it wider).
         def _enforce_sidebar_min_width(event=None):
             w = sidebar.winfo_width()
-            if 0 < w < sidebar_min_w:
-                paned.sashpos(0, sidebar_min_w)
+            if 0 < w < sidebar_content_w:
+                paned.sashpos(0, sidebar_content_w)
 
         sidebar.bind('<Configure>', _enforce_sidebar_min_width)
 
