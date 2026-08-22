@@ -2232,7 +2232,12 @@ class NecLabApp:
         col_name = self.multi_xls_common_columns[index]
         display_label = self.multi_xls_column_listbox.get(index)
         show_labels = self.multi_xls_show_labels_var.get()
-        reserve_colorbar = self._multi_xls_effective_shared_scale()
+        # Only reserve the heatmap colorbar's margin when the heatmap pane
+        # is actually shown - otherwise this plot has nothing below it to
+        # stay aligned with, and the reserved space is just blank margin
+        # on the right (the heatmap pane is hidden by default).
+        reserve_colorbar = (self.multi_xls_show_heatmap_var.get()
+                             and self._multi_xls_effective_shared_scale())
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
