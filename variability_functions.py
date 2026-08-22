@@ -14,61 +14,61 @@ from sklearn.cluster import KMeans
 
 def calculate_variability(img_array, method=1):
     """
-    Calcula la variabilidad de una imagen usando diferentes métodos.
-    
+    Calculates the variability of an image using different methods.
+
     """
     methods_info = {
-        0: {"name": "Rango", "default_th": 100},
-        1: {"name": "Varianza Poblacional", "default_th": 120},
-        2: {"name": "Varianza Muestral", "default_th": 200},
-        3: {"name": "Desviación Estándar Poblacional", "default_th": 12},
-        4: {"name": "Desviación Estándar Muestral", "default_th": 5},
-        5: {"name": "Coeficiente de Variación", "default_th": 5},
-        6: {"name": "Rango Intercuartílico (IQR)", "default_th": 20}
+        0: {"name": "Range", "default_th": 100},
+        1: {"name": "Population Variance", "default_th": 120},
+        2: {"name": "Sample Variance", "default_th": 200},
+        3: {"name": "Population Standard Deviation", "default_th": 12},
+        4: {"name": "Sample Standard Deviation", "default_th": 5},
+        5: {"name": "Coefficient of Variation", "default_th": 5},
+        6: {"name": "Interquartile Range (IQR)", "default_th": 20}
     }
-    
+
     select = method
-    
+
     if select == 0:
-        # 1. Rango
+        # 1. Range
         var_im = np.max(img_array, axis=0) - np.min(img_array, axis=0)
         th = 100
     elif select == 1:
-        # 2. Varianza
-        var_im = np.var(img_array, axis=0)  # Poblacional
+        # 2. Variance
+        var_im = np.var(img_array, axis=0)  # Population
         th = 120
     elif select == 2:
-        # 2. Varianza
-        var_im = np.var(img_array, axis=0, ddof=1)  # Muestral
+        # 2. Variance
+        var_im = np.var(img_array, axis=0, ddof=1)  # Sample
         th = 200
     elif select == 3:
-        # 3. Desviación estándar
+        # 3. Standard deviation
         th = 12
-        var_im = np.std(img_array, axis=0)  # Poblacional
+        var_im = np.std(img_array, axis=0)  # Population
     elif select == 4:
-        # 3. Desviación estándar
+        # 3. Standard deviation
         th = 5
-        var_im = np.std(img_array, axis=0, ddof=1)  # Muestral
+        var_im = np.std(img_array, axis=0, ddof=1)  # Sample
     elif select == 5:
-        # 4. Coeficiente de variación
+        # 4. Coefficient of variation
         th = 5
-        var_im = np.std(img_array, axis=0, ddof=1)  # Muestral
+        var_im = np.std(img_array, axis=0, ddof=1)  # Sample
         media = np.mean(img_array, axis=0)
         var_im = (var_im / media) * 100
     elif select == 6:
         th = 20
-        # 5. Rango intercuartílico (IQR)
+        # 5. Interquartile range (IQR)
         q1 = np.percentile(img_array, 25, axis=0)
         q3 = np.percentile(img_array, 75, axis=0)
         var_im = q3 - q1
     else:
-        raise ValueError("Método debe estar entre 0 y 6")
+        raise ValueError("Method must be between 0 and 6")
     
     return var_im, th, methods_info[method]["name"]
 
 def apply_image_processing(var_im):
     """
-    Aplica el procesamiento de imagen: unsharp mask y filtro.
+    Applies image processing: unsharp mask and filter.
     """
     result_1 = unsharp_mask(var_im, radius=20, amount=1)
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
@@ -77,7 +77,7 @@ def apply_image_processing(var_im):
 
 def apply_binarization(image, th):
     """
-    Aplica binarización
+    Applies binarization
     """
     deconvolved_RL2 = np.reshape(image, (image.shape[0] * image.shape[1]))
     res_labels = [int(deconvolved_RL2[i] > th) for i in range(len(deconvolved_RL2))]
@@ -86,7 +86,7 @@ def apply_binarization(image, th):
 
 def candidate_neighbors(node):
     """
-    Función original para encontrar vecinos.
+    Original function to find neighbors.
     """
     return [(node[0] + 1, node[1]), (node[0], node[1] + 1), (node[0] + 1, node[1] + 1),
            (node[0] - 1, node[1]), (node[0], node[1] - 1), (node[0] - 1, node[1] - 1),
@@ -94,7 +94,7 @@ def candidate_neighbors(node):
 
 def neighboring_groups(nodes):
     """
-    Función original para agrupar píxeles conectados.
+    Original function to group connected pixels.
     """
     remain = set(nodes)
     while len(remain) > 0:
@@ -111,7 +111,7 @@ def neighboring_groups(nodes):
 
 def extract_pixels_from_binary(res_labels):
     """
-    Extrae píxeles de la imagen binarizada.
+    Extracts pixels from the binarized image.
     """
     pixels = []
     for i in range(res_labels.shape[0]):
@@ -122,69 +122,69 @@ def extract_pixels_from_binary(res_labels):
 
 def find_peaks(Z, dz_dx, dz_dy, selected_points):
     """
-    Detecta picos usando cambio de signo en las derivadas.
-    Código original de Jose.
+    Detects peaks using sign changes in the derivatives.
+    Original code by Jose.
     """
     peaks = []
     for i, j in selected_points:
-        # Verificar que no estemos en los bordes
+        # Check that we are not on the edges
         if 1 <= i < Z.shape[0] - 1 and 1 <= j < Z.shape[1] - 1:
-            # Buscar si es un pico (máximo local)
+            # Check if it is a peak (local maximum)
             if dz_dx[i, j - 1] > 0 and dz_dx[i, j] <= 0 and dz_dy[i - 1, j] > 0 and dz_dy[i, j] <= 0:
                 peaks.append((i, j))
     return peaks
 
 def assign_points_to_peaks(Z, peaks, selected_points):
     """
-    Asigna puntos seleccionados a los picos más cercanos.
-    Código original de Jose.
+    Assigns selected points to the nearest peaks.
+    Original code by Jose.
     """
     import math
-    
-    # Inicializar una lista para los conjuntos de puntos por pico
+
+    # Initialize a list for the point sets per peak
     peak_sets = {i: [] for i in range(len(peaks))}
-    
-    # Crear una matriz de etiquetas para asignar puntos a conjuntos
+
+    # Create a label matrix to assign points to sets
     peak_map = np.zeros_like(Z, dtype=int) - 1
-    gx = np.gradient(Z, axis=1)  # Derivada parcial respecto a x
-    gy = np.gradient(Z, axis=0)  # Derivada parcial respecto a y
-    
-    # Etiquetar los picos con IDs únicos
+    gx = np.gradient(Z, axis=1)  # Partial derivative with respect to x
+    gy = np.gradient(Z, axis=0)  # Partial derivative with respect to y
+
+    # Label the peaks with unique IDs
     for label_id, (pi, pj) in enumerate(peaks):
         if 0 <= pi < Z.shape[0] and 0 <= pj < Z.shape[1]:
             peak_map[pi, pj] = label_id
-    
-    # Asignar los puntos seleccionados a sus picos más cercanos
+
+    # Assign the selected points to their nearest peaks
     for i, j in selected_points:
         if not (0 <= i < Z.shape[0] and 0 <= j < Z.shape[1]):
             continue
-            
+
         x, y = i, j
         seen = []
-        
-        # Gradient descent hasta encontrar un pico
+
+        # Gradient descent until a peak is found
         while (x, y) not in seen and (x, y) not in peaks:
-            if len(seen) > 100:  # Evitar loops infinitos
+            if len(seen) > 100:  # Avoid infinite loops
                 break
-                
+
             if not (0 <= x < Z.shape[0] and 0 <= y < Z.shape[1]):
                 break
-                
-            # Obtener dirección del gradiente
+
+            # Get gradient direction
             if abs(gx[x, y]) > 1e-10 or abs(gy[x, y]) > 1e-10:
                 dx, dy = int(np.sign(gx[x, y])), int(np.sign(gy[x, y]))
             else:
                 break
-            
-            # Moverse en la dirección del gradiente
+
+            # Move in the direction of the gradient
             new_x, new_y = x + dx, y + dy
             if (0 <= new_x < Z.shape[0]) and (0 <= new_y < Z.shape[1]):
                 seen.append((x, y))
                 x, y = new_x, new_y
             else:
                 break
-        
-        # Encontrar el pico más cercano
+
+        # Find the nearest peak
         if peaks:
             min_dist = float('inf')
             sel_peak = None
@@ -196,8 +196,8 @@ def assign_points_to_peaks(Z, peaks, selected_points):
                         sel_peak = p
                 except:
                     continue
-            
-            # Asignar el punto al conjunto del pico
+
+            # Assign the point to the peak's set
             if sel_peak is not None:
                 peak_x, peak_y = sel_peak
                 if 0 <= peak_x < peak_map.shape[0] and 0 <= peak_y < peak_map.shape[1]:

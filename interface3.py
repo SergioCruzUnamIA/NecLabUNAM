@@ -1,10 +1,10 @@
 """
-NecLab - Herramienta de análisis de imágenes de microscopía y visualización de datos
-Interfaz gráfica principal (versión unificada)
+NecLab - Microscopy image analysis and data visualization tool
+Main graphical interface (unified version)
 """
 
 import os
-os.environ["OMP_NUM_THREADS"] = "1"  # Limita número de threads
+os.environ["OMP_NUM_THREADS"] = "1"  # Limit number of threads
 
 import tkinter as tk
 from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messagebox
@@ -24,8 +24,8 @@ import subprocess
 import json
 import urllib.request
 
-# Axes margins (in inches, not a fixed fraction of the figure) for the Datos
-# Multiples top line plot and bottom heatmap. Left/right are shared by both
+# Axes margins (in inches, not a fixed fraction of the figure) for the Multiple
+# Files top line plot and bottom heatmap. Left/right are shared by both
 # so a sample's x-position lines up vertically between the two regardless of
 # the heatmap's colorbar taking extra space on its side. Using inches instead
 # of a fixed fraction keeps the margins just large enough for their content
@@ -37,8 +37,8 @@ _MULTI_XLS_RIGHT_IN_CBAR = 0.95       # reserved when the heatmap colorbar
                                        # too, which has none, so both x-axes
                                        # stay aligned)
 _MULTI_XLS_RIGHT_IN_PLAIN = 0.15      # reserved when no colorbar will be
-                                       # drawn this redraw (escala individual
-                                       # por hoja): just a hair of breathing
+                                       # drawn this redraw (individual scale
+                                       # per sheet): just a hair of breathing
                                        # room instead of a full colorbar's worth
 _MULTI_XLS_TOP_IN = 0.35              # title
 _MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
@@ -47,15 +47,15 @@ _MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
 _MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
 
 # 'jet' with black prepended at the very bottom of the range, so the lowest
-# values in the Datos Multiples heatmap render as black instead of jet's dark
+# values in the Multiple Files heatmap render as black instead of jet's dark
 # blue - a smooth gradient (black -> blue -> cyan -> green -> yellow -> red).
 _MULTI_XLS_HEATMAP_CMAP = mcolors.LinearSegmentedColormap.from_list(
     'jet_black', np.vstack(([[0, 0, 0, 1]], plt.cm.jet(np.linspace(0, 1, 256)))))
 
 
 def _multi_xls_axes_margins(fig_width, fig_height, show_labels, reserve_colorbar):
-    """(left, right, top, bottom) axes-position fractions for the Datos
-    Multiples line plot / heatmap figures, computed from constant margins in
+    """(left, right, top, bottom) axes-position fractions for the Multiple
+    Files line plot / heatmap figures, computed from constant margins in
     inches so the plotted area keeps expanding to fill the panel as it grows
     instead of leaving a fixed fraction of it unused. `reserve_colorbar`
     controls whether the right margin needs to fit the heatmap's colorbar
@@ -92,14 +92,14 @@ _C = {
     'border': '#e2e8f0',   # divider lines
 }
 
-# Módulos locales
+# Local modules
 from pyometiff import OMETIFFReader
 from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
 
-# Intentar importar módulos de procesamiento de imagen si existen
+# Try to import image processing modules if they exist
 try:
     from image_loader import load_ometiff_image, process_image_slice
     from image_processing import auto_contrast, threshold_image_pil
@@ -110,27 +110,27 @@ except ImportError:
 
 
 class NecLabApp:
-    """Clase principal de la aplicación NecLab - Versión unificada."""
-    
+    """Main class of the NecLab application - Unified version."""
+
     def __init__(self, root):
         self.root = root
-        self.root.title("NecLab - Análisis de Imágenes y Datos")
+        self.root.title("NecLab - Image and Data Analysis")
         self.root.tk.call('tk', 'windowingsystem')
         self.root.option_add('*tearOff', FALSE)
-        
-        # Configurar tamaño de ventana (90% de la pantalla)
+
+        # Configure window size (90% of the screen)
         self.screen_width = self.root.winfo_screenwidth()
         self.screen_height = self.root.winfo_screenheight()
         self.width = int(self.screen_width * 0.9)
         self.height = int(self.screen_height * 0.9)
         self.root.geometry(f"{self.width}x{self.height}")
-        
-        # Variables de estado - Imágenes
-        self.img_original = None  # Imagen original sin modificar
-        self.img_array = None     # Imagen de trabajo (puede tener modificaciones)
-        self.img_display = None   # Imagen para visualización (con contraste, etc.)
-        
-        # Variables de estado - Datos de visualización
+
+        # State variables - Images
+        self.img_original = None  # Original, unmodified image
+        self.img_array = None     # Working image (may have modifications)
+        self.img_display = None   # Image for display (with contrast, etc.)
+
+        # State variables - Visualization data
         self.loaded_data = None
         self.current_column = 0
         self.canvas = None
@@ -156,7 +156,7 @@ class NecLabApp:
         self.plot_mid_frame = None
         self._mid_fig = None
 
-        # Variables de estado - Tab Datos Multiples (múltiples archivos .xls)
+        # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
         self.multi_xls_datasets = []
         self.multi_xls_common_columns = []
@@ -166,7 +166,7 @@ class NecLabApp:
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=True)
         # None = auto (per-sheet or shared-scale range, per the checkbox
-        # above); (min, max) = manual override set via "Límites de Color
+        # above); (min, max) = manual override set via "Color Limits
         # (Heatmap)...", applied to every sheet's heatmap image.
         self.multi_xls_heatmap_manual_range = None
         # 'local': min of this column, within each sheet (default). 'sheet':
@@ -200,24 +200,24 @@ class NecLabApp:
         self.multi_xls_class_row = None
         self.multi_xls_plot_placeholder = None
         self.multi_xls_heatmap_placeholder = None
-        # El canvas/figura/ejes de cada gráfica se crean una sola vez y se
-        # reutilizan en cada redibujado (en vez de destruir y crear uno
-        # nuevo cada vez), y el tamaño se actualiza con forward=False: así
-        # nunca se le ordena a Tk que redimensione el widget del canvas,
-        # que es lo que generaba un <Configure> nuevo en cada redibujado y
-        # provocaba un ciclo de redibujado infinito.
+        # Each plot's canvas/figure/axes are created only once and reused on
+        # every redraw (instead of being destroyed and recreated each time),
+        # and the size is updated with forward=False: this way Tk is never
+        # told to resize the canvas widget, which is what triggered a new
+        # <Configure> event on every redraw and caused an infinite redraw
+        # loop.
         self._multi_xls_plot_canvas = None
         self._multi_xls_plot_ax = None
         self._multi_xls_heatmap_canvas = None
         self._multi_xls_heatmap_ax = None
         self._multi_xls_heatmap_colorbar = None
-        self.multi_xls_classes = []           # nombres disponibles para clasificar hojas (cosmético)
-        self.multi_xls_sheet_class_var = {}    # sheet label -> tk.StringVar con la clasificación elegida
-        self.multi_xls_class_combos = {}       # sheet label -> ttk.Combobox (posicionado sobre su segmento)
-        self.multi_xls_classifications = {}    # col_index -> {sheet label -> clasificación guardada}
+        self.multi_xls_classes = []           # names available for classifying sheets (cosmetic)
+        self.multi_xls_sheet_class_var = {}    # sheet label -> tk.StringVar with the chosen classification
+        self.multi_xls_class_combos = {}       # sheet label -> ttk.Combobox (positioned over its segment)
+        self.multi_xls_classifications = {}    # col_index -> {sheet label -> saved classification}
         self._multi_xls_syncing_class_row = False
 
-        # Variables de estado - Tab Dendograma
+        # State variables - Dendrogram tab
         self.dendo_tab = None
         self.dendo_column_listbox = None
         self.dendo_selection_listbox = None
@@ -234,67 +234,67 @@ class NecLabApp:
         self.btn_dendo_save_img = None
         self.btn_dendo_save_csv = None
 
-        # Construir la interfaz
+        # Build the interface
         self._create_menu()
         self._create_layout()
-        
-        # Manejar cierre de ventana para liberar todo el proceso
+
+        # Handle window close to release the entire process
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        
+
         self.root.lift()
         self.root.focus_force()
-    
+
     def _on_close(self):
-        """Cerrar la aplicación completamente, liberando todos los recursos."""
-        if messagebox.askokcancel("Salir", "¿Desea salir de NecLab?"):
+        """Fully close the application, releasing all resources."""
+        if messagebox.askokcancel("Exit", "Do you want to exit NecLab?"):
             plt.close('all')
             self.root.quit()
             self.root.destroy()
             sys.exit(0)
-    
-    # ==================== MENÚ ====================
-    
+
+    # ==================== MENU ====================
+
     def _create_menu(self):
-        """Crea la barra de menús unificada."""
+        """Create the unified menu bar."""
         self.menu_bar = Menu(self.root)
         self.root.config(menu=self.menu_bar)
-        
-        # Menú Archivo
+
+        # File menu
         self.menu_archivo = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_archivo, label="Archivo")
+        self.menu_bar.add_cascade(menu=self.menu_archivo, label="File")
         self.menu_archivo.add_command(
-            label="Abrir OME-TIFF",
+            label="Open OME-TIFF",
             accelerator="Ctrl+O",
             command=self.open_ometiff_file
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Abrir Datos (.npy / .csv / .xlsx)',
+            label='Open Data (.npy / .csv / .xlsx)',
             command=self.open_visualization_data,
             state=NORMAL
         )
         self.menu_archivo.add_command(
-            label='Cargar Matriz de Correlacion',
+            label='Load Correlation Matrix',
             command=self.load_correlation_matrix_wrapper,
             state=NORMAL
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Abrir Multiples Archivos (.xls / .csv)',
+            label='Open Multiple Files (.xls / .csv)',
             command=self.open_multiple_xls_files,
             state=NORMAL
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label="Salir",
+            label="Exit",
             command=self._on_close
         )
-        
-        # Menú Imagen
+
+        # Image menu
         self.menu_imagen = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_imagen, label="Imagen")
+        self.menu_bar.add_cascade(menu=self.menu_imagen, label="Image")
         self.menu_imagen.add_command(
-            label="Auto Contraste",
+            label="Auto Contrast",
             command=self.apply_auto_contrast,
             state=DISABLED
         )
@@ -310,16 +310,16 @@ class NecLabApp:
         )
         self.menu_imagen.add_separator()
         self.menu_imagen.add_command(
-            label="Restaurar Original",
+            label="Restore Original",
             command=self.restore_original,
             state=DISABLED
         )
 
-        # Menú Análisis de Variabilidad (top-level, between Imagen and Visualizacion)
+        # Variability Analysis menu (top-level, between Image and Visualization)
         self.menu_variabilidad = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
+        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Variability Analysis", state=DISABLED)
 
-        # Agregar los 7 métodos de variabilidad
+        # Add the 7 variability methods
         methods = get_variability_methods()
         for i, method_name in enumerate(methods):
             self.menu_variabilidad.add_command(
@@ -327,28 +327,28 @@ class NecLabApp:
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
 
-        # Menú Visualización
+        # Visualization menu
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
+        self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualization")
 
-        self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
+        self.menu_visual.add_command(label='Dendrogram', command=None, state=DISABLED)
         self.menu_visual.add_separator()
-        self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
+        self.menu_visual.add_command(label='Time Series', command=None, state=DISABLED)
 
-        # Menú Ayuda
+        # Help menu
         self.menu_ayuda = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_ayuda, label="Help")
         self.menu_ayuda.add_command(label='Check for Updates', command=self._check_for_updates)
         self.menu_ayuda.add_separator()
         self.menu_ayuda.add_command(label='About NecLab', command=self._show_about)
 
-        # Atajo de teclado
+        # Keyboard shortcut
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
-    
-    # ==================== LAYOUT PRINCIPAL ====================
-    
+
+    # ==================== MAIN LAYOUT ====================
+
     def _create_layout(self):
-        """Crea el layout principal con tabs para diferentes modos."""
+        """Create the main layout with tabs for different modes."""
         self.root.configure(bg=_C['bg'])
 
         # Thin accent line across the top of the content area
@@ -374,19 +374,19 @@ class NecLabApp:
         self.notebook = ttk.Notebook(self.root, style='L1.TNotebook')
         self.notebook.pack(fill='both', expand=True)
 
-        # Tab 1: Procesamiento de Imágenes
+        # Tab 1: Image Processing
         self.image_tab = tk.Frame(self.notebook, bg=_C['bg'])
-        self.notebook.add(self.image_tab, text="  Procesamiento de Imágenes  ")
+        self.notebook.add(self.image_tab, text="  Image Processing  ")
         self._create_image_processing_layout()
 
-        # Tab 2: Visualización de Datos
+        # Tab 2: Data Visualization
         self.data_tab = tk.Frame(self.notebook, bg=_C['bg'])
-        self.notebook.add(self.data_tab, text="  Visualización de Datos  ")
+        self.notebook.add(self.data_tab, text="  Data Visualization  ")
         self._create_data_visualization_layout()
 
-    
+
     def _create_image_processing_layout(self):
-        """Crea el layout para procesamiento de imágenes."""
+        """Create the layout for image processing."""
         self.image_tab.columnconfigure(0, weight=3)
         self.image_tab.columnconfigure(1, weight=1)
         self.image_tab.rowconfigure(0, weight=1)
@@ -401,44 +401,44 @@ class NecLabApp:
 
         self._create_image_controls_panel()
         self._load_default_image()
-    
+
     def _create_image_controls_panel(self):
-        """Crea el panel lateral derecho con controles de imagen."""
+        """Create the right-side panel with image controls."""
         self.controls_panel = tk.Frame(self.image_tab, bg=_C['panel'],
                                        highlightbackground=_C['border'],
                                        highlightthickness=1)
         self.controls_panel.grid(row=0, column=1, sticky='nsew', padx=(4, 8), pady=8)
 
-        tk.Label(self.controls_panel, text="Controles de Imagen",
+        tk.Label(self.controls_panel, text="Image Controls",
                  font=('Arial', 13, 'bold'), bg=_C['panel'], fg=_C['text']).pack(pady=12)
 
         tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
-        
-        # ===== SECCIÓN: Navegación =====
+
+        # ===== SECTION: Navigation =====
         self._create_section_navigation()
-        
-        # ===== SECCIÓN: Ajustes de Imagen =====
+
+        # ===== SECTION: Image Adjustments =====
         self._create_section_image_adjustments()
-        
-        # ===== SECCIÓN: Procesamiento =====
+
+        # ===== SECTION: Processing =====
         self._create_section_processing()
-        
-        # ===== SECCIÓN: Información =====
+
+        # ===== SECTION: Information =====
         self._create_section_info()
-    
+
     def _create_section_navigation(self):
-        """Sección de navegación de frames."""
+        """Frame navigation section."""
         def _sec_label(parent, text):
             tk.Label(parent, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(parent, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label(self.controls_panel, "NAVEGACIÓN")
+        _sec_label(self.controls_panel, "NAVIGATION")
 
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 
-        tk.Label(inner, text="Capa (Frame):", bg=_C['panel'],
+        tk.Label(inner, text="Layer (Frame):", bg=_C['panel'],
                  fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
 
         self.slice_slider = tk.Scale(inner, from_=0, to=0, orient="horizontal",
@@ -453,17 +453,17 @@ class NecLabApp:
         self.frame_info_label.pack(anchor='w')
 
     def _create_section_image_adjustments(self):
-        """Sección de ajustes de imagen."""
+        """Image adjustments section."""
         def _sec_label(text):
             tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label("AJUSTES DE IMAGEN")
+        _sec_label("IMAGE ADJUSTMENTS")
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 
-        tk.Label(inner, text="Brillo:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
+        tk.Label(inner, text="Brightness:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
         self.brightness_slider = tk.Scale(inner, from_=-100, to=100, orient="horizontal",
                                           command=self._on_adjustment_changed,
                                           bg=_C['panel'], troughcolor=_C['card'],
@@ -471,7 +471,7 @@ class NecLabApp:
         self.brightness_slider.set(0)
         self.brightness_slider.pack(fill='x')
 
-        tk.Label(inner, text="Contraste:", bg=_C['panel'], fg=_C['text'],
+        tk.Label(inner, text="Contrast:", bg=_C['panel'], fg=_C['text'],
                  font=('Arial', 9)).pack(anchor='w', pady=(5, 0))
         self.contrast_slider = tk.Scale(inner, from_=-100, to=100, orient="horizontal",
                                         command=self._on_adjustment_changed,
@@ -480,24 +480,24 @@ class NecLabApp:
         self.contrast_slider.set(0)
         self.contrast_slider.pack(fill='x')
 
-        ctk.CTkButton(inner, text="Auto Contraste", height=30, corner_radius=6,
+        ctk.CTkButton(inner, text="Auto Contrast", height=30, corner_radius=6,
                       fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
                       font=ctk.CTkFont(size=11),
                       command=self.apply_auto_contrast).pack(fill='x', pady=(6, 2))
-        ctk.CTkButton(inner, text="Resetear Ajustes", height=30, corner_radius=6,
+        ctk.CTkButton(inner, text="Reset Adjustments", height=30, corner_radius=6,
                       fg_color=_C['card'], hover_color=_C['border'],
                       text_color=_C['text'], border_width=1, border_color=_C['border'],
                       font=ctk.CTkFont(size=11),
                       command=self._reset_adjustments).pack(fill='x', pady=2)
 
     def _create_section_processing(self):
-        """Sección de procesamiento."""
+        """Processing section."""
         def _sec_label(text):
             tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label("PROCESAMIENTO")
+        _sec_label("PROCESSING")
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 

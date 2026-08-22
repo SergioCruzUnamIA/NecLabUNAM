@@ -100,21 +100,21 @@ def _load_data(data, sheet_name=None):
         return numpy_data
 
     else:
-        raise ValueError("Archivo no soportado. Por favor, use un archivo .npy, .csv o .xlsx/.xls")
+        raise ValueError("Unsupported file. Please use a .npy, .csv, or .xlsx/.xls file")
 
 def _normalize_data_helper(data):
-    norm_data = np.zeros(data.shape) # crea un arreglo con zeros en la forma de los datos
-    for i in range(data.shape[1]): 
+    norm_data = np.zeros(data.shape) # creates an array of zeros with the shape of the data
+    for i in range(data.shape[1]):
         reg = ElasticNet().fit(np.array(range(len(data[:, i]))).reshape(-1, 1), data[:, i])
         #reg = svm.SVR().fit(np.array(range(len(data_[:, i]))).reshape(-1, 1), data_[:, i])
         res = reg.predict(np.array(range(len(data[:, i]))).reshape(-1, 1))
         norm_data[:, i] = data[:, i] - res
         min_data = min(norm_data[:, i])
         max_data = max(norm_data[:, i])
-        #norm_data[:, i] = data_[:, i] 
-        #norm_data[:, i] = norm_data[:, i] - min_data # opcion para nomalizar los datos
-        #norm_data[:, i] = norm_data[:, i] / min_data # opcion para nomalizar los datos
-        norm_data[:, i] = (norm_data[:, i] - min_data) / (max_data - min_data) # opcion para nomalizar los datos
+        #norm_data[:, i] = data_[:, i]
+        #norm_data[:, i] = norm_data[:, i] - min_data # option to normalize the data
+        #norm_data[:, i] = norm_data[:, i] / min_data # option to normalize the data
+        norm_data[:, i] = (norm_data[:, i] - min_data) / (max_data - min_data) # option to normalize the data
     return norm_data
 
 def show_parameter_dialog(parent, title, params):
