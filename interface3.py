@@ -32,10 +32,6 @@ import urllib.request
 # (axis label, title, colorbar) instead of eating a growing chunk of the
 # figure as the panel gets wider.
 _MULTI_XLS_LEFT_IN = 0.62             # y-axis label + tick numbers
-_MULTI_XLS_RIGHT_IN_CBAR = 0.95       # reserved when the heatmap colorbar
-                                       # will be drawn (kept on the line plot
-                                       # too, which has none, so both x-axes
-                                       # stay aligned)
 _MULTI_XLS_RIGHT_IN_PLAIN = 0.15      # reserved when no colorbar will be
                                        # drawn this redraw (individual scale
                                        # per sheet): just a hair of breathing
@@ -45,6 +41,15 @@ _MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
 _MULTI_XLS_BOTTOM_IN_NOLABELS = 0.22  # no labels: just the tick marks
 _MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
 _MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
+_MULTI_XLS_CBAR_TICKLABEL_IN = 0.25   # room for its "-1"/"0"/"1" tick labels
+# Reserved on the heatmap plot when its colorbar will be drawn: exactly
+# what the colorbar takes (gap + width + tick labels), not a flat guess.
+# The line plot above it never draws a colorbar of its own, so it always
+# uses the minimal margin instead (see _draw_multi_xls_plot) - trading
+# away x-axis alignment between the two for never showing blank space on
+# the line plot.
+_MULTI_XLS_RIGHT_IN_CBAR = (_MULTI_XLS_CBAR_GAP_IN + _MULTI_XLS_CBAR_WIDTH_IN
+                             + _MULTI_XLS_CBAR_TICKLABEL_IN)
 
 # 'jet' with black prepended at the very bottom of the range, so the lowest
 # values in the Multiple Files heatmap render as black instead of jet's dark
@@ -2232,12 +2237,13 @@ class NecLabApp:
         col_name = self.multi_xls_common_columns[index]
         display_label = self.multi_xls_column_listbox.get(index)
         show_labels = self.multi_xls_show_labels_var.get()
-        # Only reserve the heatmap colorbar's margin when the heatmap pane
-        # is actually shown - otherwise this plot has nothing below it to
-        # stay aligned with, and the reserved space is just blank margin
-        # on the right (the heatmap pane is hidden by default).
-        reserve_colorbar = (self.multi_xls_show_heatmap_var.get()
-                             and self._multi_xls_effective_shared_scale())
+        # This plot never draws a colorbar itself, so it always uses the
+        # minimal right margin - never the heatmap-colorbar-sized one -
+        # even while the heatmap pane is shown below it. That trades away
+        # pixel-for-pixel x-axis alignment with the heatmap's plot (which
+        # does reserve room for its own colorbar) in favor of never
+        # showing blank space on this plot.
+        reserve_colorbar = False
 
         self.multi_xls_current_column = col_name
         self.multi_xls_current_index = index
