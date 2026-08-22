@@ -678,9 +678,11 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
     close_label = "Close Tab" if is_tab else "Close"
     tk.Button(button_frame, text=close_label, command=close_window, width=12).pack(side=tk.RIGHT, padx=5)
 
-def load_correlation_matrix(root, canvas):
+def load_correlation_matrix(root, canvas, target_frame=None):
     """
-    Load a correlation matrix from a CSV file and display it
+    Load a correlation matrix from a CSV file and display it.
+    'target_frame', if given, is drawn into directly instead of the frame
+    _plot_correlation_helper falls back to finding inside 'root'.
     """
     try:
         # Open file dialog to select correlation matrix file
@@ -732,7 +734,8 @@ def load_correlation_matrix(root, canvas):
         
         # Display the correlation matrix
         size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
-        canvas, _ = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True, corr_method='Loaded Correlation')
+        canvas, _ = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True,
+                                              corr_method='Loaded Correlation', target_frame=target_frame)
         
         messagebox.showinfo(
             "Matrix Loaded", 
