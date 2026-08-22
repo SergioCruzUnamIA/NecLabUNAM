@@ -236,6 +236,12 @@ class NecLabApp:
         self._multi_xls_corr_df = None
         self.btn_multi_xls_add_sel = None
         self.btn_multi_xls_remove_sel = None
+        self.multi_xls_right_paned = None
+        # Middle (heatmap) and bottom (correlation) panes are hidden by
+        # default - only the top line plot shows until one of these View
+        # menu checkboxes is turned on.
+        self.multi_xls_show_heatmap_var = tk.BooleanVar(value=False)
+        self.multi_xls_show_correlation_var = tk.BooleanVar(value=False)
 
         # State variables - Dendrogram tab
         self.dendo_tab = None
@@ -1110,6 +1116,13 @@ class NecLabApp:
             return menu
 
         def build_vista_menu(m):
+            m.add_checkbutton(label="Show Middle Plot (Heatmap)",
+                               variable=self.multi_xls_show_heatmap_var,
+                               command=self._on_multi_xls_show_heatmap_toggle)
+            m.add_checkbutton(label="Show Bottom Plot (Correlation)",
+                               variable=self.multi_xls_show_correlation_var,
+                               command=self._on_multi_xls_show_correlation_toggle)
+            m.add_separator()
             m.add_checkbutton(label="Show Data Names",
                                variable=self.multi_xls_show_labels_var,
                                command=self._on_multi_xls_show_labels_toggle)
@@ -1404,37 +1417,35 @@ class NecLabApp:
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
         self.multi_xls_correlation_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
+        self.multi_xls_right_paned = right_paned
+        # Only the top (line plot) pane is shown by default; the heatmap
+        # and correlation panes are added on demand by their View-menu
+        # checkboxes (see _on_multi_xls_show_heatmap_toggle /
+        # _on_multi_xls_show_correlation_toggle), each unchecked by
+        # default so a fresh load shows the upper plot alone.
         right_paned.add(self.multi_xls_plot_frame, weight=3)
-        right_paned.add(self.multi_xls_heatmap_frame, weight=2)
-        right_paned.add(self.multi_xls_correlation_frame, weight=2)
-        # Same 3:2 starting ratio the old fixed Grid rows used between plot
-        # and heatmap; the correlation pane starts small (last ~20%) since
-        # it's empty until columns are added to Selection.
-        def _set_initial_sashes():
-            total = right_paned.winfo_height()
-            right_paned.sashpos(0, int(total * 0.5))
-            right_paned.sashpos(1, int(total * 0.8))
-        self.root.after(50, _set_initial_sashes)
 
-        # Keep every panel at a legible minimum height, same idea as the
-        # sidebar's minimum width above.
+        # Keep every visible panel at a legible minimum height, same idea
+        # as the sidebar's minimum width above.
         right_min_h = 160
 
         def _enforce_right_paned_min_height(event=None):
             total = right_paned.winfo_height()
-            if total <= 1:
+            n_sashes = len(right_paned.panes()) - 1
+            if total <= 1 or n_sashes < 1:
                 return
-            pos0 = right_paned.sashpos(0)
-            pos1 = right_paned.sashpos(1)
-            if pos0 < right_min_h:
-                pos0 = right_min_h
-                right_paned.sashpos(0, pos0)
-            if pos1 - pos0 < right_min_h:
-                pos1 = pos0 + right_min_h
-                right_paned.sashpos(1, pos1)
-            if total - pos1 < right_min_h:
-                right_paned.sashpos(1, total - right_min_h)
+            positions = [right_paned.sashpos(i) for i in range(n_sashes)]
+            prev = 0
+            for i, pos in enumerate(positions):
+                if pos - prev < right_min_h:
+                    pos = prev + right_min_h
+                    right_paned.sashpos(i, pos)
+                positions[i] = pos
+                prev = pos
+            if total - prev < right_min_h and n_sashes >= 1:
+                right_paned.sashpos(n_sashes - 1, max(prev, total - right_min_h))
 
+        self._enforce_multi_xls_right_paned_min_height = _enforce_right_paned_min_height
         self.multi_xls_plot_frame.bind('<Configure>', _enforce_right_paned_min_height, add='+')
 
     def _populate_multi_xls_columns(self):
@@ -1852,6 +1863,41 @@ class NecLabApp:
         tk.Button(btns, text="Auto", command=reset_auto, width=8).pack(side='left', padx=4)
         tk.Button(btns, text="Cancel", command=dialog.destroy, width=8).pack(side='left', padx=4)
         tk.Button(btns, text="Apply", command=apply_range, width=8).pack(side='left', padx=4)
+
+    def _on_multi_xls_show_heatmap_toggle(self):
+        """Add or remove the middle (heatmap) pane from the vertical
+        PanedWindow, inserting it before the correlation pane if that one
+        is already shown so the top-to-bottom order (plot, heatmap,
+        correlation) stays fixed regardless of toggle order."""
+        paned = self.multi_xls_right_paned
+        if paned is None:
+            return
+        panes = paned.panes()
+        shown = str(self.multi_xls_heatmap_frame) in panes
+        if self.multi_xls_show_heatmap_var.get() and not shown:
+            if str(self.multi_xls_correlation_frame) in panes:
+                paned.insert(self.multi_xls_correlation_frame, self.multi_xls_heatmap_frame, weight=2)
+            else:
+                paned.add(self.multi_xls_heatmap_frame, weight=2)
+            self._enforce_multi_xls_right_paned_min_height()
+            self._draw_multi_xls_heatmap()
+        elif not self.multi_xls_show_heatmap_var.get() and shown:
+            paned.forget(self.multi_xls_heatmap_frame)
+
+    def _on_multi_xls_show_correlation_toggle(self):
+        """Add or remove the bottom (correlation) pane from the vertical
+        PanedWindow - always goes at the end, so plain .add() is enough
+        regardless of whether the heatmap pane is shown."""
+        paned = self.multi_xls_right_paned
+        if paned is None:
+            return
+        shown = str(self.multi_xls_correlation_frame) in paned.panes()
+        if self.multi_xls_show_correlation_var.get() and not shown:
+            paned.add(self.multi_xls_correlation_frame, weight=2)
+            self._enforce_multi_xls_right_paned_min_height()
+            self._update_multi_xls_correlation_display()
+        elif not self.multi_xls_show_correlation_var.get() and shown:
+            paned.forget(self.multi_xls_correlation_frame)
 
     def _on_multi_xls_show_labels_toggle(self):
         """Redraw both plots to show or hide each sheet's label under the
