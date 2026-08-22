@@ -1445,7 +1445,6 @@ class NecLabApp:
             if total - prev < right_min_h and n_sashes >= 1:
                 right_paned.sashpos(n_sashes - 1, max(prev, total - right_min_h))
 
-        self._enforce_multi_xls_right_paned_min_height = _enforce_right_paned_min_height
         self.multi_xls_plot_frame.bind('<Configure>', _enforce_right_paned_min_height, add='+')
 
     def _populate_multi_xls_columns(self):
@@ -1864,6 +1863,25 @@ class NecLabApp:
         tk.Button(btns, text="Cancel", command=dialog.destroy, width=8).pack(side='left', padx=4)
         tk.Button(btns, text="Apply", command=apply_range, width=8).pack(side='left', padx=4)
 
+    def _distribute_multi_xls_right_paned_evenly(self):
+        """Give every currently visible pane (the plot, and whichever of
+        heatmap/correlation are toggled on) an equal share of the height,
+        instead of ttk.PanedWindow's default of handing a newly added pane
+        a small sliver. Scheduled with a short delay (like the tab's other
+        one-shot sash positioning) since a pane just added/removed hasn't
+        settled into its final geometry yet."""
+        paned = self.multi_xls_right_paned
+        if paned is None:
+            return
+        n = len(paned.panes())
+        if n < 2:
+            return
+        total = paned.winfo_height()
+        if total <= 1:
+            return
+        for i in range(1, n):
+            paned.sashpos(i - 1, int(total * i / n))
+
     def _on_multi_xls_show_heatmap_toggle(self):
         """Add or remove the middle (heatmap) pane from the vertical
         PanedWindow, inserting it before the correlation pane if that one
@@ -1879,10 +1897,10 @@ class NecLabApp:
                 paned.insert(self.multi_xls_correlation_frame, self.multi_xls_heatmap_frame, weight=2)
             else:
                 paned.add(self.multi_xls_heatmap_frame, weight=2)
-            self._enforce_multi_xls_right_paned_min_height()
             self._draw_multi_xls_heatmap()
         elif not self.multi_xls_show_heatmap_var.get() and shown:
             paned.forget(self.multi_xls_heatmap_frame)
+        self.root.after(50, self._distribute_multi_xls_right_paned_evenly)
 
     def _on_multi_xls_show_correlation_toggle(self):
         """Add or remove the bottom (correlation) pane from the vertical
@@ -1894,10 +1912,10 @@ class NecLabApp:
         shown = str(self.multi_xls_correlation_frame) in paned.panes()
         if self.multi_xls_show_correlation_var.get() and not shown:
             paned.add(self.multi_xls_correlation_frame, weight=2)
-            self._enforce_multi_xls_right_paned_min_height()
             self._update_multi_xls_correlation_display()
         elif not self.multi_xls_show_correlation_var.get() and shown:
             paned.forget(self.multi_xls_correlation_frame)
+        self.root.after(50, self._distribute_multi_xls_right_paned_evenly)
 
     def _on_multi_xls_show_labels_toggle(self):
         """Redraw both plots to show or hide each sheet's label under the
