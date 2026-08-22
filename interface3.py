@@ -1,10 +1,10 @@
 """
-NecLab - Herramienta de análisis de imágenes de microscopía y visualización de datos
-Interfaz gráfica principal (versión unificada)
+NecLab - Microscopy image analysis and data visualization tool
+Main graphical interface (unified version)
 """
 
 import os
-os.environ["OMP_NUM_THREADS"] = "1"  # Limita número de threads
+os.environ["OMP_NUM_THREADS"] = "1"  # Limit number of threads
 
 import tkinter as tk
 from tkinter import Menu, Grid, filedialog, FALSE, DISABLED, NORMAL, ttk, messagebox
@@ -24,8 +24,8 @@ import subprocess
 import json
 import urllib.request
 
-# Axes margins (in inches, not a fixed fraction of the figure) for the Datos
-# Multiples top line plot and bottom heatmap. Left/right are shared by both
+# Axes margins (in inches, not a fixed fraction of the figure) for the Multiple
+# Files top line plot and bottom heatmap. Left/right are shared by both
 # so a sample's x-position lines up vertically between the two regardless of
 # the heatmap's colorbar taking extra space on its side. Using inches instead
 # of a fixed fraction keeps the margins just large enough for their content
@@ -37,8 +37,8 @@ _MULTI_XLS_RIGHT_IN_CBAR = 0.95       # reserved when the heatmap colorbar
                                        # too, which has none, so both x-axes
                                        # stay aligned)
 _MULTI_XLS_RIGHT_IN_PLAIN = 0.15      # reserved when no colorbar will be
-                                       # drawn this redraw (escala individual
-                                       # por hoja): just a hair of breathing
+                                       # drawn this redraw (individual scale
+                                       # per sheet): just a hair of breathing
                                        # room instead of a full colorbar's worth
 _MULTI_XLS_TOP_IN = 0.35              # title
 _MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
@@ -47,15 +47,15 @@ _MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
 _MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
 
 # 'jet' with black prepended at the very bottom of the range, so the lowest
-# values in the Datos Multiples heatmap render as black instead of jet's dark
+# values in the Multiple Files heatmap render as black instead of jet's dark
 # blue - a smooth gradient (black -> blue -> cyan -> green -> yellow -> red).
 _MULTI_XLS_HEATMAP_CMAP = mcolors.LinearSegmentedColormap.from_list(
     'jet_black', np.vstack(([[0, 0, 0, 1]], plt.cm.jet(np.linspace(0, 1, 256)))))
 
 
 def _multi_xls_axes_margins(fig_width, fig_height, show_labels, reserve_colorbar):
-    """(left, right, top, bottom) axes-position fractions for the Datos
-    Multiples line plot / heatmap figures, computed from constant margins in
+    """(left, right, top, bottom) axes-position fractions for the Multiple
+    Files line plot / heatmap figures, computed from constant margins in
     inches so the plotted area keeps expanding to fill the panel as it grows
     instead of leaving a fixed fraction of it unused. `reserve_colorbar`
     controls whether the right margin needs to fit the heatmap's colorbar
@@ -92,14 +92,14 @@ _C = {
     'border': '#e2e8f0',   # divider lines
 }
 
-# Módulos locales
+# Local modules
 from pyometiff import OMETIFFReader
 from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
 
-# Intentar importar módulos de procesamiento de imagen si existen
+# Try to import image processing modules if they exist
 try:
     from image_loader import load_ometiff_image, process_image_slice
     from image_processing import auto_contrast, threshold_image_pil
@@ -110,27 +110,27 @@ except ImportError:
 
 
 class NecLabApp:
-    """Clase principal de la aplicación NecLab - Versión unificada."""
-    
+    """Main class of the NecLab application - Unified version."""
+
     def __init__(self, root):
         self.root = root
-        self.root.title("NecLab - Análisis de Imágenes y Datos")
+        self.root.title("NecLab - Image and Data Analysis")
         self.root.tk.call('tk', 'windowingsystem')
         self.root.option_add('*tearOff', FALSE)
-        
-        # Configurar tamaño de ventana (90% de la pantalla)
+
+        # Configure window size (90% of the screen)
         self.screen_width = self.root.winfo_screenwidth()
         self.screen_height = self.root.winfo_screenheight()
         self.width = int(self.screen_width * 0.9)
         self.height = int(self.screen_height * 0.9)
         self.root.geometry(f"{self.width}x{self.height}")
-        
-        # Variables de estado - Imágenes
-        self.img_original = None  # Imagen original sin modificar
-        self.img_array = None     # Imagen de trabajo (puede tener modificaciones)
-        self.img_display = None   # Imagen para visualización (con contraste, etc.)
-        
-        # Variables de estado - Datos de visualización
+
+        # State variables - Images
+        self.img_original = None  # Original, unmodified image
+        self.img_array = None     # Working image (may have modifications)
+        self.img_display = None   # Image for display (with contrast, etc.)
+
+        # State variables - Visualization data
         self.loaded_data = None
         self.current_column = 0
         self.canvas = None
@@ -156,7 +156,7 @@ class NecLabApp:
         self.plot_mid_frame = None
         self._mid_fig = None
 
-        # Variables de estado - Tab Datos Multiples (múltiples archivos .xls)
+        # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
         self.multi_xls_datasets = []
         self.multi_xls_common_columns = []
@@ -166,7 +166,7 @@ class NecLabApp:
         self.multi_xls_smoothing_points_var = tk.IntVar(value=2)
         self.multi_xls_shared_scale_var = tk.BooleanVar(value=True)
         # None = auto (per-sheet or shared-scale range, per the checkbox
-        # above); (min, max) = manual override set via "Límites de Color
+        # above); (min, max) = manual override set via "Color Limits
         # (Heatmap)...", applied to every sheet's heatmap image.
         self.multi_xls_heatmap_manual_range = None
         # 'local': min of this column, within each sheet (default). 'sheet':
@@ -200,24 +200,24 @@ class NecLabApp:
         self.multi_xls_class_row = None
         self.multi_xls_plot_placeholder = None
         self.multi_xls_heatmap_placeholder = None
-        # El canvas/figura/ejes de cada gráfica se crean una sola vez y se
-        # reutilizan en cada redibujado (en vez de destruir y crear uno
-        # nuevo cada vez), y el tamaño se actualiza con forward=False: así
-        # nunca se le ordena a Tk que redimensione el widget del canvas,
-        # que es lo que generaba un <Configure> nuevo en cada redibujado y
-        # provocaba un ciclo de redibujado infinito.
+        # Each plot's canvas/figure/axes are created only once and reused on
+        # every redraw (instead of being destroyed and recreated each time),
+        # and the size is updated with forward=False: this way Tk is never
+        # told to resize the canvas widget, which is what triggered a new
+        # <Configure> event on every redraw and caused an infinite redraw
+        # loop.
         self._multi_xls_plot_canvas = None
         self._multi_xls_plot_ax = None
         self._multi_xls_heatmap_canvas = None
         self._multi_xls_heatmap_ax = None
         self._multi_xls_heatmap_colorbar = None
-        self.multi_xls_classes = []           # nombres disponibles para clasificar hojas (cosmético)
-        self.multi_xls_sheet_class_var = {}    # sheet label -> tk.StringVar con la clasificación elegida
-        self.multi_xls_class_combos = {}       # sheet label -> ttk.Combobox (posicionado sobre su segmento)
-        self.multi_xls_classifications = {}    # col_index -> {sheet label -> clasificación guardada}
+        self.multi_xls_classes = []           # names available for classifying sheets (cosmetic)
+        self.multi_xls_sheet_class_var = {}    # sheet label -> tk.StringVar with the chosen classification
+        self.multi_xls_class_combos = {}       # sheet label -> ttk.Combobox (positioned over its segment)
+        self.multi_xls_classifications = {}    # col_index -> {sheet label -> saved classification}
         self._multi_xls_syncing_class_row = False
 
-        # Variables de estado - Tab Dendograma
+        # State variables - Dendrogram tab
         self.dendo_tab = None
         self.dendo_column_listbox = None
         self.dendo_selection_listbox = None
@@ -234,67 +234,67 @@ class NecLabApp:
         self.btn_dendo_save_img = None
         self.btn_dendo_save_csv = None
 
-        # Construir la interfaz
+        # Build the interface
         self._create_menu()
         self._create_layout()
-        
-        # Manejar cierre de ventana para liberar todo el proceso
+
+        # Handle window close to release the entire process
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        
+
         self.root.lift()
         self.root.focus_force()
-    
+
     def _on_close(self):
-        """Cerrar la aplicación completamente, liberando todos los recursos."""
-        if messagebox.askokcancel("Salir", "¿Desea salir de NecLab?"):
+        """Fully close the application, releasing all resources."""
+        if messagebox.askokcancel("Exit", "Do you want to exit NecLab?"):
             plt.close('all')
             self.root.quit()
             self.root.destroy()
             sys.exit(0)
-    
-    # ==================== MENÚ ====================
-    
+
+    # ==================== MENU ====================
+
     def _create_menu(self):
-        """Crea la barra de menús unificada."""
+        """Create the unified menu bar."""
         self.menu_bar = Menu(self.root)
         self.root.config(menu=self.menu_bar)
-        
-        # Menú Archivo
+
+        # File menu
         self.menu_archivo = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_archivo, label="Archivo")
+        self.menu_bar.add_cascade(menu=self.menu_archivo, label="File")
         self.menu_archivo.add_command(
-            label="Abrir OME-TIFF",
+            label="Open OME-TIFF",
             accelerator="Ctrl+O",
             command=self.open_ometiff_file
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Abrir Datos (.npy / .csv / .xlsx)',
+            label='Open Data (.npy / .csv / .xlsx)',
             command=self.open_visualization_data,
             state=NORMAL
         )
         self.menu_archivo.add_command(
-            label='Cargar Matriz de Correlacion',
+            label='Load Correlation Matrix',
             command=self.load_correlation_matrix_wrapper,
             state=NORMAL
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Abrir Multiples Archivos (.xls / .csv)',
+            label='Open Multiple Files (.xls / .csv)',
             command=self.open_multiple_xls_files,
             state=NORMAL
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label="Salir",
+            label="Exit",
             command=self._on_close
         )
-        
-        # Menú Imagen
+
+        # Image menu
         self.menu_imagen = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_imagen, label="Imagen")
+        self.menu_bar.add_cascade(menu=self.menu_imagen, label="Image")
         self.menu_imagen.add_command(
-            label="Auto Contraste",
+            label="Auto Contrast",
             command=self.apply_auto_contrast,
             state=DISABLED
         )
@@ -310,16 +310,16 @@ class NecLabApp:
         )
         self.menu_imagen.add_separator()
         self.menu_imagen.add_command(
-            label="Restaurar Original",
+            label="Restore Original",
             command=self.restore_original,
             state=DISABLED
         )
 
-        # Menú Análisis de Variabilidad (top-level, between Imagen and Visualizacion)
+        # Variability Analysis menu (top-level, between Image and Visualization)
         self.menu_variabilidad = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Análisis de Variabilidad", state=DISABLED)
+        self.menu_bar.add_cascade(menu=self.menu_variabilidad, label="Variability Analysis", state=DISABLED)
 
-        # Agregar los 7 métodos de variabilidad
+        # Add the 7 variability methods
         methods = get_variability_methods()
         for i, method_name in enumerate(methods):
             self.menu_variabilidad.add_command(
@@ -327,28 +327,28 @@ class NecLabApp:
                 command=lambda idx=i: self.show_variability_menu(idx)
             )
 
-        # Menú Visualización
+        # Visualization menu
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
-        self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualizacion")
+        self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualization")
 
-        self.menu_visual.add_command(label='Dendograma', command=None, state=DISABLED)
+        self.menu_visual.add_command(label='Dendrogram', command=None, state=DISABLED)
         self.menu_visual.add_separator()
-        self.menu_visual.add_command(label='Series de tiempo', command=None, state=DISABLED)
+        self.menu_visual.add_command(label='Time Series', command=None, state=DISABLED)
 
-        # Menú Ayuda
+        # Help menu
         self.menu_ayuda = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_ayuda, label="Help")
         self.menu_ayuda.add_command(label='Check for Updates', command=self._check_for_updates)
         self.menu_ayuda.add_separator()
         self.menu_ayuda.add_command(label='About NecLab', command=self._show_about)
 
-        # Atajo de teclado
+        # Keyboard shortcut
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
-    
-    # ==================== LAYOUT PRINCIPAL ====================
-    
+
+    # ==================== MAIN LAYOUT ====================
+
     def _create_layout(self):
-        """Crea el layout principal con tabs para diferentes modos."""
+        """Create the main layout with tabs for different modes."""
         self.root.configure(bg=_C['bg'])
 
         # Thin accent line across the top of the content area
@@ -374,19 +374,19 @@ class NecLabApp:
         self.notebook = ttk.Notebook(self.root, style='L1.TNotebook')
         self.notebook.pack(fill='both', expand=True)
 
-        # Tab 1: Procesamiento de Imágenes
+        # Tab 1: Image Processing
         self.image_tab = tk.Frame(self.notebook, bg=_C['bg'])
-        self.notebook.add(self.image_tab, text="  Procesamiento de Imágenes  ")
+        self.notebook.add(self.image_tab, text="  Image Processing  ")
         self._create_image_processing_layout()
 
-        # Tab 2: Visualización de Datos
+        # Tab 2: Data Visualization
         self.data_tab = tk.Frame(self.notebook, bg=_C['bg'])
-        self.notebook.add(self.data_tab, text="  Visualización de Datos  ")
+        self.notebook.add(self.data_tab, text="  Data Visualization  ")
         self._create_data_visualization_layout()
 
-    
+
     def _create_image_processing_layout(self):
-        """Crea el layout para procesamiento de imágenes."""
+        """Create the layout for image processing."""
         self.image_tab.columnconfigure(0, weight=3)
         self.image_tab.columnconfigure(1, weight=1)
         self.image_tab.rowconfigure(0, weight=1)
@@ -401,44 +401,44 @@ class NecLabApp:
 
         self._create_image_controls_panel()
         self._load_default_image()
-    
+
     def _create_image_controls_panel(self):
-        """Crea el panel lateral derecho con controles de imagen."""
+        """Create the right-side panel with image controls."""
         self.controls_panel = tk.Frame(self.image_tab, bg=_C['panel'],
                                        highlightbackground=_C['border'],
                                        highlightthickness=1)
         self.controls_panel.grid(row=0, column=1, sticky='nsew', padx=(4, 8), pady=8)
 
-        tk.Label(self.controls_panel, text="Controles de Imagen",
+        tk.Label(self.controls_panel, text="Image Controls",
                  font=('Arial', 13, 'bold'), bg=_C['panel'], fg=_C['text']).pack(pady=12)
 
         tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
-        
-        # ===== SECCIÓN: Navegación =====
+
+        # ===== SECTION: Navigation =====
         self._create_section_navigation()
-        
-        # ===== SECCIÓN: Ajustes de Imagen =====
+
+        # ===== SECTION: Image Adjustments =====
         self._create_section_image_adjustments()
-        
-        # ===== SECCIÓN: Procesamiento =====
+
+        # ===== SECTION: Processing =====
         self._create_section_processing()
-        
-        # ===== SECCIÓN: Información =====
+
+        # ===== SECTION: Information =====
         self._create_section_info()
-    
+
     def _create_section_navigation(self):
-        """Sección de navegación de frames."""
+        """Frame navigation section."""
         def _sec_label(parent, text):
             tk.Label(parent, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(parent, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label(self.controls_panel, "NAVEGACIÓN")
+        _sec_label(self.controls_panel, "NAVIGATION")
 
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 
-        tk.Label(inner, text="Capa (Frame):", bg=_C['panel'],
+        tk.Label(inner, text="Layer (Frame):", bg=_C['panel'],
                  fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
 
         self.slice_slider = tk.Scale(inner, from_=0, to=0, orient="horizontal",
@@ -453,17 +453,17 @@ class NecLabApp:
         self.frame_info_label.pack(anchor='w')
 
     def _create_section_image_adjustments(self):
-        """Sección de ajustes de imagen."""
+        """Image adjustments section."""
         def _sec_label(text):
             tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label("AJUSTES DE IMAGEN")
+        _sec_label("IMAGE ADJUSTMENTS")
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 
-        tk.Label(inner, text="Brillo:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
+        tk.Label(inner, text="Brightness:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(anchor='w')
         self.brightness_slider = tk.Scale(inner, from_=-100, to=100, orient="horizontal",
                                           command=self._on_adjustment_changed,
                                           bg=_C['panel'], troughcolor=_C['card'],
@@ -471,7 +471,7 @@ class NecLabApp:
         self.brightness_slider.set(0)
         self.brightness_slider.pack(fill='x')
 
-        tk.Label(inner, text="Contraste:", bg=_C['panel'], fg=_C['text'],
+        tk.Label(inner, text="Contrast:", bg=_C['panel'], fg=_C['text'],
                  font=('Arial', 9)).pack(anchor='w', pady=(5, 0))
         self.contrast_slider = tk.Scale(inner, from_=-100, to=100, orient="horizontal",
                                         command=self._on_adjustment_changed,
@@ -480,24 +480,24 @@ class NecLabApp:
         self.contrast_slider.set(0)
         self.contrast_slider.pack(fill='x')
 
-        ctk.CTkButton(inner, text="Auto Contraste", height=30, corner_radius=6,
+        ctk.CTkButton(inner, text="Auto Contrast", height=30, corner_radius=6,
                       fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
                       font=ctk.CTkFont(size=11),
                       command=self.apply_auto_contrast).pack(fill='x', pady=(6, 2))
-        ctk.CTkButton(inner, text="Resetear Ajustes", height=30, corner_radius=6,
+        ctk.CTkButton(inner, text="Reset Adjustments", height=30, corner_radius=6,
                       fg_color=_C['card'], hover_color=_C['border'],
                       text_color=_C['text'], border_width=1, border_color=_C['border'],
                       font=ctk.CTkFont(size=11),
                       command=self._reset_adjustments).pack(fill='x', pady=2)
 
     def _create_section_processing(self):
-        """Sección de procesamiento."""
+        """Processing section."""
         def _sec_label(text):
             tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label("PROCESAMIENTO")
+        _sec_label("PROCESSING")
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 
@@ -505,7 +505,7 @@ class NecLabApp:
         row.pack(fill='x')
         tk.Label(row, text="Threshold:", bg=_C['panel'], fg=_C['text'], font=('Arial', 9)).pack(side='left')
         self.threshold_enabled = tk.BooleanVar(value=False)
-        self.threshold_check = tk.Checkbutton(row, text="Aplicar", variable=self.threshold_enabled,
+        self.threshold_check = tk.Checkbutton(row, text="Apply", variable=self.threshold_enabled,
                                                command=self._update_image_display,
                                                bg=_C['panel'], fg=_C['text'],
                                                selectcolor=_C['card'], activebackground=_C['panel'])
@@ -519,29 +519,29 @@ class NecLabApp:
         self.threshold_slider.pack(fill='x')
 
     def _create_section_info(self):
-        """Sección de información de la imagen."""
+        """Image information section."""
         def _sec_label(text):
             tk.Label(self.controls_panel, text=text, font=('Arial', 8, 'bold'),
                      bg=_C['panel'], fg=_C['sub']).pack(anchor='w', padx=12, pady=(12, 2))
             tk.Frame(self.controls_panel, bg=_C['border'], height=1).pack(fill='x', padx=10)
 
-        _sec_label("INFORMACIÓN")
+        _sec_label("INFORMATION")
         inner = tk.Frame(self.controls_panel, bg=_C['panel'], padx=10, pady=6)
         inner.pack(fill='x')
 
-        self.info_text = tk.Label(inner, text="No hay imagen cargada", bg=_C['panel'],
+        self.info_text = tk.Label(inner, text="No image loaded", bg=_C['panel'],
                                    fg=_C['text'], justify='left', anchor='w', font=('Arial', 9))
         self.info_text.pack(fill='x')
-    
+
     def _create_data_visualization_layout(self):
-        """Crea el layout para visualización de datos."""
+        """Create the layout for data visualization."""
         Grid.rowconfigure(self.data_tab, 0, weight=0)
         Grid.rowconfigure(self.data_tab, 1, weight=1)
         Grid.columnconfigure(self.data_tab, 0, weight=0)
         Grid.columnconfigure(self.data_tab, 1, weight=1)
 
         # Local menu bar, docked at the top of the tab (same pattern as the
-        # Datos Multiples tab's local menubar), grouping the Smoothing/Show
+        # Multiple Files tab's local menubar), grouping the Smoothing/Show
         # points/Show Labels checkboxes and the Save Data/Correlation/Peaks
         # actions that used to be stacked individually in the sidebar.
         menubar = tk.Frame(self.data_tab, bg='#f5f5f5', height=26,
@@ -565,7 +565,7 @@ class NecLabApp:
             m.add_checkbutton(label="Show points", variable=self.show_smoothing_points_var,
                                command=self._on_smoothing_toggle, state='disabled')
             m.add_separator()
-            m.add_checkbutton(label="Show Labels (Correlación)", variable=self.show_corr_labels_var,
+            m.add_checkbutton(label="Show Labels (Correlation)", variable=self.show_corr_labels_var,
                                command=self._update_correlation_display)
 
         def build_guardar_menu(m):
@@ -575,8 +575,8 @@ class NecLabApp:
             m.add_command(label="Save Correlation Data...", command=self._save_correlation_data, state='disabled')
             m.add_command(label="Save Peaks CSV...", command=self._save_peaks_csv, state='disabled')
 
-        self.data_menu_vista = add_tab_menu("Vista", build_vista_menu)
-        self.data_menu_guardar = add_tab_menu("Guardar", build_guardar_menu)
+        self.data_menu_vista = add_tab_menu("View", build_vista_menu)
+        self.data_menu_guardar = add_tab_menu("Save", build_guardar_menu)
 
         # ── Sidebar ──────────────────────────────────────────────────────────
         sidebar_frame = tk.Frame(self.data_tab, bg=_C['panel'], width=250,
@@ -594,7 +594,7 @@ class NecLabApp:
                                                               sticky='ew', padx=10)
             return row + 1
 
-        row = _sec(sidebar_frame, "COLUMNAS DE DATOS", 0)
+        row = _sec(sidebar_frame, "DATA COLUMNS", 0)
 
         # Column listbox
         listbox_frame = tk.Frame(sidebar_frame, bg=_C['card'],
@@ -654,7 +654,7 @@ class NecLabApp:
         self.smoothing_points_var.trace_add('write', lambda *args: self._on_smoothing_toggle())
 
         # ── Correlation ──
-        row = _sec(sidebar_frame, "CORRELACIÓN", row)
+        row = _sec(sidebar_frame, "CORRELATION", row)
 
         corr_method_combo = ttk.Combobox(
             sidebar_frame, textvariable=self.corr_method_var,
@@ -665,7 +665,7 @@ class NecLabApp:
         row += 1
 
         # ── Selection ──
-        row = _sec(sidebar_frame, "SELECCIÓN", row)
+        row = _sec(sidebar_frame, "SELECTION", row)
 
         sel_listbox_frame = tk.Frame(sidebar_frame, bg=_C['card'],
                                      highlightbackground=_C['border'], highlightthickness=1)
@@ -1157,7 +1157,7 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
 
     def open_visualization_data(self):
-        """Abre datos para visualización de picos."""
+        """Open data for peak visualization."""
         canvas = initialize_visualization(
             self.data_tab,
             self.menu_visual,
@@ -1181,7 +1181,7 @@ class NecLabApp:
             self.data_menu_vista.entryconfigure("Smoothing", state='normal')
             self.data_menu_vista.entryconfigure("Show points", state='normal')
             self.menu_visual.entryconfig(
-                "Dendograma",
+                "Dendrogram",
                 command=self._run_dendogram_on_selection,
                 state=NORMAL
             )
@@ -1238,10 +1238,10 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _run_dendogram_on_selection(self):
-        """Create the Dendogram tab on first use, then switch to it."""
+        """Create the Dendrogram tab on first use, then switch to it."""
         if self.dendo_tab is None or not self.dendo_tab.winfo_exists():
             self.dendo_tab = tk.Frame(self.notebook, bg=_C['bg'])
-            self.notebook.add(self.dendo_tab, text="Dendograma")
+            self.notebook.add(self.dendo_tab, text="Dendrogram")
             # Reset all dendo state so _create_dendogram_layout starts fresh
             self.dendo_column_listbox = None
             self.dendo_selection_listbox = None
@@ -1268,7 +1268,7 @@ class NecLabApp:
     # ==================== DENDOGRAM TAB ====================
 
     def _create_dendogram_layout(self):
-        """Build the permanent Dendogram tab (sidebar + plot area)."""
+        """Build the permanent Dendrogram tab (sidebar + plot area)."""
         Grid.rowconfigure(self.dendo_tab, 0, weight=1)
         Grid.columnconfigure(self.dendo_tab, 0, weight=0)
         Grid.columnconfigure(self.dendo_tab, 1, weight=1)
@@ -1289,7 +1289,7 @@ class NecLabApp:
                 row=row, column=0, sticky='ew', padx=10)
             return row + 1
 
-        drow = _dsec("COLUMNAS DE DATOS", 0)
+        drow = _dsec("DATA COLUMNS", 0)
 
         lb_frame = tk.Frame(sidebar, bg=_C['card'],
                             highlightbackground=_C['border'], highlightthickness=1)
@@ -1311,7 +1311,7 @@ class NecLabApp:
         self.dendo_column_listbox.grid(row=0, column=0, sticky='nsew')
         lb_sb.config(command=self.dendo_column_listbox.yview)
 
-        drow = _dsec("SELECCIÓN", drow)
+        drow = _dsec("SELECTION", drow)
 
         sel_frame = tk.Frame(sidebar, bg=_C['card'],
                              highlightbackground=_C['border'], highlightthickness=1)
@@ -1406,7 +1406,7 @@ class NecLabApp:
         self.dendo_column_listbox.bind('<ButtonRelease-1>', self._dendo_on_column_click)
 
     def _dendo_populate_columns(self):
-        """Fill the Dendogram tab column listbox with the same names as the main tab."""
+        """Fill the Dendrogram tab column listbox with the same names as the main tab."""
         if self.dendo_column_listbox is None or self.loaded_data is None:
             return
         self.dendo_column_listbox.delete(0, tk.END)
@@ -1590,32 +1590,32 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
 
     def load_correlation_matrix_wrapper(self):
-        """Wrapper para cargar matriz de correlación."""
+        """Wrapper to load a correlation matrix."""
         load_correlation_matrix(self.data_tab, self.canvas)
 
-    # ==================== DATOS MULTIPLES (XLS) TAB ====================
+    # ==================== MULTIPLE FILES (XLS) TAB ====================
 
     def open_multiple_xls_files(self):
-        """Abre múltiples archivos .xls/.xlsx/.csv, deja elegir qué hojas cargar
-        (un .csv cuenta como su única hoja), y muestra sus columnas de datos
-        en la pestaña 'Datos Multiples'."""
+        """Open multiple .xls/.xlsx/.csv files, let the user choose which
+        sheets to load (a .csv counts as its own single sheet), and show
+        their data columns in the 'Multiple Files' tab."""
         selection = pick_files_and_sheets(self.root)
         if not selection:
             return
         self._load_xls_with_progress(selection, self._on_multi_xls_load_complete)
 
     def _on_multi_xls_load_complete(self, datasets):
-        """Continúa donde open_multiple_xls_files lo dejó, una vez que la
-        carga en segundo plano terminó (ver _run_with_progress_window)."""
+        """Continue where open_multiple_xls_files left off, once the
+        background loading has finished (see _run_with_progress_window)."""
         if not datasets:
-            messagebox.showwarning("Sin datos", "No se pudo cargar ninguna hoja seleccionada.")
+            messagebox.showwarning("No Data", "Could not load any of the selected sheets.")
             return
 
         self.multi_xls_datasets = datasets
 
         if self.multi_xls_tab is None or not self.multi_xls_tab.winfo_exists():
             self.multi_xls_tab = tk.Frame(self.notebook, bg=_C['bg'])
-            self.notebook.add(self.multi_xls_tab, text="  Datos Multiples  ")
+            self.notebook.add(self.multi_xls_tab, text="  Multiple Files  ")
             self._create_multi_xls_layout()
 
         self._populate_multi_xls_columns()
@@ -1623,26 +1623,25 @@ class NecLabApp:
 
     def _run_with_progress_window(self, title, message, maximum, worker_fn,
                                    on_complete, on_error=None):
-        """Corre 'worker_fn(report_progress, report_error)' en un hilo
-        aparte, mostrando una ventana de progreso que sigue respondiendo
-        (se puede mover, repintar, etc.) mientras tanto - en vez de
-        bloquear el hilo principal de Tk durante toda la operación, que es
-        lo que hacía que la ventana se reportara como "no responde" con
-        archivos grandes.
+        """Run 'worker_fn(report_progress, report_error)' in a separate
+        thread, showing a progress window that stays responsive (it can be
+        moved, repainted, etc.) in the meantime - instead of blocking Tk's
+        main thread for the whole operation, which is what made the window
+        get reported as "not responding" with large files.
 
-        'worker_fn' debe llamar a report_progress(done, total, texto) para
-        actualizar la barra (opcional), y devolver su resultado, que se
-        pasa a on_complete(resultado) en el hilo principal cuando termina.
-        report_error(texto) muestra un messagebox de error sin detener el
-        hilo (para errores por-archivo que no deben abortar todo el
-        proceso). Una excepción no capturada dentro de worker_fn se pasa a
-        on_error(excepcion) (o se muestra con un messagebox genérico si
-        on_error es None), también en el hilo principal.
+        'worker_fn' should call report_progress(done, total, text) to
+        update the bar (optional), and return its result, which is passed
+        to on_complete(result) on the main thread when it finishes.
+        report_error(text) shows an error messagebox without stopping the
+        thread (for per-file errors that shouldn't abort the whole
+        process). An uncaught exception inside worker_fn is passed to
+        on_error(exception) (or shown with a generic messagebox if
+        on_error is None), also on the main thread.
 
-        Tkinter no es seguro para usar desde otro hilo que no sea el
-        principal: worker_fn nunca debe tocar widgets ni variables de Tk
-        directamente, solo llamar a report_progress/report_error (que solo
-        encolan un mensaje) y trabajar con datos planos de Python/pandas."""
+        Tkinter is not safe to use from any thread other than the main
+        one: worker_fn must never touch Tk widgets or variables directly,
+        only call report_progress/report_error (which just queue a
+        message) and work with plain Python/pandas data."""
         progress_win = tk.Toplevel(self.root)
         progress_win.title(title)
         progress_win.transient(self.root)
@@ -1652,7 +1651,7 @@ class NecLabApp:
 
         tk.Label(progress_win, text=message, font=('Arial', 11, 'bold')).pack(
             pady=(15, 4), padx=15, anchor='w')
-        status_label = tk.Label(progress_win, text="Preparando...", font=('Arial', 9),
+        status_label = tk.Label(progress_win, text="Preparing...", font=('Arial', 9),
                                  fg=_C['sub'], anchor='w')
         status_label.pack(fill='x', padx=15, anchor='w')
         progress_bar = ttk.Progressbar(progress_win, orient='horizontal', length=390,
@@ -1707,10 +1706,10 @@ class NecLabApp:
         progress_win.after(50, poll)
 
     def _load_xls_with_progress(self, selection, on_complete):
-        """Carga las hojas seleccionadas en un hilo aparte (ver
-        _run_with_progress_window), mostrando una barra de progreso que
-        sigue respondiendo mientras se leen archivos grandes. Llama a
-        on_complete(datasets) en el hilo principal cuando termina."""
+        """Load the selected sheets in a separate thread (see
+        _run_with_progress_window), showing a progress bar that stays
+        responsive while large files are being read. Calls
+        on_complete(datasets) on the main thread when it finishes."""
         def worker(report_progress, report_error):
             def _on_progress(done, total, filepath, sheet):
                 report_progress(done, total,
@@ -1718,26 +1717,26 @@ class NecLabApp:
 
             def _on_error(filepath, sheet, exc):
                 report_error(
-                    f"No se pudo cargar la hoja '{sheet}' de '{os.path.basename(filepath)}':\n{exc}")
+                    f"Could not load sheet '{sheet}' from '{os.path.basename(filepath)}':\n{exc}")
 
             return load_selected_sheets(
                 selection, progress_callback=_on_progress, error_callback=_on_error)
 
         self._run_with_progress_window(
-            title="Cargando Archivos", message="Cargando hojas de Excel...",
+            title="Loading Files", message="Loading Excel sheets...",
             maximum=len(selection), worker_fn=worker, on_complete=on_complete)
 
     def _create_multi_xls_layout(self):
-        """Construye la pestaña 'Datos Multiples': un menú local ('Vista',
-        'Gráfica', 'Datos') con los controles que antes eran botones/checks de
-        la barra lateral, una lista de columnas (celdas) redimensionable a la
-        izquierda (arrastrando el divisor) y la gráfica combinada a la derecha."""
+        """Build the 'Multiple Files' tab: a local menu ('View', 'Plot',
+        'Data') with the controls that used to be buttons/checkboxes in the
+        sidebar, a resizable column list on the left (by dragging the
+        divider) and the combined plot on the right."""
         Grid.rowconfigure(self.multi_xls_tab, 0, weight=0)
         Grid.rowconfigure(self.multi_xls_tab, 1, weight=1)
         Grid.columnconfigure(self.multi_xls_tab, 0, weight=1)
 
         # Local menu bar, docked at the top of the tab (same look as the
-        # window's top 'Archivo' menu), grouping the controls that used to
+        # window's top 'File' menu), grouping the controls that used to
         # be individual checkboxes/buttons stacked in the sidebar.
         menubar = tk.Frame(self.multi_xls_tab, bg='#f5f5f5', height=26,
                            highlightbackground=_C['border'], highlightthickness=1)
@@ -1755,42 +1754,42 @@ class NecLabApp:
             return menu
 
         def build_vista_menu(m):
-            m.add_checkbutton(label="Mostrar Nombres de Datos",
+            m.add_checkbutton(label="Show Data Names",
                                variable=self.multi_xls_show_labels_var,
                                command=self._on_multi_xls_show_labels_toggle)
             m.add_checkbutton(label="Smoothing",
                                variable=self.multi_xls_smoothing_var,
                                command=self._on_multi_xls_smoothing_toggle)
-            m.add_command(label="Puntos de Smoothing...",
+            m.add_command(label="Smoothing Points...",
                           command=self._open_multi_xls_smoothing_points_dialog)
             m.add_separator()
-            m.add_checkbutton(label="Escala de Color Compartida (mapa de calor)",
+            m.add_checkbutton(label="Shared Color Scale (heatmap)",
                                variable=self.multi_xls_shared_scale_var,
                                command=self._on_multi_xls_shared_scale_toggle)
             m.add_separator()
             norm_menu = tk.Menu(m, tearoff=0, font=('Segoe UI', 9))
             norm_menu.add_radiobutton(
-                label="Por Columna (mínimo de esa columna en cada hoja)",
+                label="By Column (minimum of that column in each sheet)",
                 variable=self.multi_xls_norm_mode_var, value='local',
                 command=self._on_multi_xls_norm_mode_toggle)
             norm_menu.add_radiobutton(
-                label="Por Hoja (mínimo de toda la hoja)",
+                label="By Sheet (minimum of the entire sheet)",
                 variable=self.multi_xls_norm_mode_var, value='sheet',
                 command=self._on_multi_xls_norm_mode_toggle)
             norm_menu.add_radiobutton(
-                label="Por Columna en Todas las Hojas (mínimo compartido)",
+                label="By Column Across All Sheets (shared minimum)",
                 variable=self.multi_xls_norm_mode_var, value='column_global',
                 command=self._on_multi_xls_norm_mode_toggle)
             norm_menu.add_radiobutton(
-                label="Global (mínimo de todas las columnas y hojas)",
+                label="Global (minimum of all columns and sheets)",
                 variable=self.multi_xls_norm_mode_var, value='all_global',
                 command=self._on_multi_xls_norm_mode_toggle)
-            m.add_cascade(label="Normalización", menu=norm_menu)
+            m.add_cascade(label="Normalization", menu=norm_menu)
 
         def build_grafica_menu(m):
-            m.add_command(label="Límites de Ejes (Gráfica Superior)...",
+            m.add_command(label="Axis Limits (Top Plot)...",
                           command=self._open_multi_xls_axis_limits_dialog)
-            m.add_command(label="Límites de Color (Heatmap)...",
+            m.add_command(label="Color Limits (Heatmap)...",
                           command=self._open_multi_xls_heatmap_range_dialog)
             m.add_separator()
             m.add_command(label="Save Plot Image...", state='disabled',
@@ -1802,7 +1801,7 @@ class NecLabApp:
                           command=self._save_multi_xls_smoothed_data)
 
         def build_datos_menu(m):
-            m.add_command(label="Editar Clasificaciones...",
+            m.add_command(label="Edit Classifications...",
                           command=self._open_multi_xls_class_editor)
             m.add_separator()
             m.add_command(label="Save Classifications...", state='disabled',
@@ -1810,9 +1809,9 @@ class NecLabApp:
             m.add_command(label="Load Classifications...", state='disabled',
                           command=self._load_multi_xls_classifications)
 
-        add_tab_menu("Vista", build_vista_menu)
-        self.multi_xls_menu_grafica = add_tab_menu("Gráfica", build_grafica_menu)
-        self.multi_xls_menu_datos = add_tab_menu("Datos", build_datos_menu)
+        add_tab_menu("View", build_vista_menu)
+        self.multi_xls_menu_grafica = add_tab_menu("Plot", build_grafica_menu)
+        self.multi_xls_menu_datos = add_tab_menu("Data", build_datos_menu)
 
         self.multi_xls_smoothing_points_var.trace_add(
             'write', lambda *args: self._on_multi_xls_smoothing_toggle())
@@ -1827,7 +1826,7 @@ class NecLabApp:
                            highlightbackground=_C['border'], highlightthickness=1)
         sidebar.columnconfigure(0, weight=1)
 
-        tk.Label(sidebar, text="DATOS (CELDAS)", font=('Arial', 8, 'bold'),
+        tk.Label(sidebar, text="DATA (COLUMNS)", font=('Arial', 8, 'bold'),
                  bg=_C['panel'], fg=_C['sub']).grid(row=0, column=0, sticky='w',
                                                      padx=12, pady=(12, 2))
         tk.Frame(sidebar, bg=_C['border'], height=1).grid(row=1, column=0, sticky='ew', padx=10)
@@ -1932,18 +1931,18 @@ class NecLabApp:
         self.btn_multi_xls_next_column.lift()
 
         self.multi_xls_plot_placeholder = tk.Label(
-            self.multi_xls_plot_frame, text="Selecciona una columna para graficar",
+            self.multi_xls_plot_frame, text="Select a column to plot",
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
         self.multi_xls_plot_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Bottom: heatmap images (one per sheet, columns=datos, rows=muestras)
+        # Bottom: heatmap images (one per sheet, columns=data, rows=samples)
         self.multi_xls_heatmap_frame = tk.Frame(right_paned, bg=_C['panel'],
                                                  highlightbackground=_C['border'],
                                                  highlightthickness=1)
         self.multi_xls_heatmap_frame.bind('<Configure>', self._on_multi_xls_heatmap_frame_resize)
 
         self.multi_xls_heatmap_placeholder = tk.Label(
-            self.multi_xls_heatmap_frame, text="Las imágenes de las hojas aparecerán aquí",
+            self.multi_xls_heatmap_frame, text="Sheet images will appear here",
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
         self.multi_xls_heatmap_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
@@ -1969,10 +1968,10 @@ class NecLabApp:
         self.multi_xls_plot_frame.bind('<Configure>', _enforce_right_paned_min_height, add='+')
 
     def _populate_multi_xls_columns(self):
-        """Llena la lista lateral con nombres genéricos 'Column N' (uno por
-        cada columna común a todas las hojas cargadas) y grafica la primera
-        por defecto. Estos nombres no cambian con el checkbox 'Mostrar
-        Nombres de Datos', que solo afecta a las etiquetas de la gráfica."""
+        """Fill the sidebar list with generic 'Column N' names (one for
+        each column common to all loaded sheets) and plot the first one
+        by default. These names don't change with the 'Show Data Names'
+        checkbox, which only affects the plot's labels."""
         if self.multi_xls_column_listbox is None:
             return
         old_columns = self.multi_xls_common_columns
@@ -2001,8 +2000,8 @@ class NecLabApp:
             self._draw_multi_xls_plot(0)
         else:
             messagebox.showwarning(
-                "Sin columnas comunes",
-                "Las hojas seleccionadas no comparten ninguna columna de datos con el mismo nombre."
+                "No Common Columns",
+                "The selected sheets do not share any data column with the same name."
             )
 
         self._draw_multi_xls_heatmap()
@@ -2016,14 +2015,14 @@ class NecLabApp:
             self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
 
     def _rebuild_multi_xls_class_row(self):
-        """Recrea el combobox de clasificación de cada hoja cargada (uno por
-        hoja). Las opciones por defecto son los nombres de todas las hojas
-        cargadas; cada hoja empieza clasificada con su propio nombre. Se
-        posicionan en el siguiente redibujado de la gráfica de líneas. La
-        clasificación elegida se guarda por separado para cada columna de
-        datos (self.multi_xls_classifications), así que cambiar de columna
-        en la lista actualiza los combobox con lo que se eligió para esa
-        columna en particular."""
+        """Recreate the classification combobox for each loaded sheet (one
+        per sheet). The default options are the names of every loaded
+        sheet; each sheet starts out classified with its own name. They
+        are positioned on the next redraw of the line plot. The chosen
+        classification is saved separately for each data column
+        (self.multi_xls_classifications), so switching columns in the
+        list updates the comboboxes with whatever was chosen for that
+        particular column."""
         if self.multi_xls_class_row is None:
             return
 
@@ -2053,18 +2052,18 @@ class NecLabApp:
             self.multi_xls_class_combos[label] = combo
 
     def _on_multi_xls_sheet_class_changed(self, sheet_label):
-        """Guarda la clasificación elegida para 'sheet_label' bajo la
-        columna actualmente seleccionada."""
+        """Save the chosen classification for 'sheet_label' under the
+        currently selected column."""
         if self._multi_xls_syncing_class_row or self.multi_xls_current_index is None:
             return
         value = self.multi_xls_sheet_class_var[sheet_label].get()
         self.multi_xls_classifications.setdefault(self.multi_xls_current_index, {})[sheet_label] = value
 
     def _sync_multi_xls_class_row_values(self, index):
-        """Actualiza los combobox para mostrar la clasificación guardada de
-        cada hoja para la columna 'index' (o el nombre de la hoja como
-        valor por defecto si esa combinación columna+hoja aún no se ha
-        clasificado)."""
+        """Update the comboboxes to show the saved classification of each
+        sheet for column 'index' (or the sheet's name as the default
+        value if that column+sheet combination hasn't been classified
+        yet)."""
         saved = self.multi_xls_classifications.get(index, {})
         self._multi_xls_syncing_class_row = True
         try:
@@ -2074,12 +2073,12 @@ class NecLabApp:
             self._multi_xls_syncing_class_row = False
 
     def _position_multi_xls_class_row(self, ax, bounds):
-        """Coloca cada combobox de clasificación alineado en pixeles con la
-        porción VISIBLE (según los límites actuales del eje X, que pueden
-        haberse fijado manualmente desde 'Límites de Ejes') del segmento
-        (offset_inicio, offset_fin) de su hoja en la gráfica 'ax' recién
-        dibujada. Las hojas que quedan totalmente fuera del rango visible
-        se ocultan en vez de colocarse fuera del canvas."""
+        """Position each classification combobox pixel-aligned with the
+        VISIBLE portion (according to the X axis's current limits, which
+        may have been set manually via 'Axis Limits') of its sheet's
+        (start_offset, end_offset) segment in the just-drawn plot 'ax'.
+        Sheets that fall completely outside the visible range are hidden
+        instead of being placed off-canvas."""
         if self.multi_xls_class_row is None:
             return
         xlim = ax.get_xlim()
@@ -2106,22 +2105,22 @@ class NecLabApp:
                 combo.place_forget()
 
     def _open_multi_xls_class_editor(self):
-        """Diálogo para renombrar, eliminar o agregar opciones de
-        clasificación. Al aplicar, actualiza todos los combobox y conserva
-        (o reasigna) la clasificación ya elegida en cada hoja."""
+        """Dialog to rename, delete, or add classification options. On
+        apply, updates every combobox and preserves (or remaps) the
+        classification already chosen for each sheet."""
         if not self.multi_xls_classes:
-            messagebox.showinfo("Sin datos", "Carga archivos .xls primero.")
+            messagebox.showinfo("No Data", "Load .xls files first.")
             return
 
         import uuid as _uuid
 
         dialog = tk.Toplevel(self.root)
-        dialog.title("Editar Clasificaciones")
+        dialog.title("Edit Classifications")
         dialog.geometry("360x440")
         dialog.transient(self.root)
         dialog.grab_set()
 
-        tk.Label(dialog, text="Opciones de clasificación:", font=('Arial', 11, 'bold')).pack(
+        tk.Label(dialog, text="Classification options:", font=('Arial', 11, 'bold')).pack(
             pady=(10, 4), padx=10, anchor='w')
 
         list_frame = tk.Frame(dialog)
@@ -2154,7 +2153,7 @@ class NecLabApp:
             if not name:
                 return
             if any(e['name'] == name for e in entries):
-                messagebox.showwarning("Duplicado", "Esa opción ya existe.", parent=dialog)
+                messagebox.showwarning("Duplicate", "That option already exists.", parent=dialog)
                 return
             entries.append({'id': str(_uuid.uuid4()), 'name': name})
             listbox.insert(tk.END, name)
@@ -2162,14 +2161,14 @@ class NecLabApp:
         def rename_option():
             sel = listbox.curselection()
             if not sel:
-                messagebox.showinfo("Sin selección", "Selecciona una opción para renombrar.", parent=dialog)
+                messagebox.showinfo("No Selection", "Select an option to rename.", parent=dialog)
                 return
             name = edit_var.get().strip()
             if not name:
                 return
             idx = sel[0]
             if any(i != idx and e['name'] == name for i, e in enumerate(entries)):
-                messagebox.showwarning("Duplicado", "Esa opción ya existe.", parent=dialog)
+                messagebox.showwarning("Duplicate", "That option already exists.", parent=dialog)
                 return
             entries[idx]['name'] = name
             listbox.delete(idx)
@@ -2179,10 +2178,10 @@ class NecLabApp:
         def delete_option():
             sel = listbox.curselection()
             if not sel:
-                messagebox.showinfo("Sin selección", "Selecciona una opción para eliminar.", parent=dialog)
+                messagebox.showinfo("No Selection", "Select an option to delete.", parent=dialog)
                 return
             if len(entries) <= 1:
-                messagebox.showwarning("No permitido", "Debe quedar al menos una opción.", parent=dialog)
+                messagebox.showwarning("Not Allowed", "At least one option must remain.", parent=dialog)
                 return
             idx = sel[0]
             del entries[idx]
@@ -2191,9 +2190,9 @@ class NecLabApp:
 
         btn_row = tk.Frame(dialog)
         btn_row.pack(fill=tk.X, padx=10, pady=(0, 6))
-        tk.Button(btn_row, text="Agregar", command=add_option).pack(side=tk.LEFT)
-        tk.Button(btn_row, text="Renombrar", command=rename_option).pack(side=tk.LEFT, padx=(6, 0))
-        tk.Button(btn_row, text="Eliminar", command=delete_option).pack(side=tk.LEFT, padx=(6, 0))
+        tk.Button(btn_row, text="Add", command=add_option).pack(side=tk.LEFT)
+        tk.Button(btn_row, text="Rename", command=rename_option).pack(side=tk.LEFT, padx=(6, 0))
+        tk.Button(btn_row, text="Delete", command=delete_option).pack(side=tk.LEFT, padx=(6, 0))
 
         def on_apply():
             self._apply_multi_xls_class_changes(original_entries, entries)
@@ -2204,14 +2203,14 @@ class NecLabApp:
 
         ok_row = tk.Frame(dialog)
         ok_row.pack(pady=10)
-        tk.Button(ok_row, text="Aplicar", command=on_apply, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(ok_row, text="Cancelar", command=on_cancel, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(ok_row, text="Apply", command=on_apply, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(ok_row, text="Cancel", command=on_cancel, width=10).pack(side=tk.LEFT, padx=5)
 
     def _apply_multi_xls_class_changes(self, original_entries, final_entries):
-        """Aplica los cambios del editor de clasificaciones: propaga
-        renombrados a las hojas que tenían esa opción elegida, reasigna las
-        hojas que tenían una opción eliminada, y refresca las opciones
-        disponibles en todos los combobox."""
+        """Apply the classification editor's changes: propagate renames to
+        the sheets that had that option chosen, reassign the sheets that
+        had a deleted option, and refresh the available options in every
+        combobox."""
         original_by_id = {e['id']: e['name'] for e in original_entries}
         final_by_id = {e['id']: e['name'] for e in final_entries}
 
@@ -2244,23 +2243,23 @@ class NecLabApp:
             self._sync_multi_xls_class_row_values(self.multi_xls_current_index)
 
     def _open_multi_xls_axis_limits_dialog(self):
-        """Diálogo para fijar manualmente los límites de los ejes X/Y de la
-        gráfica superior de 'Datos Multiples', o volver a autoescalado."""
+        """Dialog to manually set the X/Y axis limits of the 'Multiple
+        Files' top plot, or revert to auto-scaling."""
         if self._multi_xls_plot_ax is None:
-            messagebox.showinfo("Sin datos", "Carga y grafica una columna primero.")
+            messagebox.showinfo("No Data", "Load and plot a column first.")
             return
 
         cur_xlim = self.multi_xls_xlim or self._multi_xls_plot_ax.get_xlim()
         cur_ylim = self.multi_xls_ylim or self._multi_xls_plot_ax.get_ylim()
 
         dialog = tk.Toplevel(self.root)
-        dialog.title("Límites de Ejes - Gráfica Superior")
+        dialog.title("Axis Limits - Top Plot")
         dialog.geometry("300x230")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(False, False)
 
-        tk.Label(dialog, text="Eje X", font=('Arial', 10, 'bold')).grid(
+        tk.Label(dialog, text="X Axis", font=('Arial', 10, 'bold')).grid(
             row=0, column=0, columnspan=2, sticky='w', padx=10, pady=(12, 2))
         tk.Label(dialog, text="Min:").grid(row=1, column=0, sticky='e', padx=(10, 4))
         x_min_var = tk.StringVar(value=f"{cur_xlim[0]:.4g}")
@@ -2269,7 +2268,7 @@ class NecLabApp:
         x_max_var = tk.StringVar(value=f"{cur_xlim[1]:.4g}")
         tk.Entry(dialog, textvariable=x_max_var, width=12).grid(row=2, column=1, sticky='w', padx=(0, 10), pady=2)
 
-        tk.Label(dialog, text="Eje Y", font=('Arial', 10, 'bold')).grid(
+        tk.Label(dialog, text="Y Axis", font=('Arial', 10, 'bold')).grid(
             row=3, column=0, columnspan=2, sticky='w', padx=10, pady=(12, 2))
         tk.Label(dialog, text="Min:").grid(row=4, column=0, sticky='e', padx=(10, 4))
         y_min_var = tk.StringVar(value=f"{cur_ylim[0]:.4g}")
@@ -2283,10 +2282,10 @@ class NecLabApp:
                 xmin, xmax = float(x_min_var.get()), float(x_max_var.get())
                 ymin, ymax = float(y_min_var.get()), float(y_max_var.get())
             except ValueError:
-                messagebox.showerror("Valor inválido", "Todos los límites deben ser números.", parent=dialog)
+                messagebox.showerror("Invalid Value", "All limits must be numbers.", parent=dialog)
                 return
             if xmin >= xmax or ymin >= ymax:
-                messagebox.showerror("Rango inválido", "El mínimo debe ser menor que el máximo.", parent=dialog)
+                messagebox.showerror("Invalid Range", "The minimum must be less than the maximum.", parent=dialog)
                 return
             self.multi_xls_xlim = (xmin, xmax)
             self.multi_xls_ylim = (ymin, ymax)
@@ -2304,26 +2303,26 @@ class NecLabApp:
         btns = tk.Frame(dialog)
         btns.grid(row=6, column=0, columnspan=2, pady=18)
         tk.Button(btns, text="Auto", command=reset_auto, width=8).pack(side='left', padx=4)
-        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
-        tk.Button(btns, text="Aplicar", command=apply_limits, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Cancel", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Apply", command=apply_limits, width=8).pack(side='left', padx=4)
 
     def _open_multi_xls_heatmap_range_dialog(self):
-        """Diálogo para fijar manualmente el rango de color (min/max) del
-        heatmap de 'Datos Multiples', mostrando el rango actualmente en
-        uso, o volver a autoescalado (por hoja, o compartido si 'Escala de
-        Color Compartida' está activo)."""
+        """Dialog to manually set the color range (min/max) of the
+        'Multiple Files' heatmap, showing the range currently in use, or
+        revert to auto-scaling (per sheet, or shared if 'Shared Color
+        Scale' is on)."""
         if not self.multi_xls_datasets:
-            messagebox.showinfo("Sin datos", "Carga archivos primero.")
+            messagebox.showinfo("No Data", "Load files first.")
             return
 
         matrices, _vmin, _vmax, _per_sheet_ranges = self._compute_multi_xls_heatmap_matrices()
         if not matrices:
-            messagebox.showinfo("Sin datos", "No hay datos numéricos para calcular un rango.")
+            messagebox.showinfo("No Data", "There is no numeric data to compute a range from.")
             return
 
-        # Rango combinado de todas las hojas, sobre los mismos datos
-        # normalizados/suavizados que dibuja el heatmap - referencia de
-        # "rango actual" incluso cuando cada hoja usa su propia escala.
+        # Combined range across all sheets, over the same normalized/smoothed
+        # data the heatmap draws - a "current range" reference even when
+        # each sheet uses its own scale.
         all_finite = np.concatenate([m[np.isfinite(m)].ravel() for m in matrices])
         auto_min, auto_max = float(all_finite.min()), float(all_finite.max())
 
@@ -2333,13 +2332,13 @@ class NecLabApp:
             cur_min, cur_max = auto_min, auto_max
 
         dialog = tk.Toplevel(self.root)
-        dialog.title("Límites de Color - Heatmap")
+        dialog.title("Color Limits - Heatmap")
         dialog.geometry("320x210")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(False, False)
 
-        tk.Label(dialog, text="Rango actual en uso:", font=('Arial', 9, 'bold')).grid(
+        tk.Label(dialog, text="Current range in use:", font=('Arial', 9, 'bold')).grid(
             row=0, column=0, columnspan=2, sticky='w', padx=10, pady=(12, 0))
         tk.Label(dialog, text=f"{cur_min:.4g}  —  {cur_max:.4g}", font=('Arial', 9)).grid(
             row=1, column=0, columnspan=2, sticky='w', padx=10, pady=(0, 10))
@@ -2355,10 +2354,10 @@ class NecLabApp:
             try:
                 new_min, new_max = float(min_var.get()), float(max_var.get())
             except ValueError:
-                messagebox.showerror("Valor inválido", "Min y Max deben ser números.", parent=dialog)
+                messagebox.showerror("Invalid Value", "Min and Max must be numbers.", parent=dialog)
                 return
             if new_min >= new_max:
-                messagebox.showerror("Rango inválido", "El mínimo debe ser menor que el máximo.", parent=dialog)
+                messagebox.showerror("Invalid Range", "The minimum must be less than the maximum.", parent=dialog)
                 return
             self.multi_xls_heatmap_manual_range = (new_min, new_max)
             dialog.destroy()
@@ -2376,29 +2375,29 @@ class NecLabApp:
         btns = tk.Frame(dialog)
         btns.grid(row=4, column=0, columnspan=2, pady=18)
         tk.Button(btns, text="Auto", command=reset_auto, width=8).pack(side='left', padx=4)
-        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
-        tk.Button(btns, text="Aplicar", command=apply_range, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Cancel", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Apply", command=apply_range, width=8).pack(side='left', padx=4)
 
     def _on_multi_xls_show_labels_toggle(self):
-        """Redibuja ambas gráficas para mostrar u ocultar las etiquetas de
-        cada hoja bajo el eje X, sin tocar los nombres de la lista de datos."""
+        """Redraw both plots to show or hide each sheet's label under the
+        X axis, without touching the data list's names."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
         self._draw_multi_xls_heatmap()
 
     def _on_multi_xls_smoothing_toggle(self):
-        """Redibuja ambas gráficas (línea y heatmap) con el smoothing
-        Convex Envelope aplicado (o removido), o con el número de puntos
-        actualizado."""
+        """Redraw both plots (line and heatmap) with Convex Envelope
+        smoothing applied (or removed), or with the updated number of
+        points."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
         self._draw_multi_xls_heatmap()
 
     def _open_multi_xls_smoothing_points_dialog(self):
-        """Diálogo para ajustar el número de puntos usado por el smoothing
-        Convex Envelope de la gráfica superior de 'Datos Multiples'."""
+        """Dialog to adjust the number of points used by the Convex
+        Envelope smoothing of the 'Multiple Files' top plot."""
         dialog = tk.Toplevel(self.root)
-        dialog.title("Puntos de Smoothing")
+        dialog.title("Smoothing Points")
         dialog.geometry("260x120")
         dialog.transient(self.root)
         dialog.grab_set()
@@ -2406,7 +2405,7 @@ class NecLabApp:
 
         row = tk.Frame(dialog)
         row.pack(padx=16, pady=(20, 8), fill='x')
-        tk.Label(row, text="Número de puntos:").pack(side='left')
+        tk.Label(row, text="Number of points:").pack(side='left')
         points_var = tk.StringVar(value=str(self.multi_xls_smoothing_points_var.get()))
         ttk.Spinbox(row, from_=2, to=50, textvariable=points_var, width=6).pack(side='left', padx=(8, 0))
 
@@ -2414,33 +2413,33 @@ class NecLabApp:
             try:
                 n = int(points_var.get())
             except ValueError:
-                messagebox.showerror("Valor inválido", "Debe ser un número entero.", parent=dialog)
+                messagebox.showerror("Invalid Value", "Must be an integer.", parent=dialog)
                 return
             if not (2 <= n <= 50):
-                messagebox.showerror("Valor inválido", "Debe estar entre 2 y 50.", parent=dialog)
+                messagebox.showerror("Invalid Value", "Must be between 2 and 50.", parent=dialog)
                 return
             self.multi_xls_smoothing_points_var.set(n)
             dialog.destroy()
 
         btns = tk.Frame(dialog)
         btns.pack(side='bottom', pady=16)
-        tk.Button(btns, text="Cancelar", command=dialog.destroy, width=8).pack(side='left', padx=4)
-        tk.Button(btns, text="Aplicar", command=apply_points, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Cancel", command=dialog.destroy, width=8).pack(side='left', padx=4)
+        tk.Button(btns, text="Apply", command=apply_points, width=8).pack(side='left', padx=4)
 
     def _on_multi_xls_shared_scale_toggle(self):
-        """Redibuja el mapa de calor con una escala de color compartida entre
-        todas las hojas, o una escala independiente para cada hoja. También
-        redibuja la gráfica de líneas: su margen derecho depende de si el
-        mapa de calor mostrará colorbar, para que ambas sigan alineadas."""
+        """Redraw the heatmap with a color scale shared across all sheets,
+        or an independent scale for each sheet. Also redraws the line
+        plot: its right margin depends on whether the heatmap will show a
+        colorbar, so both stay aligned."""
         self._draw_multi_xls_heatmap()
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
     def _multi_xls_effective_shared_scale(self):
         """True when every sheet's heatmap image is drawn with the same
-        color range - either because 'Escala de Color Compartida' is on,
-        or because a manual range override is set (Límites de Color). Used
-        to decide whether to reserve/draw the heatmap colorbar and to keep
+        color range - either because 'Shared Color Scale' is on, or
+        because a manual range override is set (Color Limits). Used to
+        decide whether to reserve/draw the heatmap colorbar and to keep
         the line plot's right margin aligned with it."""
         return self.multi_xls_shared_scale_var.get() or self.multi_xls_heatmap_manual_range is not None
 
@@ -2478,34 +2477,34 @@ class NecLabApp:
         return out
 
     def _on_multi_xls_norm_mode_toggle(self):
-        """Redibuja ambas gráficas con el modo de normalización elegido:
-        por columna (local, por defecto), por hoja, por columna en todas
-        las hojas, o global (todas las columnas y hojas). Ambas gráficas
-        usan el mismo modo, así que las dos se redibujan."""
+        """Redraw both plots with the chosen normalization mode: by column
+        (local, default), by sheet, by column across all sheets, or
+        global (all columns and sheets). Both plots use the same mode, so
+        both are redrawn."""
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
         self._draw_multi_xls_heatmap()
 
     def _compute_multi_xls_series(self, col_name):
-        """Para cada hoja cargada que tenga la columna 'col_name', devuelve
-        (label, values) ya interpolados, normalizados y suavizados - el
-        mismo procesamiento que dibuja la gráfica superior, factorizado
-        aparte para que el caché lo pueda reutilizar. El divisor de la
-        normalización depende de multi_xls_norm_mode_var:
-        - 'local': mínimo de esa columna, dentro de cada hoja (cada hoja
-          usa su propio mínimo).
-        - 'sheet': mínimo de toda la hoja (todas sus columnas), dentro de
-          cada hoja (mismo criterio que el heatmap).
-        - 'column_global': mínimo de esa columna, agrupando todas las
-          hojas cargadas - un solo valor, compartido por todas.
-        - 'all_global': mínimo de todas las columnas y todas las hojas - un
-          solo valor para absolutamente todo lo cargado, sin importar la
-          columna seleccionada.
+        """For each loaded sheet that has column 'col_name', return
+        (label, values) already interpolated, normalized and smoothed -
+        the same processing that draws the top plot, factored out so the
+        cache can reuse it. The normalization divisor depends on
+        multi_xls_norm_mode_var:
+        - 'local': minimum of that column, within each sheet (each sheet
+          uses its own minimum).
+        - 'sheet': minimum of the entire sheet (all its columns), within
+          each sheet (same criterion as the heatmap).
+        - 'column_global': minimum of that column, pooling every loaded
+          sheet - a single value shared by all of them.
+        - 'all_global': minimum of all columns and all sheets - a single
+          value for absolutely everything loaded, regardless of the
+          selected column.
 
-        El resultado se guarda en caché (por columna + modo de
-        normalización + smoothing), porque un redibujado disparado solo por
-        cambio de tamaño de panel no cambia ninguno de estos datos - así se
-        evita reprocesar cada hoja en cada resize."""
+        The result is cached (by column + normalization mode + smoothing),
+        because a redraw triggered only by a panel resize doesn't change
+        any of this data - this avoids reprocessing every sheet on every
+        resize."""
         import pandas as pd
 
         mode = self.multi_xls_norm_mode_var.get()
@@ -2568,7 +2567,7 @@ class NecLabApp:
         return series
 
     def _on_multi_xls_column_select(self, event=None):
-        """Callback cuando el usuario elige una columna en la lista lateral."""
+        """Callback for when the user chooses a column in the sidebar list."""
         sel = self.multi_xls_column_listbox.curselection()
         if not sel or sel[0] >= len(self.multi_xls_common_columns):
             return
@@ -2588,13 +2587,13 @@ class NecLabApp:
         self._draw_multi_xls_plot(next_index)
 
     def _on_multi_xls_plot_frame_resize(self, event=None):
-        """Redibuja la gráfica de líneas (con un pequeño retraso, para no
-        redibujar en cada pixel mientras se arrastra la ventana) para que
-        siga llenando exactamente el panel tras cambiar de tamaño. Mientras
-        se arrastra un sash, no se agenda nada: el redibujo (caro, porque
-        reprocesa los datos de cada hoja) se hace una sola vez, al soltar
-        (ver _on_multi_xls_sash_release), en vez de arriesgarse a que el
-        temporizador dispare a mitad del arrastre y se sienta como trabado."""
+        """Redraw the line plot (with a small delay, to avoid redrawing on
+        every pixel while the window is being dragged) so it keeps
+        exactly filling the panel after a resize. While a sash is being
+        dragged, nothing is scheduled: the (expensive, since it
+        reprocesses every sheet's data) redraw happens only once, on
+        release (see _on_multi_xls_sash_release), instead of risking the
+        timer firing mid-drag, which would feel stuck."""
         if self._multi_xls_sash_dragging:
             return
         if self._multi_xls_plot_resize_job is not None:
@@ -2607,10 +2606,10 @@ class NecLabApp:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
     def _on_multi_xls_heatmap_frame_resize(self, event=None):
-        """Redibuja el panel de imágenes (con un pequeño retraso) para que
-        siga llenando exactamente el panel tras cambiar de tamaño. Igual que
-        en _on_multi_xls_plot_frame_resize, no agenda nada mientras se
-        arrastra un sash."""
+        """Redraw the image panel (with a small delay) so it keeps
+        exactly filling the panel after a resize. Same as in
+        _on_multi_xls_plot_frame_resize, nothing is scheduled while a
+        sash is being dragged."""
         if self._multi_xls_sash_dragging:
             return
         if self._multi_xls_heatmap_resize_job is not None:
@@ -2618,12 +2617,12 @@ class NecLabApp:
         self._multi_xls_heatmap_resize_job = self.root.after(200, self._draw_multi_xls_heatmap)
 
     def _on_multi_xls_sash_release(self, event=None):
-        """Redibuja ambas gráficas inmediatamente al soltar el mouse tras
-        arrastrar el divisor entre la lista y las gráficas, en vez de esperar
-        al temporizador de espera usado para el redimensionado de ventana
-        (que sí necesita ese retraso, porque no hay un evento de "mouse
-        liberado" al que enganchar cuando el arrastre lo controla el gestor
-        de ventanas del sistema operativo en vez de Tk)."""
+        """Redraw both plots immediately when the mouse is released after
+        dragging the divider between the list and the plots, instead of
+        waiting for the debounce timer used for window resizing (which
+        does need that delay, since there is no "mouse released" event to
+        hook into when the drag is controlled by the OS window manager
+        instead of Tk)."""
         self._multi_xls_sash_dragging = False
         if self._multi_xls_plot_resize_job is not None:
             self.root.after_cancel(self._multi_xls_plot_resize_job)
@@ -2636,14 +2635,13 @@ class NecLabApp:
         self._draw_multi_xls_heatmap()
 
     def _draw_multi_xls_plot(self, index):
-        """Grafica la columna en la posición 'index' de cada hoja cargada,
-        una junto a la otra en la misma figura, separadas por líneas
-        verticales punteadas. El título de la gráfica usa la misma etiqueta
-        que está seleccionada en la lista de datos, y las etiquetas de cada
-        hoja se muestran u ocultan según el checkbox 'Mostrar Nombres de
-        Datos'. El canvas se crea una sola vez y se reutiliza en cada
-        redibujado (ver comentario en __init__), ajustándose exactamente al
-        tamaño del panel para que se vea completo sin hacer scroll."""
+        """Plot the column at position 'index' of each loaded sheet, side
+        by side in the same figure, separated by vertical dashed lines.
+        The plot's title uses the same label selected in the data list,
+        and each sheet's labels are shown or hidden according to the
+        'Show Data Names' checkbox. The canvas is created only once and
+        reused on every redraw (see comment in __init__), resizing to
+        exactly fit the panel so it's fully visible without scrolling."""
         if not self.multi_xls_datasets or self.multi_xls_plot_frame is None:
             return
         if index >= len(self.multi_xls_common_columns):
@@ -2653,9 +2651,9 @@ class NecLabApp:
         frame.update_idletasks()
         w_px, h_px = frame.winfo_width(), frame.winfo_height()
         if w_px <= 1 or h_px <= 1:
-            # El panel todavía no está visible (p.ej. la pestaña se acaba de
-            # crear). Recordamos qué columna dibujar; el <Configure> que se
-            # dispare cuando el panel obtenga su tamaño real hará el dibujo.
+            # The panel isn't visible yet (e.g. the tab was just created).
+            # Remember which column to plot; the <Configure> that fires
+            # once the panel gets its real size will do the drawing.
             self.multi_xls_current_index = index
             self.multi_xls_current_column = self.multi_xls_common_columns[index]
             return
@@ -2682,8 +2680,8 @@ class NecLabApp:
             self._multi_xls_plot_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         else:
             self._multi_xls_plot_ax.clear()
-            # forward=False: solo actualiza el tamaño interno de la figura,
-            # sin ordenarle a Tk que redimensione el widget del canvas.
+            # forward=False: only updates the figure's internal size,
+            # without telling Tk to resize the canvas widget.
             self.multi_xls_fig.set_size_inches(fig_width, fig_height, forward=False)
 
         ax = self._multi_xls_plot_ax
@@ -2710,15 +2708,15 @@ class NecLabApp:
         ax.set_title(display_label)
         norm_mode = self.multi_xls_norm_mode_var.get()
         if norm_mode == 'sheet':
-            ax.set_ylabel('Value / mínimo de toda la hoja')
+            ax.set_ylabel('Value / minimum of the entire sheet')
         elif norm_mode == 'column_global':
-            ax.set_ylabel('Value / mínimo de la columna (todas las hojas)')
+            ax.set_ylabel('Value / minimum of the column (all sheets)')
         elif norm_mode == 'all_global':
-            ax.set_ylabel('Value / mínimo global (todas las columnas y hojas)')
+            ax.set_ylabel('Value / global minimum (all columns and sheets)')
         else:
-            ax.set_ylabel('Value / mínimo de la columna')
+            ax.set_ylabel('Value / minimum of the column')
 
-        # Manual axis limits set via "Límites de Ejes", if any; otherwise fit
+        # Manual axis limits set via "Axis Limits", if any; otherwise fit
         # tightly to the data range (matching the heatmap below) instead of
         # matplotlib's default 5% autoscale padding on each side.
         if self.multi_xls_xlim is not None:
@@ -2743,35 +2741,35 @@ class NecLabApp:
         self.btn_multi_xls_next_column.lift()
 
     def _compute_multi_xls_heatmap_matrices(self):
-        """Devuelve (matrices, vmin, vmax, per_sheet_ranges) para el
-        heatmap: cada matriz normalizada y transpuesta (filas=columnas de
-        datos, columnas=muestras); vmin/vmax (o None, None si no aplica
-        escala compartida); y una lista de (min, max) por hoja para cuando
-        no aplica. Devuelve (None, None, None, None) si no hay datos
-        finitos.
+        """Return (matrices, vmin, vmax, per_sheet_ranges) for the
+        heatmap: each normalized and transposed matrix (rows=data
+        columns, columns=samples); vmin/vmax (or None, None if a shared
+        scale doesn't apply); and a list of per-sheet (min, max) for when
+        it doesn't. Returns (None, None, None, None) if there is no
+        finite data.
 
-        Usa el mismo modo de normalización (multi_xls_norm_mode_var) que la
-        gráfica de líneas de arriba, adaptado a que aquí cada hoja se
-        muestra entera (todas sus columnas a la vez, una por fila):
-        - 'local': cada fila (columna de datos) se normaliza contra su
-          propio mínimo, calculado solo dentro de esa hoja.
-        - 'sheet': toda la hoja (todas sus columnas juntas) se normaliza
-          contra un solo mínimo, dentro de esa hoja (comportamiento
-          original de este heatmap).
-        - 'column_global': cada fila (columna de datos, por posición) se
-          normaliza contra el mínimo de esa misma posición de columna,
-          agrupando todas las hojas cargadas.
-        - 'all_global': un solo mínimo para absolutamente todo lo cargado.
+        Uses the same normalization mode (multi_xls_norm_mode_var) as the
+        line plot above, adapted to the fact that here each sheet is
+        shown in full (all its columns at once, one per row):
+        - 'local': each row (data column) is normalized against its own
+          minimum, computed only within that sheet.
+        - 'sheet': the entire sheet (all its columns together) is
+          normalized against a single minimum, within that sheet
+          (this heatmap's original behavior).
+        - 'column_global': each row (data column, by position) is
+          normalized against the minimum of that same column position,
+          pooling every loaded sheet.
+        - 'all_global': a single minimum for absolutely everything loaded.
 
-        Si 'Smoothing' está activo, cada fila (columna de datos) se pasa
-        además por el mismo Convex Envelope que usa la gráfica de líneas
-        de arriba (_smooth_multi_xls_signal), para que el heatmap
-        coincida con lo que muestra esa gráfica.
+        If 'Smoothing' is on, each row (data column) also goes through
+        the same Convex Envelope used by the line plot above
+        (_smooth_multi_xls_signal), so the heatmap matches what that plot
+        shows.
 
-        Cacheado por (datasets, modo de normalización, escala compartida,
-        smoothing, puntos de smoothing) - nada de esto cambia con el
-        tamaño del panel, así que un redibujado disparado solo por resize
-        reutiliza el resultado en vez de reprocesar todas las hojas."""
+        Cached by (datasets, normalization mode, shared scale, smoothing,
+        smoothing points) - none of this changes with the panel's size,
+        so a redraw triggered only by a resize reuses the result instead
+        of reprocessing every sheet."""
         mode = self.multi_xls_norm_mode_var.get()
         shared_scale = self.multi_xls_shared_scale_var.get()
         smoothing_on = self.multi_xls_smoothing_var.get()
@@ -2842,21 +2840,20 @@ class NecLabApp:
         return result
 
     def _draw_multi_xls_heatmap(self):
-        """Dibuja, para cada hoja cargada, una imagen donde el eje X son las
-        muestras (el mismo eje que la gráfica de líneas de arriba) y el eje Y
-        son las columnas (las series de datos); el color de cada pixel
-        representa su valor dividido entre un mínimo, calculado según el
-        modo elegido en el submenú 'Normalización' (ver
-        _compute_multi_xls_heatmap_matrices) - el mismo modo que usa la
-        gráfica de líneas de arriba. Si hay un rango manual fijado
-        (multi_xls_heatmap_manual_range, ver
-        _open_multi_xls_heatmap_range_dialog), todas las hojas usan ese
-        rango; si no, y 'Escala de Color Compartida' está activo, todas las
-        hojas comparten la misma escala automática; si no, cada hoja usa su
-        propio rango automático. Las imágenes de cada hoja se colocan una
-        junto a otra. El canvas se crea una sola vez y se reutiliza en cada
-        redibujado (ver comentario en __init__), ajustándose exactamente al
-        tamaño del panel."""
+        """Draw, for each loaded sheet, an image where the X axis is the
+        samples (the same axis as the line plot above) and the Y axis is
+        the columns (the data series); each pixel's color represents its
+        value divided by a minimum, computed according to the mode chosen
+        in the 'Normalization' submenu (see
+        _compute_multi_xls_heatmap_matrices) - the same mode used by the
+        line plot above. If a manual range is set
+        (multi_xls_heatmap_manual_range, see
+        _open_multi_xls_heatmap_range_dialog), every sheet uses that
+        range; otherwise, if 'Shared Color Scale' is on, every sheet
+        shares the same automatic scale; otherwise, each sheet uses its
+        own automatic range. Each sheet's images are placed side by side.
+        The canvas is created only once and reused on every redraw (see
+        comment in __init__), resizing to exactly fit the panel."""
         if self.multi_xls_heatmap_frame is None:
             return
 
@@ -2870,7 +2867,7 @@ class NecLabApp:
             for w in list(self.multi_xls_heatmap_frame.winfo_children()):
                 w.destroy()
             self.multi_xls_heatmap_placeholder = tk.Label(
-                self.multi_xls_heatmap_frame, text="Las imágenes de las hojas aparecerán aquí",
+                self.multi_xls_heatmap_frame, text="Sheet images will appear here",
                 font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
             self.multi_xls_heatmap_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
             return
@@ -2907,10 +2904,10 @@ class NecLabApp:
             self.multi_xls_heatmap_fig.clear()
             self._multi_xls_heatmap_ax = self.multi_xls_heatmap_fig.add_subplot(111)
             self._multi_xls_heatmap_colorbar = None
-            # forward=False: solo actualiza el tamaño interno de la figura,
-            # sin ordenarle a Tk que redimensione el widget del canvas (eso
-            # generaba un <Configure> nuevo en cada redibujado y provocaba
-            # un ciclo de redibujado infinito).
+            # forward=False: only updates the figure's internal size,
+            # without telling Tk to resize the canvas widget (that used
+            # to trigger a new <Configure> on every redraw and caused an
+            # infinite redraw loop).
             self.multi_xls_heatmap_fig.set_size_inches(fig_width, fig_height, forward=False)
 
         ax = self._multi_xls_heatmap_ax
@@ -2942,17 +2939,17 @@ class NecLabApp:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
         norm_mode_desc = {
-            'local': 'mínimo de cada columna en cada hoja',
-            'sheet': 'mínimo de cada hoja',
-            'column_global': 'mínimo de cada columna (todas las hojas)',
-            'all_global': 'mínimo global (todas las columnas y hojas)',
-        }.get(self.multi_xls_norm_mode_var.get(), 'mínimo de cada hoja')
+            'local': 'minimum of each column in each sheet',
+            'sheet': 'minimum of each sheet',
+            'column_global': 'minimum of each column (all sheets)',
+            'all_global': 'global minimum (all columns and sheets)',
+        }.get(self.multi_xls_norm_mode_var.get(), 'minimum of each sheet')
         if manual_range is not None:
-            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc}, rango manual)')
+            ax.set_title(f'All sheets (value / {norm_mode_desc}, manual range)')
         elif shared_scale:
-            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc})')
+            ax.set_title(f'All sheets (value / {norm_mode_desc})')
         else:
-            ax.set_title(f'Todas las hojas (valor / {norm_mode_desc}, escala individual por hoja)')
+            ax.set_title(f'All sheets (value / {norm_mode_desc}, per-sheet individual scale)')
         # Same shared left/right bounds as the top line plot (see
         # _multi_xls_axes_margins), so a sample's x-position lines up
         # vertically between the two. The colorbar (when shown) goes in its
@@ -2971,7 +2968,7 @@ class NecLabApp:
         self._multi_xls_heatmap_canvas.draw()
 
     def _save_multi_xls_plot_image(self):
-        """Guarda la gráfica de líneas combinada de 'Datos Multiples' en un archivo."""
+        """Save the combined line plot of 'Multiple Files' to a file."""
         if self.multi_xls_fig is None:
             return
         from tkinter.filedialog import asksaveasfilename
@@ -2986,7 +2983,7 @@ class NecLabApp:
             self.multi_xls_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
     def _save_multi_xls_heatmap_image(self):
-        """Guarda la imagen del heatmap de 'Datos Multiples' en un archivo."""
+        """Save the heatmap image of 'Multiple Files' to a file."""
         if self.multi_xls_heatmap_fig is None:
             return
         from tkinter.filedialog import asksaveasfilename
@@ -3001,19 +2998,19 @@ class NecLabApp:
             self.multi_xls_heatmap_fig.savefig(filename, dpi=300, bbox_inches='tight')
 
     def _save_multi_xls_smoothed_data(self):
-        """Guarda, en un solo archivo .xlsx o .csv, todas las columnas comunes con
-        exactamente el mismo procesamiento que se ve en la gráfica superior
-        (interpoladas, normalizadas según 'multi_xls_norm_mode_var' y - si
-        'Smoothing' está activo - suavizadas con Convex Envelope), para cada
-        hoja cargada. Los datos de cada hoja se apilan uno debajo del otro en
-        una sola hoja de cálculo (o un único CSV), separados por 20 filas en
-        blanco, en vez de una hoja de Excel distinta por cada una. A
-        diferencia de la gráfica, que solo muestra la columna seleccionada,
-        esto exporta todas las columnas comunes. El procesamiento y guardado
-        corren en un hilo aparte (ver _run_with_progress_window) para que la
-        ventana de progreso no se quede sin responder con archivos grandes."""
+        """Save, into a single .xlsx or .csv file, all the common columns
+        with exactly the same processing shown in the top plot
+        (interpolated, normalized according to 'multi_xls_norm_mode_var'
+        and - if 'Smoothing' is on - smoothed with Convex Envelope), for
+        each loaded sheet. Each sheet's data is stacked one below the
+        other in a single spreadsheet (or a single CSV), separated by 20
+        blank rows, instead of a separate Excel sheet for each. Unlike
+        the plot, which only shows the selected column, this exports all
+        the common columns. Processing and saving run in a separate
+        thread (see _run_with_progress_window) so the progress window
+        doesn't become unresponsive with large files."""
         if not self.multi_xls_datasets or not self.multi_xls_common_columns:
-            messagebox.showwarning("Sin Datos", "Carga datos primero.")
+            messagebox.showwarning("No Data", "Load data first.")
             return
 
         from tkinter.filedialog import asksaveasfilename
@@ -3069,7 +3066,7 @@ class NecLabApp:
 
             blocks = []
             for i, ds in enumerate(datasets):
-                report_progress(i, n_steps, f"Procesando {ds['label']}  ({i + 1}/{len(datasets)})")
+                report_progress(i, n_steps, f"Processing {ds['label']}  ({i + 1}/{len(datasets)})")
 
                 sheet_min = None
                 if norm_mode == 'sheet':
@@ -3103,7 +3100,7 @@ class NecLabApp:
                     out_cols[col_name] = values
                 blocks.append(pd.DataFrame(out_cols))
 
-            report_progress(len(datasets), n_steps, "Guardando archivo...")
+            report_progress(len(datasets), n_steps, "Saving file...")
             stacked = []
             for i, block in enumerate(blocks):
                 stacked.append(block)
@@ -3117,20 +3114,19 @@ class NecLabApp:
             return filename
 
         self._run_with_progress_window(
-            title="Guardando Datos", message="Guardando datos suavizados...",
+            title="Saving Data", message="Saving smoothed data...",
             maximum=len(datasets) + 1, worker_fn=worker,
             on_complete=lambda fn: messagebox.showinfo("Saved", f"Data saved to:\n{fn}"),
-            on_error=lambda exc: messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{exc}"),
+            on_error=lambda exc: messagebox.showerror("Error", f"Could not save the file:\n{exc}"),
         )
 
     def _save_multi_xls_classifications(self):
-        """Guarda, para cada columna de datos y cada hoja cargada, la
-        clasificación elegida (una fila por columna, una columna por hoja),
-        en un archivo .xlsx o .csv. Las combinaciones no clasificadas
-        todavía usan el mismo valor por defecto (el nombre de la hoja) que
-        se muestra en la interfaz."""
+        """Save, for each data column and each loaded sheet, the chosen
+        classification (one row per column, one column per sheet), to an
+        .xlsx or .csv file. Combinations not classified yet still use the
+        same default value (the sheet's name) shown in the interface."""
         if not self.multi_xls_datasets or not self.multi_xls_common_columns:
-            messagebox.showwarning("Sin Datos", "Carga datos primero.")
+            messagebox.showwarning("No Data", "Load data first.")
             return
 
         from tkinter.filedialog import asksaveasfilename
@@ -3171,13 +3167,13 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Classifications saved to:\n{filename}")
 
     def _load_multi_xls_classifications(self):
-        """Carga clasificaciones previamente guardadas (mismo formato que
-        "Save Classifications": una fila por columna de datos, una columna
-        por hoja) y las aplica a las columnas/hojas que coincidan por
-        nombre con lo actualmente cargado. Cualquier valor de clasificación
-        nuevo se agrega a las opciones disponibles en los combobox."""
+        """Load previously saved classifications (same format as "Save
+        Classifications": one row per data column, one column per sheet)
+        and apply them to the columns/sheets that match by name with what
+        is currently loaded. Any new classification value is added to the
+        options available in the comboboxes."""
         if not self.multi_xls_datasets or not self.multi_xls_common_columns:
-            messagebox.showwarning("Sin Datos", "Carga datos primero.")
+            messagebox.showwarning("No Data", "Load data first.")
             return
 
         from tkinter.filedialog import askopenfilename
@@ -3230,8 +3226,8 @@ class NecLabApp:
 
         if not matched_sheets:
             messagebox.showwarning(
-                "Sin Coincidencias",
-                "Ninguna columna u hoja del archivo coincide con los datos cargados."
+                "No Matches",
+                "No column or sheet in the file matches the loaded data."
             )
             return
 
@@ -3257,67 +3253,67 @@ class NecLabApp:
     # ==================== IMAGE PROCESSING METHODS ====================
     
     def _load_default_image(self):
-        """Carga una imagen por defecto o muestra placeholder."""
-        # Crear imagen placeholder
+        """Load a default image or show a placeholder."""
+        # Create placeholder image
         pil_img = Image.new('RGB', (400, 300), color='#1e1e1e')
         self._display_pil_image(pil_img)
-    
+
     def _display_pil_image(self, pil_img):
-        """Muestra una imagen PIL en el label principal."""
-        # Obtener tamaño disponible del frame
+        """Show a PIL image in the main label."""
+        # Get the frame's available size
         self.image_frame.update_idletasks()
         frame_width = self.image_frame.winfo_width() - 20
         frame_height = self.image_frame.winfo_height() - 20
-        
+
         if frame_width < 100:
             frame_width = int(self.width * 0.7)
         if frame_height < 100:
             frame_height = int(self.height * 0.9)
-        
-        # Redimensionar manteniendo proporción
+
+        # Resize while preserving aspect ratio
         width_pil, height_pil = pil_img.size
         ratio = min(frame_width / width_pil, frame_height / height_pil)
         new_size = (int(width_pil * ratio), int(height_pil * ratio))
         pil_img = pil_img.resize(new_size, Image.LANCZOS)
-        
-        # Convertir y mostrar
+
+        # Convert and display
         image_tk = ImageTk.PhotoImage(pil_img)
         self.image_label.configure(image=image_tk)
-        self.image_label.image = image_tk  # Mantener referencia
-    
+        self.image_label.image = image_tk  # Keep a reference
+
     def _apply_brightness_contrast(self, image_array):
-        """Aplica brillo y contraste a la imagen."""
+        """Apply brightness and contrast to the image."""
         brightness = self.brightness_slider.get()
         contrast = self.contrast_slider.get()
-        
-        # Convertir a float para operaciones
+
+        # Convert to float for the operations
         img = image_array.astype(np.float32)
-        
-        # Aplicar brillo
+
+        # Apply brightness
         img = img + brightness
-        
-        # Aplicar contraste
+
+        # Apply contrast
         if contrast != 0:
             factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
             img = factor * (img - 128) + 128
-        
-        # Clamp valores
+
+        # Clamp values
         img = np.clip(img, 0, 255).astype(np.uint8)
-        
+
         return img
-    
+
     def _update_image_display(self):
-        """Actualiza la imagen mostrada según el estado actual."""
+        """Update the displayed image according to the current state."""
         if self.img_array is None:
             return
-        
+
         slice_idx = self.slice_slider.get()
         current_slice = self.img_array[slice_idx, :, :].copy()
-        
-        # Aplicar brillo y contraste
+
+        # Apply brightness and contrast
         current_slice = self._apply_brightness_contrast(current_slice)
-        
-        # Aplicar threshold si está habilitado
+
+        # Apply threshold if enabled
         if self.threshold_enabled.get():
             threshold_val = self.threshold_slider.get()
             if HAS_IMAGE_MODULES:
@@ -3328,163 +3324,163 @@ class NecLabApp:
             pil_img = Image.fromarray(current_slice)
             if pil_img.mode != 'RGB':
                 pil_img = pil_img.convert('RGB')
-        
+
         self._display_pil_image(pil_img)
-        
-        # Actualizar info de frame
+
+        # Update frame info
         total_frames = self.img_array.shape[0]
         self.frame_info_label.config(text=f"Frame: {slice_idx + 1} / {total_frames}")
-    
+
     def _reset_adjustments(self):
-        """Resetea los ajustes de brillo y contraste."""
+        """Reset the brightness and contrast adjustments."""
         self.brightness_slider.set(0)
         self.contrast_slider.set(0)
         self._update_image_display()
-    
+
     # ==================== CALLBACKS ====================
-    
+
     def _on_slice_changed(self, val):
-        """Callback cuando cambia el slider de capa."""
+        """Callback for when the layer slider changes."""
         self._update_image_display()
-    
+
     def _on_threshold_changed(self, val):
-        """Callback cuando cambia el slider de threshold."""
+        """Callback for when the threshold slider changes."""
         if self.threshold_enabled.get():
             self._update_image_display()
-    
+
     def _on_adjustment_changed(self, val):
-        """Callback cuando cambian los ajustes de brillo/contraste."""
+        """Callback for when the brightness/contrast adjustments change."""
         self._update_image_display()
-    
-    # ==================== COMANDOS DE MENÚ - ARCHIVO ====================
-    
+
+    # ==================== MENU COMMANDS - FILE ====================
+
     def open_ometiff_file(self):
-        """Abre un archivo OME-TIFF."""
+        """Open an OME-TIFF file."""
         if HAS_IMAGE_MODULES:
             img, metadata, xml_metadata = load_ometiff_image()
         else:
             filename = filedialog.askopenfilename(
-                title="Abrir OME-TIFF",
+                title="Open OME-TIFF",
                 filetypes=[("OME-TIFF files", "*.ome.tiff *.ome.tif"), ("All files", "*.*")]
             )
             if not filename:
                 return
-            
+
             try:
                 reader = OMETIFFReader(fpath=filename)
                 img, metadata, xml_metadata = reader.read()
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo cargar la imagen:\n{str(e)}")
+                messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
                 return
-        
+
         if img is None:
             return
-        
+
         self.img_original = img
         self.img_array = img.copy()
-        
-        # Actualizar slider de capas
+
+        # Update the layer slider
         num_slices = self.img_array.shape[0]
         self.slice_slider.configure(to=num_slices - 1)
         self.slice_slider.set(0)
-        
-        # Resetear ajustes
+
+        # Reset adjustments
         self._reset_adjustments()
-        
-        # Actualizar información
+
+        # Update information
         shape = self.img_array.shape
-        info_text = f"Dimensiones: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nTipo: {self.img_array.dtype}"
+        info_text = f"Dimensions: {shape[2]}x{shape[1]}\nFrames: {shape[0]}\nType: {self.img_array.dtype}"
         self.info_text.config(text=info_text)
         
         # Enable image menu items now that an image is loaded
-        self.menu_imagen.entryconfig("Auto Contraste", state=NORMAL)
+        self.menu_imagen.entryconfig("Auto Contrast", state=NORMAL)
         self.menu_imagen.entryconfig("Histogram", state=NORMAL)
         self.menu_imagen.entryconfig("Binarize", state=NORMAL)
-        self.menu_imagen.entryconfig("Restaurar Original", state=NORMAL)
-        self.menu_bar.entryconfig("Análisis de Variabilidad", state=NORMAL)
+        self.menu_imagen.entryconfig("Restore Original", state=NORMAL)
+        self.menu_bar.entryconfig("Variability Analysis", state=NORMAL)
 
-        # Cambiar a la pestaña de imagen
+        # Switch to the image tab
         self.notebook.select(self.image_tab)
 
         self._update_image_display()
-    
-    # ==================== COMANDOS DE MENÚ - IMAGEN ====================
-    
+
+    # ==================== MENU COMMANDS - IMAGE ====================
+
     def restore_original(self):
-        """Restaura la imagen original."""
+        """Restore the original image."""
         if self.img_original is None:
-            messagebox.showwarning("Advertencia", "No hay imagen original cargada")
+            messagebox.showwarning("Warning", "No original image loaded")
             return
         self.img_array = self.img_original.copy()
         self._reset_adjustments()
-    
+
     def apply_auto_contrast(self):
-        """Aplica auto contraste a la imagen."""
+        """Apply auto contrast to the image."""
         if self.img_array is None:
-            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+            messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-        
+
         if HAS_IMAGE_MODULES:
-            # Usar módulo de procesamiento si está disponible
+            # Use the processing module if available
             self.img_array = auto_contrast(self.img_array)
         else:
-            # Fallback: aplicar auto contraste frame por frame
+            # Fallback: apply auto contrast frame by frame
             for i in range(self.img_array.shape[0]):
                 im_pil = Image.fromarray(self.img_array[i, :, :])
                 if im_pil.mode != 'RGB':
                     im_pil = im_pil.convert('RGB')
                 im2 = ImageOps.autocontrast(im_pil, cutoff=2, ignore=2).convert('L')
                 self.img_array[i, :, :] = np.array(im2)
-        
+
         self._update_image_display()
-    
+
     def show_histogram(self):
-        """Muestra el histograma de la imagen."""
+        """Show the image's histogram."""
         if self.img_original is None:
-            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+            messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-        
+
         var_im = np.var(self.img_original, axis=0)
         plt.figure(figsize=(8, 6))
         plt.hist(var_im.flatten(), bins=50)
-        plt.title('Histograma de Varianza')
-        plt.xlabel('Varianza')
-        plt.ylabel('Frecuencia')
+        plt.title('Variance Histogram')
+        plt.xlabel('Variance')
+        plt.ylabel('Frequency')
         plt.show()
-    
+
     def show_binarize(self):
-        """Muestra ventana de binarización."""
+        """Show the binarization window."""
         if self.img_original is None:
-            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+            messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-        
+
         var_im = np.var(self.img_original, axis=0)
         pil_img = self._apply_binarize(var_im, 150)
-        
-        # Crear ventana emergente
+
+        # Create popup window
         top = tk.Toplevel(self.root)
-        top.title("Binarización")
+        top.title("Binarization")
         top.geometry("600x700")
-        
-        # Frame para la imagen
+
+        # Frame for the image
         img_frame = tk.Frame(top, relief=tk.RAISED, borderwidth=1)
         img_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         image_ = ImageTk.PhotoImage(pil_img)
         label = tk.Label(img_frame, image=image_)
         label.image = image_
         label.pack(fill=tk.BOTH, expand=True)
-        
-        # Frame para controles
+
+        # Frame for controls
         control_frame = tk.Frame(top)
         control_frame.pack(fill=tk.X, padx=10, pady=10)
-        
+
         tk.Label(control_frame, text="Threshold:").pack(side=tk.LEFT, padx=5)
-        
+
         inputtxt = tk.Text(control_frame, height=1, width=10)
         inputtxt.insert("1.0", "150")
         inputtxt.pack(side=tk.LEFT, padx=5)
-        
+
         def update_binarization():
             try:
                 threshold = int(inputtxt.get(1.0, "end-1c"))
@@ -3493,32 +3489,32 @@ class NecLabApp:
                 label.configure(image=new_image)
                 label.image = new_image
             except ValueError:
-                messagebox.showerror("Error", "Por favor ingresa un número válido")
-        
+                messagebox.showerror("Error", "Please enter a valid number")
+
         tk.Button(
             control_frame,
-            text="Aplicar Binarización",
+            text="Apply Binarization",
             command=update_binarization
         ).pack(side=tk.LEFT, padx=5)
-    
+
     def _apply_binarize(self, var_im, threshold):
-        """Aplica binarización a la imagen basado en el threshold."""
+        """Apply binarization to the image based on the threshold."""
         if len(var_im.shape) == 2:
-            # Es una imagen 2D (varianza)
+            # It's a 2D (variance) image
             binary = (var_im > threshold).astype(np.uint8) * 255
         else:
-            # Es una imagen normal
+            # It's a regular image
             binary = (var_im > threshold).astype(np.uint8) * 255
-        
+
         pil_img = Image.fromarray(binary)
         if pil_img.mode != 'RGB':
             pil_img = pil_img.convert('RGB')
         return pil_img
-    
+
     def show_variability_menu(self, method_index):
-        """Mostrar análisis de variabilidad completo."""
+        """Show the full variability analysis."""
         if self.img_array is None or len(self.img_array) == 0:
-            messagebox.showwarning("Advertencia", "Primero carga una imagen OME-TIFF")
+            messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
         show_variability_analysis(self.img_array, method_index, self.root)
 
@@ -3630,14 +3626,14 @@ class NecLabApp:
     def _show_about(self):
         messagebox.showinfo(
             "About NecLab",
-            "NecLab — Análisis de Imágenes de Microscopía y Visualización de Datos\n\n"
+            "NecLab — Microscopy Image Analysis and Data Visualization\n\n"
             f"Repository: github.com/{self._REPO}\n"
             "Contact: sergio.cruz@ciencias.unam.mx"
         )
 
 
 def main():
-    """Función principal."""
+    """Main function."""
     root = tk.Tk()
     app = NecLabApp(root)
     root.mainloop()

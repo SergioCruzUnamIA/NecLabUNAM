@@ -14,61 +14,61 @@ from sklearn.cluster import KMeans
 
 def calculate_variability(img_array, method=1):
     """
-    Calcula la variabilidad de una imagen usando diferentes métodos.
-    
+    Calculates the variability of an image using different methods.
+
     """
     methods_info = {
-        0: {"name": "Rango", "default_th": 100},
-        1: {"name": "Varianza Poblacional", "default_th": 120},
-        2: {"name": "Varianza Muestral", "default_th": 200},
-        3: {"name": "Desviación Estándar Poblacional", "default_th": 12},
-        4: {"name": "Desviación Estándar Muestral", "default_th": 5},
-        5: {"name": "Coeficiente de Variación", "default_th": 5},
-        6: {"name": "Rango Intercuartílico (IQR)", "default_th": 20}
+        0: {"name": "Range", "default_th": 100},
+        1: {"name": "Population Variance", "default_th": 120},
+        2: {"name": "Sample Variance", "default_th": 200},
+        3: {"name": "Population Standard Deviation", "default_th": 12},
+        4: {"name": "Sample Standard Deviation", "default_th": 5},
+        5: {"name": "Coefficient of Variation", "default_th": 5},
+        6: {"name": "Interquartile Range (IQR)", "default_th": 20}
     }
-    
+
     select = method
-    
+
     if select == 0:
-        # 1. Rango
+        # 1. Range
         var_im = np.max(img_array, axis=0) - np.min(img_array, axis=0)
         th = 100
     elif select == 1:
-        # 2. Varianza
-        var_im = np.var(img_array, axis=0)  # Poblacional
+        # 2. Variance
+        var_im = np.var(img_array, axis=0)  # Population
         th = 120
     elif select == 2:
-        # 2. Varianza
-        var_im = np.var(img_array, axis=0, ddof=1)  # Muestral
+        # 2. Variance
+        var_im = np.var(img_array, axis=0, ddof=1)  # Sample
         th = 200
     elif select == 3:
-        # 3. Desviación estándar
+        # 3. Standard deviation
         th = 12
-        var_im = np.std(img_array, axis=0)  # Poblacional
+        var_im = np.std(img_array, axis=0)  # Population
     elif select == 4:
-        # 3. Desviación estándar
+        # 3. Standard deviation
         th = 5
-        var_im = np.std(img_array, axis=0, ddof=1)  # Muestral
+        var_im = np.std(img_array, axis=0, ddof=1)  # Sample
     elif select == 5:
-        # 4. Coeficiente de variación
+        # 4. Coefficient of variation
         th = 5
-        var_im = np.std(img_array, axis=0, ddof=1)  # Muestral
+        var_im = np.std(img_array, axis=0, ddof=1)  # Sample
         media = np.mean(img_array, axis=0)
         var_im = (var_im / media) * 100
     elif select == 6:
         th = 20
-        # 5. Rango intercuartílico (IQR)
+        # 5. Interquartile range (IQR)
         q1 = np.percentile(img_array, 25, axis=0)
         q3 = np.percentile(img_array, 75, axis=0)
         var_im = q3 - q1
     else:
-        raise ValueError("Método debe estar entre 0 y 6")
+        raise ValueError("Method must be between 0 and 6")
     
     return var_im, th, methods_info[method]["name"]
 
 def apply_image_processing(var_im):
     """
-    Aplica el procesamiento de imagen: unsharp mask y filtro.
+    Applies image processing: unsharp mask and filter.
     """
     result_1 = unsharp_mask(var_im, radius=20, amount=1)
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
@@ -77,7 +77,7 @@ def apply_image_processing(var_im):
 
 def apply_binarization(image, th):
     """
-    Aplica binarización
+    Applies binarization
     """
     deconvolved_RL2 = np.reshape(image, (image.shape[0] * image.shape[1]))
     res_labels = [int(deconvolved_RL2[i] > th) for i in range(len(deconvolved_RL2))]
@@ -86,7 +86,7 @@ def apply_binarization(image, th):
 
 def candidate_neighbors(node):
     """
-    Función original para encontrar vecinos.
+    Original function to find neighbors.
     """
     return [(node[0] + 1, node[1]), (node[0], node[1] + 1), (node[0] + 1, node[1] + 1),
            (node[0] - 1, node[1]), (node[0], node[1] - 1), (node[0] - 1, node[1] - 1),
@@ -94,7 +94,7 @@ def candidate_neighbors(node):
 
 def neighboring_groups(nodes):
     """
-    Función original para agrupar píxeles conectados.
+    Original function to group connected pixels.
     """
     remain = set(nodes)
     while len(remain) > 0:
@@ -111,7 +111,7 @@ def neighboring_groups(nodes):
 
 def extract_pixels_from_binary(res_labels):
     """
-    Extrae píxeles de la imagen binarizada.
+    Extracts pixels from the binarized image.
     """
     pixels = []
     for i in range(res_labels.shape[0]):
@@ -122,69 +122,69 @@ def extract_pixels_from_binary(res_labels):
 
 def find_peaks(Z, dz_dx, dz_dy, selected_points):
     """
-    Detecta picos usando cambio de signo en las derivadas.
-    Código original de Jose.
+    Detects peaks using sign changes in the derivatives.
+    Original code by Jose.
     """
     peaks = []
     for i, j in selected_points:
-        # Verificar que no estemos en los bordes
+        # Check that we are not on the edges
         if 1 <= i < Z.shape[0] - 1 and 1 <= j < Z.shape[1] - 1:
-            # Buscar si es un pico (máximo local)
+            # Check if it is a peak (local maximum)
             if dz_dx[i, j - 1] > 0 and dz_dx[i, j] <= 0 and dz_dy[i - 1, j] > 0 and dz_dy[i, j] <= 0:
                 peaks.append((i, j))
     return peaks
 
 def assign_points_to_peaks(Z, peaks, selected_points):
     """
-    Asigna puntos seleccionados a los picos más cercanos.
-    Código original de Jose.
+    Assigns selected points to the nearest peaks.
+    Original code by Jose.
     """
     import math
-    
-    # Inicializar una lista para los conjuntos de puntos por pico
+
+    # Initialize a list for the point sets per peak
     peak_sets = {i: [] for i in range(len(peaks))}
-    
-    # Crear una matriz de etiquetas para asignar puntos a conjuntos
+
+    # Create a label matrix to assign points to sets
     peak_map = np.zeros_like(Z, dtype=int) - 1
-    gx = np.gradient(Z, axis=1)  # Derivada parcial respecto a x
-    gy = np.gradient(Z, axis=0)  # Derivada parcial respecto a y
-    
-    # Etiquetar los picos con IDs únicos
+    gx = np.gradient(Z, axis=1)  # Partial derivative with respect to x
+    gy = np.gradient(Z, axis=0)  # Partial derivative with respect to y
+
+    # Label the peaks with unique IDs
     for label_id, (pi, pj) in enumerate(peaks):
         if 0 <= pi < Z.shape[0] and 0 <= pj < Z.shape[1]:
             peak_map[pi, pj] = label_id
-    
-    # Asignar los puntos seleccionados a sus picos más cercanos
+
+    # Assign the selected points to their nearest peaks
     for i, j in selected_points:
         if not (0 <= i < Z.shape[0] and 0 <= j < Z.shape[1]):
             continue
-            
+
         x, y = i, j
         seen = []
-        
-        # Gradient descent hasta encontrar un pico
+
+        # Gradient descent until a peak is found
         while (x, y) not in seen and (x, y) not in peaks:
-            if len(seen) > 100:  # Evitar loops infinitos
+            if len(seen) > 100:  # Avoid infinite loops
                 break
-                
+
             if not (0 <= x < Z.shape[0] and 0 <= y < Z.shape[1]):
                 break
-                
-            # Obtener dirección del gradiente
+
+            # Get gradient direction
             if abs(gx[x, y]) > 1e-10 or abs(gy[x, y]) > 1e-10:
                 dx, dy = int(np.sign(gx[x, y])), int(np.sign(gy[x, y]))
             else:
                 break
-            
-            # Moverse en la dirección del gradiente
+
+            # Move in the direction of the gradient
             new_x, new_y = x + dx, y + dy
             if (0 <= new_x < Z.shape[0]) and (0 <= new_y < Z.shape[1]):
                 seen.append((x, y))
                 x, y = new_x, new_y
             else:
                 break
-        
-        # Encontrar el pico más cercano
+
+        # Find the nearest peak
         if peaks:
             min_dist = float('inf')
             sel_peak = None
@@ -196,8 +196,8 @@ def assign_points_to_peaks(Z, peaks, selected_points):
                         sel_peak = p
                 except:
                     continue
-            
-            # Asignar el punto al conjunto del pico
+
+            # Assign the point to the peak's set
             if sel_peak is not None:
                 peak_x, peak_y = sel_peak
                 if 0 <= peak_x < peak_map.shape[0] and 0 <= peak_y < peak_map.shape[1]:
@@ -209,19 +209,19 @@ def assign_points_to_peaks(Z, peaks, selected_points):
 
 def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
     """
-    Procesa clusters con detección de picos avanzada.
-    Código original de Jose adaptado con validaciones robustas.
+    Processes clusters with advanced peak detection.
+    Original code by Jose adapted with robust validations.
     """
     try:
         from sklearn import linear_model
-        
+
         clusters_min_size = []
         final_cl = []
-        
-        # Calcular derivadas parciales
+
+        # Calculate partial derivatives
         dz_dx = np.gradient(var_im, axis=1)
         dz_dy = np.gradient(var_im, axis=0)
-        
+
         for cl in res_clusters:
             try:
                 if max_size >= len(cl) >= min_size:
@@ -230,18 +230,18 @@ def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
                     clusters_min_size.append(cl)
             except:
                 continue
-        
-        # Procesar clusters con detección de picos
+
+        # Process clusters with peak detection
         for cl in clusters_min_size:
             try:
                 if len(cl) == 0:
                     continue
-                    
-                # Extraer coordenadas y valores
+
+                # Extract coordinates and values
                 z = []
                 x = []
                 y = []
-                
+
                 for coord in cl:
                     if len(coord) >= 2:
                         i, j = coord[0], coord[1]
@@ -249,55 +249,55 @@ def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
                             z.append(var_im[i, j])
                             x.append(i)
                             y.append(j)
-                
-                if len(z) < 3:  # Necesitamos al menos 3 puntos
+
+                if len(z) < 3:  # We need at least 3 points
                     final_cl.append(cl)
                     continue
-                
+
                 z = np.array(z)
                 y = np.array(y)
                 x = np.array(x)
-                
-                # Clasificación con SGD One-Class SVM
+
+                # Classification with SGD One-Class SVM
                 try:
                     clf = linear_model.SGDOneClassSVM(random_state=42, nu=0.131)
                     clf.fit(z.reshape(-1, 1))
                     y_pred = clf.predict(z.reshape(-1, 1))
                     y_res = [i for i, pred in enumerate(list(y_pred)) if pred == -1]
                 except:
-                    # Si falla la clasificación, usar cluster original
+                    # If classification fails, use original cluster
                     final_cl.append(cl)
                     continue
-                
-                # Crear grid para superficie
+
+                # Create grid for surface
                 if len(x) > 0 and len(y) > 0:
                     min_x, max_x = int(min(x)), int(max(x))
                     min_y, max_y = int(min(y)), int(max(y))
-                    
+
                     if max_x > min_x and max_y > min_y:
                         Z = np.zeros((max_x - min_x + 1, max_y - min_y + 1))
-                        
-                        # Llenar grid con valores
+
+                        # Fill grid with values
                         for i in range(len(z)):
                             grid_x = int(x[i] - min_x)
                             grid_y = int(y[i] - min_y)
                             if 0 <= grid_x < Z.shape[0] and 0 <= grid_y < Z.shape[1]:
                                 Z[grid_x, grid_y] = z[i]
-                        
-                        # Detectar picos
-                        peaks = find_peaks(Z, dz_dx[min_x:max_x+1, min_y:max_y+1], 
-                                         dz_dy[min_x:max_x+1, min_y:max_y+1], 
+
+                        # Detect peaks
+                        peaks = find_peaks(Z, dz_dx[min_x:max_x+1, min_y:max_y+1],
+                                         dz_dy[min_x:max_x+1, min_y:max_y+1],
                                          [(i-min_x, j-min_y) for i, j in cl if min_x <= i <= max_x and min_y <= j <= max_y])
-                        
-                        # Convertir picos de vuelta a coordenadas originales
+
+                        # Convert peaks back to original coordinates
                         original_peaks = [(p[0] + min_x, p[1] + min_y) for p in peaks]
-                        
+
                         if len(original_peaks) > 0:
-                            # Asignar puntos a picos
+                            # Assign points to peaks
                             relative_cl = [(i-min_x, j-min_y) for i, j in cl if min_x <= i <= max_x and min_y <= j <= max_y]
                             peak_sets = assign_points_to_peaks(Z, peaks, relative_cl)
-                            
-                            # Convertir de vuelta a coordenadas originales y agregar
+
+                            # Convert back to original coordinates and add
                             for peak_id, points in peak_sets.items():
                                 if points:
                                     original_points = [(p[0] + min_x, p[1] + min_y) for p in points]
@@ -308,18 +308,18 @@ def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
                         final_cl.append(cl)
                 else:
                     final_cl.append(cl)
-                    
+
             except Exception as e:
-                # Si algo falla en el procesamiento avanzado, usar cluster original
-                pass  # Error silencioso
+                # If something fails in advanced processing, use original cluster
+                pass  # Silent error
                 final_cl.append(cl)
                 continue
-        
+
         return final_cl, clusters_min_size
-        
+
     except Exception as e:
-        pass  # Error silencioso
-        # Fallback al método básico
+        pass  # Silent error
+        # Fallback to basic method
         final_cl = []
         for cl in res_clusters:
             if min_size <= len(cl) <= max_size:
@@ -328,7 +328,7 @@ def process_clusters_advanced(var_im, res_clusters, min_size=20, max_size=200):
 
 def extract_time_series(img_array, cluster_points):
     """
-    Extrae serie temporal de un cluster específico.
+    Extracts time series of a specific cluster.
     """
     final_array = np.array(cluster_points)
     sel_data_final = img_array[:, final_array[:,0], final_array[:,1]]
@@ -337,29 +337,29 @@ def extract_time_series(img_array, cluster_points):
 
 def decompose_large_clusters(res_clusters, var_im, min_size=20, max_size=200):
     """
-    Descompone clusters grandes usando KMeans con features espaciales + variabilidad.
-    Los clusters menores a min_size se descartan, los que están entre min_size y max_size
-    se mantienen, y los mayores a max_size se subdividen con KMeans.
-    Basado en el notebook cluster-Copy4.ipynb.
+    Decomposes large clusters using KMeans with spatial + variability features.
+    Clusters smaller than min_size are discarded, those between min_size and max_size
+    are kept, and those larger than max_size are subdivided with KMeans.
+    Based on the cluster-Copy4.ipynb notebook.
     """
     decomposed = []
     max_ax = np.max(var_im.shape)
     max_var = var_im.max()
     if max_var == 0:
-        max_var = 1  # Evitar división por cero
+        max_var = 1  # Avoid division by zero
     norm_var_im = (var_im / max_var) * max_ax
-    
+
     for cl in res_clusters:
         cl_size = len(cl)
         if cl_size < min_size:
-            continue  # Descartar clusters muy pequeños
+            continue  # Discard very small clusters
         elif cl_size <= max_size:
-            decomposed.append(cl)  # Mantener clusters de tamaño adecuado
+            decomposed.append(cl)  # Keep clusters of adequate size
         else:
-            # Descomponer clusters grandes con KMeans
+            # Decompose large clusters with KMeans
             num_sub = (cl_size // max_size) + 1
             try:
-                # Crear features 3D: coordenadas escaladas + variabilidad normalizada
+                # Create 3D features: scaled coordinates + normalized variability
                 new_cl = [
                     (cl[i][0] * 10, cl[i][1] * 10, norm_var_im[cl[i][0], cl[i][1]])
                     for i in range(cl_size)
@@ -368,54 +368,54 @@ def decompose_large_clusters(res_clusters, var_im, min_size=20, max_size=200):
                 labels = kmeans.labels_
                 for label_val in np.unique(labels):
                     sub_cluster = np.array(cl)[labels == label_val]
-                    # Convertir de vuelta a lista de tuplas
+                    # Convert back to list of tuples
                     sub_cluster_list = [tuple(p) for p in sub_cluster.tolist()]
                     if len(sub_cluster_list) >= min_size:
                         decomposed.append(sub_cluster_list)
             except Exception as e:
-                pass  # Error silencioso
-                decomposed.append(cl)  # Mantener original si falla
+                pass  # Silent error
+                decomposed.append(cl)  # Keep original if it fails
     
     return decomposed
 
 class VariabilityAnalysisWindow:
     """
-    Ventana para análisis de variabilidad con selección de clusters.
+    Window for variability analysis with cluster selection.
     """
     def __init__(self, img_array, method, main_window):
         self.img_array = img_array
         self.method = method
         self.main_window = main_window
-        
-        # Calcular variabilidad inicial
+
+        # Calculate initial variability
         self.var_im, self.default_th, self.method_name = calculate_variability(img_array, method)
         self.processed_image = apply_image_processing(self.var_im)
-        
-        # Variables para clustering
+
+        # Variables for clustering
         self.res_labels = None
         self.res_clusters = None
         self.final_clusters = None
         self.selected_clusters = []
         self.scatter_objects = []
         self.rect_selector = None
-        self.selection_mode = 'add'  # 'add' o 'remove'
-        self.cluster_colors = []  # Colores aleatorios por cluster
-        
-        # Variables para análisis
+        self.selection_mode = 'add'  # 'add' or 'remove'
+        self.cluster_colors = []  # Random colors per cluster
+
+        # Variables for analysis
         self.time_series_data = []
         self.cluster_labels = []
-        
+
         self.create_window()
         self.update_display()
-    
+
     def _generate_cluster_colors(self, n_clusters):
-        """Genera colores aleatorios para cada cluster, excluyendo rojo (reservado para selección)."""
+        """Generates random colors for each cluster, excluding red (reserved for selection)."""
         import colorsys
         colors = []
         rng = np.random.RandomState(42)
         for _ in range(n_clusters):
-            # Generar colores con hue lejos del rojo (0.0)
-            # Rojo está en hue ~0.0 y ~1.0, evitamos rango [0.0, 0.05] y [0.92, 1.0]
+            # Generate colors with hue far from red (0.0)
+            # Red is at hue ~0.0 and ~1.0, we avoid the range [0.0, 0.05] and [0.92, 1.0]
             hue = rng.uniform(0.08, 0.88)
             sat = rng.uniform(0.5, 1.0)
             val = rng.uniform(0.6, 1.0)
@@ -424,74 +424,74 @@ class VariabilityAnalysisWindow:
         return colors
     
     def create_window(self):
-        """Crear la ventana principal"""
+        """Create the main window"""
         self.window = tk.Toplevel(self.main_window)
-        self.window.title(f"Análisis Completo - {self.method_name}")
+        self.window.title(f"Full Analysis - {self.method_name}")
         self.window.geometry("1400x800")
 
-        # Manejar cierre de ventana
+        # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
-        # Barra de menú
+        # Menu bar
         self.window.config(menu=self._create_menu_bar())
 
-        # Frame principal
+        # Main frame
         main_frame = tk.Frame(self.window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Barra de parámetros (threshold, tamaños) e info
+        # Parameter bar (threshold, sizes) and info
         self.create_controls(main_frame)
 
-        # Frame horizontal para visualización y selección
+        # Horizontal frame for visualization and selection
         content_frame = tk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Frame para visualización (lado izquierdo)
+        # Frame for visualization (left side)
         self.viz_frame = tk.Frame(content_frame)
         self.viz_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Frame para selección (lado derecho)
+        # Frame for selection (right side)
         self.selection_frame = tk.Frame(content_frame, width=200, relief=tk.RAISED, borderwidth=1)
         self.selection_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         self.selection_frame.pack_propagate(False)
 
         self.create_selection_panel()
-    
+
     def _create_menu_bar(self):
-        """Crear la barra de menús de la ventana de análisis."""
+        """Create the menu bar for the analysis window."""
         menu_bar = tk.Menu(self.window, tearoff=False)
 
-        # Menú Clustering
+        # Clustering menu
         menu_clustering = tk.Menu(menu_bar, tearoff=False)
         menu_bar.add_cascade(label="Clustering", menu=menu_clustering)
-        menu_clustering.add_command(label="Procesar Cluster (Básico)", command=self.process_clusters_basic)
-        menu_clustering.add_command(label="Procesar Cluster (Avanzado)", command=self.process_clusters_advanced)
+        menu_clustering.add_command(label="Process Cluster (Basic)", command=self.process_clusters_basic)
+        menu_clustering.add_command(label="Process Cluster (Advanced)", command=self.process_clusters_advanced)
         menu_clustering.add_separator()
-        menu_clustering.add_command(label="Descomponer Clusters Grandes", command=self.decompose_clusters)
+        menu_clustering.add_command(label="Decompose Large Clusters", command=self.decompose_clusters)
 
-        # Menú Selección
+        # Selection menu
         menu_seleccion = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Selección", menu=menu_seleccion)
-        menu_seleccion.add_command(label="Seleccionar Todos", command=self.select_all_clusters)
-        menu_seleccion.add_command(label="Limpiar Selección", command=self.clear_selection)
+        menu_bar.add_cascade(label="Selection", menu=menu_seleccion)
+        menu_seleccion.add_command(label="Select All", command=self.select_all_clusters)
+        menu_seleccion.add_command(label="Clear Selection", command=self.clear_selection)
 
-        # Menú Visualización
+        # Visualization menu
         menu_visual = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Visualización", menu=menu_visual)
-        menu_visual.add_command(label="Vista 3D", command=self.show_3d_surface)
+        menu_bar.add_cascade(label="Visualization", menu=menu_visual)
+        menu_visual.add_command(label="3D View", command=self.show_3d_surface)
 
-        # Menú Exportar
+        # Export menu
         menu_exportar = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Exportar", menu=menu_exportar)
-        menu_exportar.add_command(label="Guardar Imagen", command=self.save_image)
-        menu_exportar.add_command(label="Guardar .npy", command=self.save_selected_npy)
+        menu_bar.add_cascade(label="Export", menu=menu_exportar)
+        menu_exportar.add_command(label="Save Image", command=self.save_image)
+        menu_exportar.add_command(label="Save .npy", command=self.save_selected_npy)
         menu_exportar.add_separator()
-        menu_exportar.add_command(label="Usar Seleccionados (Correlaciones)", command=self.use_selected_clusters)
+        menu_exportar.add_command(label="Use Selected (Correlations)", command=self.use_selected_clusters)
 
         return menu_bar
 
     def create_controls(self, parent):
-        """Crear barra de parámetros (spinboxes) e info."""
+        """Create parameter bar (spinboxes) and info."""
         control_frame = tk.Frame(parent)
         control_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -500,112 +500,112 @@ class VariabilityAnalysisWindow:
         self.threshold_var = tk.IntVar(value=self.default_th)
         ttk.Spinbox(control_frame, from_=1, to=1000, textvariable=self.threshold_var, width=10).pack(side=tk.LEFT, padx=(0, 15))
 
-        # Tamaño mínimo
+        # Minimum size
         tk.Label(control_frame, text="Min Size:").pack(side=tk.LEFT, padx=(0, 5))
         self.min_size_var = tk.IntVar(value=20)
         ttk.Spinbox(control_frame, from_=1, to=500, textvariable=self.min_size_var, width=8).pack(side=tk.LEFT, padx=(0, 15))
 
-        # Tamaño máximo
+        # Maximum size
         tk.Label(control_frame, text="Max Size:").pack(side=tk.LEFT, padx=(0, 5))
         self.max_size_var = tk.IntVar(value=200)
         ttk.Spinbox(control_frame, from_=1, to=1000, textvariable=self.max_size_var, width=8).pack(side=tk.LEFT, padx=(0, 15))
 
-        self.info_label = tk.Label(control_frame, text="Usa el menú para procesar clusters")
+        self.info_label = tk.Label(control_frame, text="Use the menu to process clusters")
         self.info_label.pack(side=tk.LEFT, padx=10)
-    
+
     def create_selection_panel(self):
-        """Crear panel de selección lateral"""
-        # Título
-        title_label = tk.Label(self.selection_frame, text="Clusters Seleccionados", 
+        """Create side selection panel"""
+        # Title
+        title_label = tk.Label(self.selection_frame, text="Selected Clusters",
                               font=("Arial", 12, "bold"))
         title_label.pack(pady=10)
-        
-        # Lista de seleccionados
+
+        # List of selected items
         self.selected_listbox = tk.Listbox(self.selection_frame, height=15)
         self.selected_listbox.pack(fill=tk.BOTH, expand=True, padx=10)
-        
-        # Frame para botones del panel
+
+        # Frame for panel buttons
         button_frame = tk.Frame(self.selection_frame)
         button_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        # Botón para remover seleccionado
-        remove_btn = tk.Button(button_frame, text="Remover", 
+
+        # Button to remove selected item
+        remove_btn = tk.Button(button_frame, text="Remove",
                               command=self.remove_selected_from_list)
         remove_btn.pack(fill=tk.X, pady=2)
-        
-        # Separador
+
+        # Separator
         ttk.Separator(self.selection_frame, orient='horizontal').pack(fill='x', padx=10, pady=5)
-        
-        # Controles de selección por región
-        region_label = tk.Label(self.selection_frame, text="Selección por Región",
+
+        # Region selection controls
+        region_label = tk.Label(self.selection_frame, text="Region Selection",
                                font=("Arial", 10, "bold"))
         region_label.pack(pady=(5, 2))
-        
-        region_info = tk.Label(self.selection_frame, 
-                              text="Click derecho + arrastrar\nen el gráfico de clusters",
+
+        region_info = tk.Label(self.selection_frame,
+                              text="Right-click + drag\non the cluster plot",
                               font=("Arial", 8), fg='gray',
                               justify=tk.CENTER)
         region_info.pack(pady=(0, 5))
-        
+
         mode_frame = tk.Frame(self.selection_frame)
         mode_frame.pack(fill=tk.X, padx=10)
-        
+
         self.selection_mode_var = tk.StringVar(value='add')
-        tk.Radiobutton(mode_frame, text="Añadir", variable=self.selection_mode_var,
+        tk.Radiobutton(mode_frame, text="Add", variable=self.selection_mode_var,
                        value='add', command=self._update_selection_mode).pack(side=tk.LEFT, expand=True)
-        tk.Radiobutton(mode_frame, text="Quitar", variable=self.selection_mode_var,
+        tk.Radiobutton(mode_frame, text="Remove", variable=self.selection_mode_var,
                        value='remove', command=self._update_selection_mode).pack(side=tk.LEFT, expand=True)
-        
-        # Información
-        self.selection_info = tk.Label(self.selection_frame, 
-                                     text="Click en clusters\npara seleccionar",
+
+        # Information
+        self.selection_info = tk.Label(self.selection_frame,
+                                     text="Click on clusters\nto select",
                                      justify=tk.CENTER)
         self.selection_info.pack(pady=10)
     
     def update_display(self):
-        """Actualizar la visualización"""
-        # Limpiar frame anterior
+        """Update the visualization"""
+        # Clear previous frame
         for widget in self.viz_frame.winfo_children():
             widget.destroy()
-        
-        # Crear figura
+
+        # Create figure
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 8))
-        
-        # 1. Imagen de variabilidad original
+
+        # 1. Original variability image
         im1 = ax1.imshow(self.var_im, cmap='viridis')
         ax1.set_title(f'{self.method_name}')
         ax1.axis('off')
         plt.colorbar(im1, ax=ax1)
-        
-        # 2. Imagen procesada
+
+        # 2. Processed image
         im2 = ax2.imshow(self.processed_image, cmap='viridis')
-        ax2.set_title('Imagen Procesada (Unsharp + Filter)')
+        ax2.set_title('Processed Image (Unsharp + Filter)')
         ax2.axis('off')
         plt.colorbar(im2, ax=ax2)
-        
-        # 3. Binarización (si existe)
+
+        # 3. Binarization (if it exists)
         if self.res_labels is not None:
             ax3.imshow(self.res_labels, cmap='gray')
-            ax3.set_title(f'Binarización (th={self.threshold_var.get()})')
+            ax3.set_title(f'Binarization (th={self.threshold_var.get()})')
         else:
-            ax3.text(0.5, 0.5, 'Aplica binarización', ha='center', va='center', transform=ax3.transAxes)
-            ax3.set_title('Binarización')
+            ax3.text(0.5, 0.5, 'Apply binarization', ha='center', va='center', transform=ax3.transAxes)
+            ax3.set_title('Binarization')
         ax3.axis('off')
-        
-        # 4. Clusters (si existen) - CON INTERACTIVIDAD CORREGIDA
+
+        # 4. Clusters (if they exist) - WITH FIXED INTERACTIVITY
         if self.final_clusters is not None:
-            # Limpiar scatter objects anteriores
+            # Clear previous scatter objects
             self.scatter_objects = []
-            
-            # Generar colores aleatorios si no los tenemos o cambió la cantidad
+
+            # Generate random colors if we don't have them or the count changed
             if len(self.cluster_colors) != len(self.final_clusters):
                 self.cluster_colors = self._generate_cluster_colors(len(self.final_clusters))
-            
+
             for i, cl in enumerate(self.final_clusters):
                 if len(cl) > 0:
                     cl_array = np.array(cl)
-                    
-                    # Rojo si seleccionado, color aleatorio si no
+
+                    # Red if selected, random color otherwise
                     if i in self.selected_clusters:
                         color = 'red'
                         alpha = 1.0
@@ -614,60 +614,60 @@ class VariabilityAnalysisWindow:
                         color = self.cluster_colors[i]
                         alpha = 0.7
                         zorder = 2
-                    
-                    scatter = ax4.scatter(cl_array[:, 1], np.array(self.var_im).shape[0] - cl_array[:, 0], 
+
+                    scatter = ax4.scatter(cl_array[:, 1], np.array(self.var_im).shape[0] - cl_array[:, 0],
                                         marker='o', s=2, alpha=alpha, color=color,
                                         picker=True, pickradius=5, zorder=zorder)
-                    
-                    # Almacenar referencia para clicks
+
+                    # Store reference for clicks
                     self.scatter_objects.append((scatter, i))
-            
-            ax4.set_title(f'Clusters Finales ({len(self.final_clusters)} encontrados) - Click para seleccionar')
+
+            ax4.set_title(f'Final Clusters ({len(self.final_clusters)} found) - Click to select')
             ax4.set_xlabel('X')
             ax4.set_ylabel('Y')
-            
+
         else:
-            ax4.text(0.5, 0.5, 'Procesa clusters', ha='center', va='center', transform=ax4.transAxes)
-            ax4.set_title('Clusters - Click para seleccionar')
-            
+            ax4.text(0.5, 0.5, 'Process clusters', ha='center', va='center', transform=ax4.transAxes)
+            ax4.set_title('Clusters - Click to select')
+
         plt.tight_layout()
-        
-        # Agregar a la ventana
+
+        # Add to the window
         canvas = FigureCanvasTkAgg(fig, master=self.viz_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # CONECTAR EVENTO DE CLICK - MUY IMPORTANTE
+
+        # CONNECT CLICK EVENT - VERY IMPORTANT
         if self.final_clusters is not None:
             canvas.mpl_connect('pick_event', self.on_cluster_click)
-            
-            # Conectar rectangle selector para selección por región (botón derecho)
+
+            # Connect rectangle selector for region selection (right button)
             self.rect_selector = RectangleSelector(
                 ax4, self._on_region_selected,
                 useblit=True,
-                button=[3],  # Solo botón derecho del mouse
+                button=[3],  # Right mouse button only
                 minspanx=5, minspany=5,
                 spancoords='pixels',
                 interactive=False,
                 props=dict(facecolor='yellow', edgecolor='black', alpha=0.3, linewidth=1.5)
             )
-        
-        # Guardar referencia para save
+
+        # Store reference for saving
         self.current_fig = fig
         self.current_canvas = canvas
     
     def _apply_binarization(self):
-        """Binarizar la imagen procesada con el threshold actual."""
+        """Binarize the processed image with the current threshold."""
         th = self.threshold_var.get()
         self.res_labels = apply_binarization(self.processed_image, th)
 
     def _find_clusters(self):
-        """Encontrar componentes conectados en la imagen binarizada."""
+        """Find connected components in the binarized image."""
         pixels = extract_pixels_from_binary(self.res_labels)
         self.res_clusters = list(neighboring_groups(pixels))
 
     def process_clusters_basic(self):
-        """Binarizar, encontrar componentes conectados y filtrar por tamaño."""
+        """Binarize, find connected components, and filter by size."""
         min_size = self.min_size_var.get()
         max_size = self.max_size_var.get()
         th = self.threshold_var.get()
@@ -681,13 +681,13 @@ class VariabilityAnalysisWindow:
         self.final_clusters = [cl for cl in self.res_clusters if min_size <= len(cl) <= max_size]
 
         self.info_label.config(
-            text=f"Básico: {len(self.final_clusters)} clusters (th={th}, tamaño {min_size}–{max_size})"
+            text=f"Basic: {len(self.final_clusters)} clusters (th={th}, size {min_size}–{max_size})"
         )
         self.update_display()
         self.update_selection_list()
 
     def process_clusters_advanced(self):
-        """Binarizar, encontrar componentes conectados y procesar con detección de picos 3D."""
+        """Binarize, find connected components, and process with 3D peak detection."""
         min_size = self.min_size_var.get()
         max_size = self.max_size_var.get()
         th = self.threshold_var.get()
@@ -700,74 +700,74 @@ class VariabilityAnalysisWindow:
                 self.var_im, self.res_clusters, min_size, max_size
             )
             self.info_label.config(
-                text=f"Avanzado: {len(self.final_clusters)} clusters (th={th}, picos 3D)"
+                text=f"Advanced: {len(self.final_clusters)} clusters (th={th}, 3D peaks)"
             )
             self.update_display()
         except Exception as e:
-            messagebox.showwarning("Advertencia", f"Error en procesamiento avanzado: {e}\nUsando método básico como respaldo")
-    
+            messagebox.showwarning("Warning", f"Error in advanced processing: {e}\nUsing basic method as fallback")
+
     def decompose_clusters(self):
-        """Descomponer clusters grandes usando KMeans"""
+        """Decompose large clusters using KMeans"""
         if self.res_clusters is None:
-            messagebox.showwarning("Advertencia", "Primero procesa los clusters con 'Procesar Cluster (Básico)' o '(Avanzado)'")
+            messagebox.showwarning("Warning", "First process the clusters with 'Process Cluster (Basic)' or '(Advanced)'")
             return
-        
+
         min_size = self.min_size_var.get()
         max_size = self.max_size_var.get()
-        
-        # Contar clusters grandes antes de descomponer
+
+        # Count large clusters before decomposing
         large_count = sum(1 for cl in self.res_clusters if len(cl) > max_size)
-        
-        # Descomponer
+
+        # Decompose
         self.res_clusters = decompose_large_clusters(
             self.res_clusters, self.var_im, min_size, max_size
         )
-        
-        # Limpiar selecciones y clusters finales
+
+        # Clear selections and final clusters
         self.selected_clusters = []
         self.final_clusters = None
-        self.cluster_colors = []  # Regenerar colores
-        
+        self.cluster_colors = []  # Regenerate colors
+
         self.info_label.config(
-            text=f"Descompuestos {large_count} clusters grandes → {len(self.res_clusters)} clusters totales"
+            text=f"Decomposed {large_count} large clusters → {len(self.res_clusters)} total clusters"
         )
         self.update_display()
         self.update_selection_list()
-    
+
     def select_all_clusters(self):
-        """Seleccionar todos los clusters"""
+        """Select all clusters"""
         if self.final_clusters is None or len(self.final_clusters) == 0:
-            messagebox.showwarning("Advertencia", "Primero procesa los clusters")
+            messagebox.showwarning("Warning", "First process the clusters")
             return
-        
+
         self.selected_clusters = list(range(len(self.final_clusters)))
         self.update_cluster_colors()
         self.update_selection_list()
-    
+
     def _update_selection_mode(self):
-        """Actualizar modo de selección por región"""
+        """Update region selection mode"""
         self.selection_mode = self.selection_mode_var.get()
-    
+
     def _on_region_selected(self, eclick, erelease):
-        """Callback para selección por región rectangular"""
+        """Callback for rectangular region selection"""
         if self.final_clusters is None:
             return
-        
-        # Obtener coordenadas del rectángulo en el espacio del gráfico
+
+        # Get rectangle coordinates in plot space
         x_min = min(eclick.xdata, erelease.xdata)
         x_max = max(eclick.xdata, erelease.xdata)
         y_min = min(eclick.ydata, erelease.ydata)
         y_max = max(eclick.ydata, erelease.ydata)
-        
+
         img_height = np.array(self.var_im).shape[0]
-        
-        # Encontrar clusters cuyo centroide cae dentro del rectángulo
+
+        # Find clusters whose centroid falls within the rectangle
         changed = False
         for i, cl in enumerate(self.final_clusters):
             if len(cl) == 0:
                 continue
             cl_array = np.array(cl)
-            # Calcular centroide en coordenadas del gráfico (igual que en scatter)
+            # Calculate centroid in plot coordinates (same as in scatter)
             centroid_x = np.mean(cl_array[:, 1])
             centroid_y = img_height - np.mean(cl_array[:, 0])
             
@@ -784,41 +784,41 @@ class VariabilityAnalysisWindow:
             self.update_selection_list()
     
     def on_cluster_click(self, event):
-        """FUNCIÓN CLAVE - Manejar click en cluster (CON PROTECCIÓN ANTI-AUTO-CLICK)"""
-        
-        # PROTECCIÓN: Solo procesar clicks reales del usuario
-        # Si no hay botón presionado, es un evento automático - ignorar
+        """KEY FUNCTION - Handle click on cluster (WITH ANTI-AUTO-CLICK PROTECTION)"""
+
+        # PROTECTION: Only process real user clicks
+        # If no button is pressed, it's an automatic event - ignore
         if not hasattr(event, 'mouseevent') or event.mouseevent is None:
             return
-            
-        # PROTECCIÓN: Solo clicks del botón izquierdo del mouse
+
+        # PROTECTION: Only left mouse button clicks
         if hasattr(event.mouseevent, 'button') and event.mouseevent.button != 1:
             return
-        
-        
-        # Encontrar qué cluster fue clickeado
+
+
+        # Find which cluster was clicked
         clicked_cluster = None
         for scatter, cluster_idx in self.scatter_objects:
             if event.artist == scatter:
                 clicked_cluster = cluster_idx
                 break
-        
+
         if clicked_cluster is not None:
             if clicked_cluster in self.selected_clusters:
-                # Deseleccionar
+                # Deselect
                 self.selected_clusters.remove(clicked_cluster)
             else:
-                # Seleccionar
+                # Select
                 self.selected_clusters.append(clicked_cluster)
-            
-            # Actualizar visualización y lista
+
+            # Update visualization and list
             self.update_cluster_colors()
             self.update_selection_list()
-    
+
     def update_cluster_colors(self):
-        """Actualizar colores de clusters según selección: rojo=seleccionado, color aleatorio=no seleccionado.
-        También muestra el ID del cluster sobre los clusters seleccionados."""
-        # Limpiar anotaciones anteriores
+        """Update cluster colors based on selection: red=selected, random color=not selected.
+        Also shows the cluster ID above selected clusters."""
+        # Clear previous annotations
         if hasattr(self, '_cluster_annotations'):
             for ann in self._cluster_annotations:
                 try:
@@ -826,16 +826,16 @@ class VariabilityAnalysisWindow:
                 except:
                     pass
         self._cluster_annotations = []
-        
+
         img_height = np.array(self.var_im).shape[0]
-        
+
         for scatter, cluster_idx in self.scatter_objects:
             if cluster_idx in self.selected_clusters:
                 scatter.set_color('red')
                 scatter.set_alpha(1.0)
                 scatter.set_zorder(3)
-                
-                # Mostrar ID del cluster en el centroide
+
+                # Show cluster ID at the centroid
                 if self.final_clusters is not None and cluster_idx < len(self.final_clusters):
                     cl = self.final_clusters[cluster_idx]
                     if len(cl) > 0:
@@ -858,54 +858,54 @@ class VariabilityAnalysisWindow:
                     scatter.set_color('blue')
                 scatter.set_alpha(0.7)
                 scatter.set_zorder(2)
-        
-        # Refrescar canvas
+
+        # Refresh canvas
         if hasattr(self, 'current_canvas'):
             self.current_canvas.draw()
-    
+
     def update_selection_list(self):
-        """Actualizar lista de clusters seleccionados"""
+        """Update list of selected clusters"""
         self.selected_listbox.delete(0, tk.END)
-        
+
         for cluster_idx in sorted(self.selected_clusters):
             cluster_size = len(self.final_clusters[cluster_idx]) if self.final_clusters else 0
             self.selected_listbox.insert(tk.END, f"Cluster {cluster_idx} ({cluster_size} pts)")
-        
-        # Actualizar información
+
+        # Update information
         count = len(self.selected_clusters)
-        self.selection_info.config(text=f"{count} clusters\nseleccionados")
-    
+        self.selection_info.config(text=f"{count} clusters\nselected")
+
     def remove_selected_from_list(self):
-        """Remover cluster seleccionado de la lista"""
+        """Remove selected cluster from the list"""
         selection = self.selected_listbox.curselection()
         if selection:
-            # Obtener índice del cluster desde el texto
+            # Get cluster index from the text
             item_text = self.selected_listbox.get(selection[0])
             cluster_idx = int(item_text.split()[1])  # "Cluster X (...)" -> X
-            
+
             if cluster_idx in self.selected_clusters:
                 self.selected_clusters.remove(cluster_idx)
                 self.update_cluster_colors()
                 self.update_selection_list()
-    
+
     def clear_selection(self):
-        """Limpiar toda la selección"""
+        """Clear the entire selection"""
         self.selected_clusters = []
         self.update_cluster_colors()
         self.update_selection_list()
-    
+
     def save_selected_npy(self):
-        """Guardar clusters seleccionados como archivo .npy"""
+        """Save selected clusters as an .npy file"""
         if not self.selected_clusters:
-            messagebox.showwarning("Advertencia", "No hay clusters seleccionados")
+            messagebox.showwarning("Warning", "No clusters selected")
             return
-        
+
         if self.final_clusters is None:
-            messagebox.showwarning("Advertencia", "Primero procesa los clusters")
+            messagebox.showwarning("Warning", "First process the clusters")
             return
-        
+
         filename = asksaveasfilename(
-            initialfile='clusters_seleccionados.npy',
+            initialfile='selected_clusters.npy',
             defaultextension=".npy",
             filetypes=[("NumPy files", "*.npy"), ("All Files", "*.*")]
         )
@@ -925,242 +925,242 @@ class VariabilityAnalysisWindow:
             data = np.hstack([frame_col, ts_matrix])
 
             np.save(filename, data)
-            messagebox.showinfo("Éxito", f"Clusters guardados en {filename}")
-    
+            messagebox.showinfo("Success", f"Clusters saved to {filename}")
+
     def _on_window_close(self):
-        """Cerrar la ventana de análisis y liberar recursos"""
+        """Close the analysis window and free resources"""
         plt.close('all')
         self.window.destroy()
-    
+
     def use_selected_clusters(self):
-        """Usar clusters seleccionados para análisis"""
+        """Use selected clusters for analysis"""
         if not self.selected_clusters:
-            messagebox.showwarning("Advertencia", "No hay clusters seleccionados")
+            messagebox.showwarning("Warning", "No clusters selected")
             return
-        
-        # Crear ventana de análisis avanzado
+
+        # Create advanced analysis window
         self.show_correlation_analysis()
-    
+
     def show_correlation_analysis(self):
-        """Mostrar análisis de correlaciones de clusters seleccionados"""
-        # Crear ventana de análisis
+        """Show correlation analysis of selected clusters"""
+        # Create analysis window
         corr_window = tk.Toplevel(self.window)
-        corr_window.title("Análisis de Correlaciones - Clusters Seleccionados")
+        corr_window.title("Correlation Analysis - Selected Clusters")
         corr_window.geometry("1200x800")
-        
-        # Frame principal
+
+        # Main frame
         main_frame = tk.Frame(corr_window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Frame de controles superiores
+
+        # Top controls frame
         control_frame = tk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Información
-        info_text = f"Analizando correlaciones entre {len(self.selected_clusters)} clusters seleccionados"
+
+        # Information
+        info_text = f"Analyzing correlations between {len(self.selected_clusters)} selected clusters"
         info_label = tk.Label(control_frame, text=info_text, font=("Arial", 12, "bold"))
         info_label.pack(pady=5)
-        
-        # Botones de correlación
+
+        # Correlation buttons
         corr_button_frame = tk.Frame(control_frame)
         corr_button_frame.pack(fill=tk.X, pady=5)
-        
-        tk.Label(corr_button_frame, text="Tipo de Correlación:").pack(side=tk.LEFT, padx=(0, 10))
-        
-        tk.Button(corr_button_frame, text="Pearson", 
+
+        tk.Label(corr_button_frame, text="Correlation Type:").pack(side=tk.LEFT, padx=(0, 10))
+
+        tk.Button(corr_button_frame, text="Pearson",
                  command=lambda: self.calculate_correlation('pearson')).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Kendall", 
+        tk.Button(corr_button_frame, text="Kendall",
                  command=lambda: self.calculate_correlation('kendall')).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Spearman", 
+        tk.Button(corr_button_frame, text="Spearman",
                  command=lambda: self.calculate_correlation('spearman')).pack(side=tk.LEFT, padx=5)
-        
-        # Separador
+
+        # Separator
         tk.Frame(corr_button_frame, height=2, bg="gray").pack(side=tk.LEFT, fill=tk.X, padx=20)
-        
-        # Botones de exportación
-        tk.Button(corr_button_frame, text="Exportar Series Temporales", 
+
+        # Export buttons
+        tk.Button(corr_button_frame, text="Export Time Series",
                  command=self.export_time_series).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Exportar Coordenadas", 
+        tk.Button(corr_button_frame, text="Export Coordinates",
                  command=self.export_coordinates).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Generar Reporte", 
+        tk.Button(corr_button_frame, text="Generate Report",
                  command=self.generate_report).pack(side=tk.LEFT, padx=5)
-        
-        # Frame para visualización
+
+        # Frame for visualization
         self.corr_viz_frame = tk.Frame(main_frame)
         self.corr_viz_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Mostrar series temporales iniciales
+
+        # Show initial time series
         self.show_initial_time_series()
     
     def show_initial_time_series(self):
-        """Mostrar series temporales de clusters seleccionados"""
-        # Limpiar frame
+        """Show time series of selected clusters"""
+        # Clear frame
         for widget in self.corr_viz_frame.winfo_children():
             widget.destroy()
-        
-        # Crear figura
+
+        # Create figure
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-        
-        # Extraer series temporales de clusters seleccionados
+
+        # Extract time series of selected clusters
         self.time_series_data = []
         self.cluster_labels = []
-        
+
         for cluster_idx in self.selected_clusters:
             if len(self.final_clusters[cluster_idx]) > 0:
                 time_series = extract_time_series(self.img_array, self.final_clusters[cluster_idx])
                 self.time_series_data.append(time_series)
                 self.cluster_labels.append(f'Cluster {cluster_idx}')
-        
-        # Graficar series temporales individuales
+
+        # Plot individual time series
         for i, (ts, label) in enumerate(zip(self.time_series_data, self.cluster_labels)):
             ax1.plot(ts, label=label, alpha=0.8)
-        
-        ax1.set_title('Series Temporales de Clusters Seleccionados')
+
+        ax1.set_title('Time Series of Selected Clusters')
         ax1.set_xlabel('Frame')
-        ax1.set_ylabel('Intensidad Promedio')
+        ax1.set_ylabel('Average Intensity')
         ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         ax1.grid(True, alpha=0.3)
-        
-        # Mapa de calor de correlación preliminar
+
+        # Preliminary correlation heatmap
         if len(self.time_series_data) > 1:
             import pandas as pd
             df = pd.DataFrame(self.time_series_data).T
             df.columns = self.cluster_labels
             corr_matrix = df.corr()
-            
+
             im = ax2.imshow(corr_matrix.values, cmap='RdBu', vmin=-1, vmax=1)
             ax2.set_xticks(range(len(self.cluster_labels)))
             ax2.set_yticks(range(len(self.cluster_labels)))
             ax2.set_xticklabels(self.cluster_labels, rotation=45)
             ax2.set_yticklabels(self.cluster_labels)
-            ax2.set_title('Matriz de Correlación Preliminar (Pearson)')
-            
-            # Agregar valores en el mapa
+            ax2.set_title('Preliminary Correlation Matrix (Pearson)')
+
+            # Add values on the map
             for i in range(len(self.cluster_labels)):
                 for j in range(len(self.cluster_labels)):
                     text = ax2.text(j, i, f'{corr_matrix.iloc[i, j]:.2f}',
                                   ha="center", va="center", color="black", fontweight="bold")
-            
+
             plt.colorbar(im, ax=ax2)
         else:
-            ax2.text(0.5, 0.5, 'Selecciona al menos 2 clusters\npara análisis de correlación', 
+            ax2.text(0.5, 0.5, 'Select at least 2 clusters\nfor correlation analysis',
                     ha='center', va='center', transform=ax2.transAxes)
-            ax2.set_title('Matriz de Correlación')
-        
+            ax2.set_title('Correlation Matrix')
+
         plt.tight_layout()
-        
-        # Agregar a la ventana
+
+        # Add to the window
         canvas = FigureCanvasTkAgg(fig, master=self.corr_viz_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # Guardar referencia
+
+        # Store reference
         self.current_corr_fig = fig
-    
+
     def calculate_correlation(self, method):
-        """Calcular correlación usando el método especificado"""
+        """Calculate correlation using the specified method"""
         if len(self.time_series_data) < 2:
-            messagebox.showwarning("Advertencia", "Necesitas al menos 2 clusters seleccionados")
+            messagebox.showwarning("Warning", "You need at least 2 selected clusters")
             return
-        
+
         import pandas as pd
-        
-        # Crear DataFrame con las series temporales
+
+        # Create DataFrame with the time series
         df = pd.DataFrame(self.time_series_data).T
         df.columns = self.cluster_labels
-        
-        # Calcular correlación según el método
+
+        # Calculate correlation according to the method
         if method == 'pearson':
             corr_matrix = df.corr(method='pearson')
         elif method == 'kendall':
             corr_matrix = df.corr(method='kendall')
         elif method == 'spearman':
             corr_matrix = df.corr(method='spearman')
-        
-        # Actualizar visualización
+
+        # Update visualization
         self.update_correlation_display(corr_matrix, method.capitalize())
     
     def update_correlation_display(self, corr_matrix, method_name):
-        """Actualizar la visualización de correlación"""
-        # Limpiar frame
+        """Update the correlation visualization"""
+        # Clear frame
         for widget in self.corr_viz_frame.winfo_children():
             widget.destroy()
-        
-        # Crear nueva figura
+
+        # Create new figure
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
-        
-        # 1. Series temporales
+
+        # 1. Time series
         for i, (ts, label) in enumerate(zip(self.time_series_data, self.cluster_labels)):
             ax1.plot(ts, label=label, alpha=0.8)
-        ax1.set_title('Series Temporales de Clusters Seleccionados')
+        ax1.set_title('Time Series of Selected Clusters')
         ax1.set_xlabel('Frame')
-        ax1.set_ylabel('Intensidad')
+        ax1.set_ylabel('Intensity')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
-        
-        # 2. Matriz de correlación
+
+        # 2. Correlation matrix
         im2 = ax2.imshow(corr_matrix.values, cmap='RdBu', vmin=-1, vmax=1)
         ax2.set_xticks(range(len(self.cluster_labels)))
         ax2.set_yticks(range(len(self.cluster_labels)))
         ax2.set_xticklabels(self.cluster_labels, rotation=45)
         ax2.set_yticklabels(self.cluster_labels)
-        ax2.set_title(f'Matriz de Correlación ({method_name})')
-        
-        # Agregar valores en la matriz
+        ax2.set_title(f'Correlation Matrix ({method_name})')
+
+        # Add values in the matrix
         for i in range(len(self.cluster_labels)):
             for j in range(len(self.cluster_labels)):
                 text = ax2.text(j, i, f'{corr_matrix.iloc[i, j]:.2f}',
                               ha="center", va="center", color="black", fontweight="bold")
-        
+
         plt.colorbar(im2, ax=ax2)
-        
-        # 3. Histograma de correlaciones
+
+        # 3. Histogram of correlations
         correlations = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)]
         ax3.hist(correlations, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-        ax3.set_title('Distribución de Correlaciones')
-        ax3.set_xlabel('Valor de Correlación')
-        ax3.set_ylabel('Frecuencia')
+        ax3.set_title('Distribution of Correlations')
+        ax3.set_xlabel('Correlation Value')
+        ax3.set_ylabel('Frequency')
         ax3.grid(True, alpha=0.3)
-        
-        # 4. Mapa de correlación reordenado
+
+        # 4. Reordered correlation map
         try:
             from scipy.cluster.hierarchy import linkage, dendrogram
             from scipy.spatial.distance import squareform
-            
-            # Crear matriz de distancias
+
+            # Create distance matrix
             distance_matrix = 1 - np.abs(corr_matrix.values)
             condensed_distances = squareform(distance_matrix)
-            
-            # Clustering jerárquico
+
+            # Hierarchical clustering
             linkage_matrix = linkage(condensed_distances, method='ward')
             dendro = dendrogram(linkage_matrix, labels=self.cluster_labels, ax=ax4)
-            ax4.set_title('Dendrograma de Clusters')
+            ax4.set_title('Cluster Dendrogram')
             ax4.set_xlabel('Clusters')
-            ax4.set_ylabel('Distancia')
+            ax4.set_ylabel('Distance')
         except Exception as e:
-            ax4.text(0.5, 0.5, 'Error al generar dendrograma', ha='center', va='center', transform=ax4.transAxes)
-            ax4.set_title('Dendrograma')
-        
+            ax4.text(0.5, 0.5, 'Error generating dendrogram', ha='center', va='center', transform=ax4.transAxes)
+            ax4.set_title('Dendrogram')
+
         plt.tight_layout()
-        
-        # Agregar a la ventana
+
+        # Add to the window
         canvas = FigureCanvasTkAgg(fig, master=self.corr_viz_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # Guardar para exportación
+
+        # Store for export
         self.current_corr_fig = fig
         self.current_corr_matrix = corr_matrix
         self.current_method = method_name
     
     def export_time_series(self):
-        """Exportar series temporales a un archivo CSV o Excel"""
+        """Export time series to a CSV or Excel file"""
         if not hasattr(self, 'time_series_data') or not self.time_series_data:
-            messagebox.showwarning("Advertencia", "No hay datos para exportar")
+            messagebox.showwarning("Warning", "No data to export")
             return
 
         filename = asksaveasfilename(
-            initialfile='series_temporales_clusters.csv',
+            initialfile='cluster_time_series.csv',
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")]
         )
@@ -1174,121 +1174,121 @@ class VariabilityAnalysisWindow:
                 df.to_excel(filename, engine='xlsxwriter')
             else:
                 df.to_csv(filename)
-            messagebox.showinfo("Éxito", f"Series temporales exportadas a {filename}")
-    
+            messagebox.showinfo("Success", f"Time series exported to {filename}")
+
     def export_coordinates(self):
-        """Exportar coordenadas de clusters seleccionados"""
+        """Export coordinates of selected clusters"""
         filename = asksaveasfilename(
-            initialfile='coordenadas_clusters.txt',
+            initialfile='cluster_coordinates.txt',
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All Files", "*.*")]
         )
-        
+
         if filename:
             with open(filename, 'w') as f:
-                f.write("# Coordenadas de Clusters Seleccionados\n")
-                f.write(f"# Método de variabilidad: {self.method_name}\n")
-                f.write(f"# Threshold usado: {self.threshold_var.get()}\n")
-                f.write(f"# Total de clusters: {len(self.selected_clusters)}\n\n")
-                
+                f.write("# Coordinates of Selected Clusters\n")
+                f.write(f"# Variability method: {self.method_name}\n")
+                f.write(f"# Threshold used: {self.threshold_var.get()}\n")
+                f.write(f"# Total clusters: {len(self.selected_clusters)}\n\n")
+
                 for cluster_idx in self.selected_clusters:
                     cluster_points = self.final_clusters[cluster_idx]
-                    f.write(f"Cluster {cluster_idx} ({len(cluster_points)} puntos):\n")
+                    f.write(f"Cluster {cluster_idx} ({len(cluster_points)} points):\n")
                     for point in cluster_points:
                         f.write(f"{point[0]},{point[1]}\n")
                     f.write("\n")
-            
-            messagebox.showinfo("Éxito", f"Coordenadas exportadas a {filename}")
-    
+
+            messagebox.showinfo("Success", f"Coordinates exported to {filename}")
+
     def generate_report(self):
-        """Generar reporte completo del análisis"""
+        """Generate complete analysis report"""
         if not hasattr(self, 'current_corr_matrix'):
-            messagebox.showwarning("Advertencia", "Primero calcula una correlación")
+            messagebox.showwarning("Warning", "First calculate a correlation")
             return
-        
+
         filename = asksaveasfilename(
-            initialfile='reporte_analisis_clusters.txt',
+            initialfile='cluster_analysis_report.txt',
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All Files", "*.*")]
         )
-        
+
         if filename:
             with open(filename, 'w') as f:
-                f.write("REPORTE DE ANÁLISIS DE CLUSTERS\n")
+                f.write("CLUSTER ANALYSIS REPORT\n")
                 f.write("=" * 50 + "\n\n")
-                
-                f.write(f"Método de variabilidad: {self.method_name}\n")
-                f.write(f"Threshold usado: {self.threshold_var.get()}\n")
-                f.write(f"Rango de tamaños: {self.min_size_var.get()} - {self.max_size_var.get()}\n")
-                f.write(f"Clusters seleccionados: {len(self.selected_clusters)}\n")
-                f.write(f"Método de correlación: {self.current_method}\n\n")
-                
-                f.write("DETALLES DE CLUSTERS:\n")
+
+                f.write(f"Variability method: {self.method_name}\n")
+                f.write(f"Threshold used: {self.threshold_var.get()}\n")
+                f.write(f"Size range: {self.min_size_var.get()} - {self.max_size_var.get()}\n")
+                f.write(f"Selected clusters: {len(self.selected_clusters)}\n")
+                f.write(f"Correlation method: {self.current_method}\n\n")
+
+                f.write("CLUSTER DETAILS:\n")
                 f.write("-" * 25 + "\n")
                 for cluster_idx in self.selected_clusters:
                     cluster_size = len(self.final_clusters[cluster_idx])
-                    f.write(f"Cluster {cluster_idx}: {cluster_size} píxeles\n")
-                
-                f.write(f"\nMATRIZ DE CORRELACIÓN ({self.current_method}):\n")
+                    f.write(f"Cluster {cluster_idx}: {cluster_size} pixels\n")
+
+                f.write(f"\nCORRELATION MATRIX ({self.current_method}):\n")
                 f.write("-" * 35 + "\n")
                 f.write(self.current_corr_matrix.to_string())
                 f.write("\n\n")
-                
-                f.write("ESTADÍSTICAS DE CORRELACIÓN:\n")
+
+                f.write("CORRELATION STATISTICS:\n")
                 f.write("-" * 30 + "\n")
                 correlations = self.current_corr_matrix.values[np.triu_indices_from(self.current_corr_matrix.values, k=1)]
-                f.write(f"Correlación promedio: {np.mean(correlations):.3f}\n")
-                f.write(f"Correlación máxima: {np.max(correlations):.3f}\n")
-                f.write(f"Correlación mínima: {np.min(correlations):.3f}\n")
-                f.write(f"Desviación estándar: {np.std(correlations):.3f}\n")
-            
-            messagebox.showinfo("Éxito", f"Reporte generado en {filename}")
+                f.write(f"Average correlation: {np.mean(correlations):.3f}\n")
+                f.write(f"Maximum correlation: {np.max(correlations):.3f}\n")
+                f.write(f"Minimum correlation: {np.min(correlations):.3f}\n")
+                f.write(f"Standard deviation: {np.std(correlations):.3f}\n")
+
+            messagebox.showinfo("Success", f"Report generated at {filename}")
     
     def show_3d_surface(self):
-        """Mostrar visualización 3D de la superficie de variabilidad"""
+        """Show 3D visualization of the variability surface"""
         from mpl_toolkits.mplot3d import Axes3D
-        
-        # Crear ventana para visualización 3D
+
+        # Create window for 3D visualization
         window_3d = tk.Toplevel(self.window)
-        window_3d.title(f"Superficie 3D - {self.method_name}")
+        window_3d.title(f"3D Surface - {self.method_name}")
         window_3d.geometry("800x600")
-        
-        # Submuestrear la imagen para que la visualización sea más rápida
-        step = max(1, min(self.var_im.shape) // 100)  # Máximo 100 puntos por dimensión
+
+        # Subsample the image so the visualization is faster
+        step = max(1, min(self.var_im.shape) // 100)  # Maximum 100 points per dimension
         var_im_sub = self.var_im[::step, ::step]
-        
-        # Crear meshgrid
+
+        # Create meshgrid
         x = np.arange(0, var_im_sub.shape[1])
         y = np.arange(0, var_im_sub.shape[0])
         X, Y = np.meshgrid(x, y)
         Z = var_im_sub
-        
-        # Crear figura 3D
+
+        # Create 3D figure
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
-        
-        # Graficar superficie
+
+        # Plot surface
         surf = ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.8)
-        
-        # Configurar ejes
-        ax.set_xlabel('X (píxeles)')
-        ax.set_ylabel('Y (píxeles)')
+
+        # Configure axes
+        ax.set_xlabel('X (pixels)')
+        ax.set_ylabel('Y (pixels)')
         ax.set_zlabel(f'{self.method_name}')
-        ax.set_title(f'Superficie de Variabilidad - {self.method_name}')
-        
-        # Agregar barra de color
+        ax.set_title(f'Variability Surface - {self.method_name}')
+
+        # Add color bar
         fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label=self.method_name)
-        
-        # Agregar a la ventana
+
+        # Add to the window
         canvas = FigureCanvasTkAgg(fig, master=window_3d)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # Frame para controles
+
+        # Frame for controls
         control_frame = tk.Frame(window_3d)
         control_frame.pack(fill=tk.X, pady=5)
-        
-        # Botón para guardar
+
+        # Button to save
         def save_3d():
             filename = asksaveasfilename(
                 initialfile=f'{self.method_name.replace(" ", "_")}_3D.png',
@@ -1299,13 +1299,13 @@ class VariabilityAnalysisWindow:
             )
             if filename:
                 fig.savefig(filename, dpi=300, bbox_inches='tight')
-                messagebox.showinfo("Éxito", f"Imagen 3D guardada en {filename}")
-        
-        tk.Button(control_frame, text="Guardar Imagen 3D", command=save_3d).pack(side=tk.LEFT, padx=10)
-        tk.Label(control_frame, text="Usa el mouse para rotar la vista").pack(side=tk.LEFT, padx=10)
-    
+                messagebox.showinfo("Success", f"3D image saved to {filename}")
+
+        tk.Button(control_frame, text="Save 3D Image", command=save_3d).pack(side=tk.LEFT, padx=10)
+        tk.Label(control_frame, text="Use the mouse to rotate the view").pack(side=tk.LEFT, padx=10)
+
     def save_image(self):
-        """Guardar la imagen actual"""
+        """Save the current image"""
         if hasattr(self, 'current_fig'):
             filename = asksaveasfilename(
                 initialfile=f'{self.method_name.replace(" ", "_")}_analysis.png',
@@ -1316,29 +1316,29 @@ class VariabilityAnalysisWindow:
             )
             if filename:
                 self.current_fig.savefig(filename, dpi=300, bbox_inches='tight')
-                messagebox.showinfo("Éxito", f"Imagen guardada en {filename}")
+                messagebox.showinfo("Success", f"Image saved to {filename}")
 
 def show_variability_analysis(img_array, method, main_window):
     """
-    Función principal para mostrar el análisis de variabilidad completo.
+    Main function to display the complete variability analysis.
     """
     if img_array is None or len(img_array) == 0:
-        messagebox.showwarning("Advertencia", "No hay imagen cargada")
+        messagebox.showwarning("Warning", "No image loaded")
         return
-    
-    # Crear la ventana de análisis
+
+    # Create the analysis window
     analysis_window = VariabilityAnalysisWindow(img_array, method, main_window)
 
 def get_variability_methods():
     """
-    Retorna lista de métodos disponibles para el menú.
+    Returns list of available methods for the menu.
     """
     return [
-        "Rango",
-        "Varianza Poblacional", 
-        "Varianza Muestral",
-        "Desviación Estándar Poblacional",
-        "Desviación Estándar Muestral", 
-        "Coeficiente de Variación",
-        "Rango Intercuartílico (IQR)"
+        "Range",
+        "Population Variance",
+        "Sample Variance",
+        "Population Standard Deviation",
+        "Sample Standard Deviation",
+        "Coefficient of Variation",
+        "Interquartile Range (IQR)"
     ]

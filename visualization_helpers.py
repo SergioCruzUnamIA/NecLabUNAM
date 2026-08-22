@@ -61,7 +61,7 @@ def initialize_visualization(window, menu_picos, canvas, listbox=None, on_column
             sheet_names = pd.ExcelFile(filename).sheet_names
         except Exception as e:
             from tkinter import messagebox
-            messagebox.showerror("Error", f"No se pudo leer el archivo Excel:\n{e}")
+            messagebox.showerror("Error", f"Could not read the Excel file:\n{e}")
             return
 
         if len(sheet_names) > 1:

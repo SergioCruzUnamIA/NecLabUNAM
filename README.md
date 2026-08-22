@@ -1,230 +1,230 @@
 # NecLab
 
-Software para el análisis automatizado de imágenes de microscopía y para la visualización/análisis de series de datos, desarrollado en el laboratorio LansBiodyt de la Facultad de Ciencias, UNAM.
+Software for automated microscopy image analysis and for the visualization/analysis of data series, developed at the LansBiodyt laboratory, Facultad de Ciencias, UNAM.
 
-📖 **Manual de usuario completo:** [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) (Español) · [docs/USER_MANUAL.md](docs/USER_MANUAL.md) (English)
-
----
-
-## Descripción
-
-NecLab es una aplicación de escritorio (Tkinter) con dos grandes flujos de trabajo:
-
-1. **Procesamiento de imágenes de microscopía**: carga de pilas OME-TIFF, ajuste de brillo/contraste/threshold, 7 métodos de análisis de variabilidad temporal, detección de células por clustering espacial, y extracción/exportación de series temporales por célula.
-2. **Visualización y análisis de datos numéricos**: carga de archivos `.npy`/`.csv` o de múltiples libros de Excel, detección de picos (7 métodos), suavizado, normalización, correlaciones (Pearson/Kendall/Spearman), dendrogramas de clustering jerárquico y exportación a CSV/XLSX.
-
-Funcionalidades principales:
-
-- Cargar y visualizar imágenes OME-TIFF, con navegación por frames
-- Ajustar brillo, contraste y threshold de binarización
-- Aplicar 7 métodos de análisis de variabilidad temporal (Rango, Varianzas, Desviaciones Estándar, Coeficiente de Variación, IQR)
-- Detectar y segmentar células mediante clustering espacial (básico, avanzado y descomposición de clusters grandes)
-- Extraer series temporales de células individuales y analizar sus correlaciones, con vista 3D de la superficie de variabilidad
-- Cargar datos `.npy`/`.csv` individuales o **múltiples archivos Excel a la vez** ("Datos Múltiples"), con suavizado, 4 modos de normalización, mapa de calor y clasificación de hojas
-- Detectar picos con 7 métodos distintos (Elliptic Envelope, Peak Caller, Local Outlier Factor, Isolation Forest, modelos lineales, etc.)
-- Generar dendrogramas de clustering jerárquico y matrices de correlación, o cargar una matriz de correlación ya calculada
-- Exportar resultados en CSV/XLSX (series de tiempo, picos, correlaciones, clasificaciones, clusters) y guardar imágenes de cada gráfica
-- Revisar actualizaciones del código directamente desde el menú **Help → Check for Updates**
+📖 **Complete user manual:** [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) (Español) · [docs/USER_MANUAL.md](docs/USER_MANUAL.md) (English)
 
 ---
 
-## Requisitos del sistema
+## Description
 
-- Sistema operativo: Windows, macOS o Linux
-- Python 3.11 (recomendado; el proyecto se compila y prueba con 3.11)
-- Miniconda o Anaconda (para la instalación recomendada)
+NecLab is a desktop application (Tkinter) with two main workflows:
+
+1. **Microscopy image processing**: loading OME-TIFF stacks, brightness/contrast/threshold adjustment, 7 temporal variability analysis methods, cell detection via spatial clustering, and per-cell time series extraction/export.
+2. **Numerical data visualization and analysis**: loading `.npy`/`.csv` files or multiple Excel workbooks, peak detection (7 methods), smoothing, normalization, correlations (Pearson/Kendall/Spearman), hierarchical clustering dendrograms, and export to CSV/XLSX.
+
+Main features:
+
+- Load and view OME-TIFF images, with frame-by-frame navigation
+- Adjust brightness, contrast, and binarization threshold
+- Apply 7 temporal variability analysis methods (Range, Variances, Standard Deviations, Coefficient of Variation, IQR)
+- Detect and segment cells via spatial clustering (basic, advanced, and decomposition of large clusters)
+- Extract time series for individual cells and analyze their correlations, with a 3D view of the variability surface
+- Load individual `.npy`/`.csv` data or **multiple Excel files at once** ("Multiple Files"), with smoothing, 4 normalization modes, a heatmap, and sheet classification
+- Detect peaks with 7 different methods (Elliptic Envelope, Peak Caller, Local Outlier Factor, Isolation Forest, linear models, etc.)
+- Generate hierarchical clustering dendrograms and correlation matrices, or load an already-computed correlation matrix
+- Export results as CSV/XLSX (time series, peaks, correlations, classifications, clusters) and save an image of each plot
+- Check for code updates directly from the **Help → Check for Updates** menu
 
 ---
 
-## Instalación
+## System requirements
 
-Hay tres formas de obtener NecLab. Para la mayoría de los usuarios del laboratorio se recomienda la **Opción A** (ejecutable precompilado); para desarrollo o para plataformas sin ejecutable publicado, use la **Opción B** (conda).
+- Operating system: Windows, macOS, or Linux
+- Python 3.11 (recommended; the project is built and tested with 3.11)
+- Miniconda or Anaconda (for the recommended installation)
 
-### Opción A: Usar el ejecutable precompilado (sin instalar Python)
+---
 
-Cada vez que se publica una versión etiquetada (`v1.0`, `v1.1`, etc.) en GitHub, se generan automáticamente ejecutables para macOS y Windows mediante GitHub Actions.
+## Installation
 
-1. Ir a la pestaña **Releases** del repositorio: https://github.com/SergioCruzUnamIA/NecLabUNAM/releases
-2. Descargar `NecLab-mac.zip` (macOS) o `NecLab.exe` (Windows) de la versión más reciente
-3. **macOS**: descomprimir y arrastrar `NecLab.app` a la carpeta Aplicaciones. Como la app no está firmada por Apple, la primera vez debe hacer clic derecho → "Abrir" (en vez de doble clic) y confirmar en el diálogo de seguridad
-4. **Windows**: ejecutar `NecLab.exe` directamente. Si Windows Defender SmartScreen muestra una advertencia, seleccione "Más información" → "Ejecutar de todas formas"
+There are three ways to get NecLab. For most lab users, **Option A** (precompiled executable) is recommended; for development, or for platforms without a published executable, use **Option B** (conda).
 
-Si no hay ninguna versión etiquetada reciente, también puede descargar el último build automático desde la pestaña **Actions** del repositorio (artefactos `NecLab-mac` / `NecLab-windows`), aunque estos requieren una cuenta de GitHub para descargarse.
+### Option A: Use the precompiled executable (no Python installation needed)
 
-### Opción B: Instalación con Conda (recomendada para desarrollo)
+Every time a tagged release (`v1.0`, `v1.1`, etc.) is published on GitHub, executables for macOS and Windows are automatically generated via GitHub Actions.
 
-#### Paso 1: Instalar Miniconda
+1. Go to the repository's **Releases** tab: https://github.com/SergioCruzUnamIA/NecLabUNAM/releases
+2. Download `NecLab-mac.zip` (macOS) or `NecLab.exe` (Windows) from the latest release
+3. **macOS**: unzip and drag `NecLab.app` to the Applications folder. Since the app isn't signed by Apple, the first time you must right-click → "Open" (instead of double-clicking) and confirm in the security dialog
+4. **Windows**: run `NecLab.exe` directly. If Windows Defender SmartScreen shows a warning, select "More info" → "Run anyway"
 
-Si no tiene Miniconda instalado, descárguelo desde:
+If there is no recent tagged release, you can also download the latest automatic build from the repository's **Actions** tab (artifacts `NecLab-mac` / `NecLab-windows`), though these require a GitHub account to download.
+
+### Option B: Installation with Conda (recommended for development)
+
+#### Step 1: Install Miniconda
+
+If you don't have Miniconda installed, download it from:
 https://docs.conda.io/en/latest/miniconda.html
 
-Siga las instrucciones de instalación para su sistema operativo.
+Follow the installation instructions for your operating system.
 
-#### Paso 2: Descargar el repositorio
+#### Step 2: Download the repository
 
-Opción A - Clonar con Git:
+Option A - Clone with Git:
 ```
 git clone https://github.com/SergioCruzUnamIA/NecLabUNAM.git
 ```
 
-Opción B - Descargar ZIP:
-1. Ir a la página del repositorio en GitHub
-2. Dar clic en el botón verde "Code"
-3. Seleccionar "Download ZIP"
-4. Extraer el archivo en la ubicación deseada
+Option B - Download ZIP:
+1. Go to the repository page on GitHub
+2. Click the green "Code" button
+3. Select "Download ZIP"
+4. Extract the file to your desired location
 
-#### Paso 3: Crear el ambiente virtual
+#### Step 3: Create the virtual environment
 
-Abra una terminal y navegue a la carpeta del proyecto:
+Open a terminal and navigate to the project folder:
 ```
-cd ruta/a/NecLabUNAM
+cd path/to/NecLabUNAM
 ```
 
-Cree el ambiente virtual con las dependencias:
+Create the virtual environment with the dependencies:
 ```
 conda env create -f environment.yml
 ```
 
-Este proceso descargará todas las bibliotecas necesarias (incluyendo `customtkinter`, instalado vía pip dentro del propio ambiente conda, ya que no está disponible en conda-forge). Puede tomar varios minutos dependiendo de su conexión a internet.
+This process will download all the required libraries (including `customtkinter`, installed via pip inside the conda environment itself, since it isn't available on conda-forge). It may take several minutes depending on your internet connection.
 
-#### Paso 4: Activar el ambiente virtual
+#### Step 4: Activate the virtual environment
 
 ```
 conda activate neclab_env
 ```
 
-Una vez activado, verá `(neclab_env)` al inicio de la línea de comandos.
+Once activated, you'll see `(neclab_env)` at the start of the command line.
 
-### Opción C: Instalación con pip / venv
+### Option C: Installation with pip / venv
 
-`requirements.txt` es una captura completa (`pip freeze`) del ambiente de *desarrollo y empaquetado*, no solo de ejecución: además de las bibliotecas que usa la aplicación, incluye herramientas para compilar ejecutables (`pyinstaller`, `cx_Freeze`, `dmgbuild`, `mac-alias`) y el stack de Jupyter usado por los notebooks de prototipado. Instalarlo funciona, pero es más pesado de lo necesario solo para ejecutar la app.
+`requirements.txt` is a complete snapshot (`pip freeze`) of the *development and packaging* environment, not just the runtime one: in addition to the libraries the application uses, it includes tools for building executables (`pyinstaller`, `cx_Freeze`, `dmgbuild`, `mac-alias`) and the Jupyter stack used by the prototyping notebooks. Installing it works, but it's heavier than necessary just to run the app.
 
 ```
 python -m venv venv
-source venv/bin/activate        # En Windows: venv\Scripts\activate
+source venv/bin/activate        # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ---
 
-## Ejecución
+## Running the app
 
-Con el ambiente virtual activado, ejecute:
+With the virtual environment activated, run:
 
 ```
 python interface3.py
 ```
 
-La primera ejecución puede tardar entre 1 y 2 minutos mientras se cargan las bibliotecas.
+The first run may take 1 to 2 minutes while the libraries load.
 
 ---
 
-## Guía de uso rápida
+## Quick usage guide
 
-Esta sección es solo un resumen. Para instrucciones detalladas paso a paso de cada menú, pestaña y función de exportación, consulte el **manual de usuario completo**: [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) (Español) o [docs/USER_MANUAL.md](docs/USER_MANUAL.md) (English).
+This section is only a summary. For detailed step-by-step instructions for each menu, tab, and export feature, see the **complete user manual**: [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) (Español) or [docs/USER_MANUAL.md](docs/USER_MANUAL.md) (English).
 
-La aplicación se organiza en pestañas:
+The application is organized into tabs:
 
-- **Procesamiento de Imágenes**: abrir una imagen OME-TIFF (`Archivo → Abrir OME-TIFF`, o `Ctrl+O`), ajustar brillo/contraste/threshold, y desde el menú **Análisis de Variabilidad** elegir uno de los 7 métodos para abrir la ventana de detección y clustering de células.
-- **Visualización de Datos**: abrir un archivo `.npy`/`.csv` (`Archivo → Abrir Datos`) para buscar picos, aplicar suavizado, calcular correlaciones y generar dendrogramas o series de tiempo.
-- **Datos Múltiples** (aparece al usar `Archivo → Abrir Multiples Archivos (.xls)`): cargar y comparar varias hojas de Excel a la vez, con suavizado, normalización, mapa de calor y clasificación de hojas.
-- **Dendograma** y **Time Series**: se crean automáticamente al usar las opciones correspondientes del menú **Visualizacion**, una vez que hay datos cargados.
+- **Image Processing**: open an OME-TIFF image (`File → Open OME-TIFF`, or `Ctrl+O`), adjust brightness/contrast/threshold, and from the **Variability Analysis** menu choose one of the 7 methods to open the cell detection and clustering window.
+- **Data Visualization**: open a `.npy`/`.csv` file (`File → Open Data`) to find peaks, apply smoothing, compute correlations, and generate dendrograms or time series.
+- **Multiple Files** (appears when using `File → Open Multiple Files (.xls)`): load and compare several Excel sheets at once, with smoothing, normalization, a heatmap, and sheet classification.
+- **Dendrogram** and **Time Series**: created automatically when using the corresponding options in the **Visualization** menu, once data has been loaded.
 
-También puede cargar una matriz de correlación ya calculada con `Archivo → Cargar Matriz de Correlacion`.
-
----
-
-## Actualizaciones desde la aplicación
-
-`Help → Check for Updates` compara la versión local contra el último commit de la rama `main` del repositorio en GitHub y, si hay una versión más reciente, ofrece descargar los archivos `.py` actualizados y reiniciar la aplicación automáticamente. Requiere conexión a internet.
-
-`Help → About NecLab` muestra información de contacto y del repositorio.
+You can also load an already-computed correlation matrix with `File → Load Correlation Matrix`.
 
 ---
 
-## Estructura del proyecto
+## Updates from within the app
+
+`Help → Check for Updates` compares the local version against the latest commit on the `main` branch of the GitHub repository and, if a newer version is available, offers to download the updated `.py` files and restart the application automatically. Requires an internet connection.
+
+`Help → About NecLab` shows contact and repository information.
+
+---
+
+## Project structure
 
 ```
 NecLabUNAM/
-├── interface3.py               # Interfaz gráfica principal (punto de entrada)
-├── variability_functions.py    # Métodos de variabilidad y clustering de células
-├── peak_functions.py           # Detección de picos (7 métodos) y suavizado
-├── corr_dendo_functions.py     # Correlaciones, dendrogramas y series de tiempo
-├── multi_xls_helpers.py        # Carga y procesamiento para la pestaña Datos Múltiples
-├── visualization_helpers.py    # Funciones auxiliares de visualización de datos
-├── image_loader.py             # Carga de imágenes OME-TIFF
-├── image_processing.py         # Procesamiento de imágenes
-├── NecLab.spec                 # Especificación de PyInstaller (ejecutables Mac/Windows)
-├── build_mac.sh                # Script para compilar NecLab.app localmente
-├── build_windows.bat           # Script para compilar NecLab.exe localmente
-├── .github/workflows/build.yml # Compilación automática de ejecutables (GitHub Actions)
-├── environment.yml             # Dependencias del proyecto (conda)
-├── requirements.txt            # Dependencias completas de desarrollo/empaquetado (pip)
-├── cell_detection_complete.ipynb  # Notebook de prototipado (no forma parte de la app)
-├── signal_processing.ipynb        # Notebook de prototipado (no forma parte de la app)
+├── interface3.py               # Main graphical interface (entry point)
+├── variability_functions.py    # Variability methods and cell clustering
+├── peak_functions.py           # Peak detection (7 methods) and smoothing
+├── corr_dendo_functions.py     # Correlations, dendrograms, and time series
+├── multi_xls_helpers.py        # Loading and processing for the Multiple Files tab
+├── visualization_helpers.py    # Helper functions for data visualization
+├── image_loader.py             # OME-TIFF image loading
+├── image_processing.py         # Image processing
+├── NecLab.spec                 # PyInstaller spec (Mac/Windows executables)
+├── build_mac.sh                # Script to build NecLab.app locally
+├── build_windows.bat           # Script to build NecLab.exe locally
+├── .github/workflows/build.yml # Automatic executable build (GitHub Actions)
+├── environment.yml             # Project dependencies (conda)
+├── requirements.txt            # Full development/packaging dependencies (pip)
+├── cell_detection_complete.ipynb  # Prototyping notebook (not part of the app)
+├── signal_processing.ipynb        # Prototyping notebook (not part of the app)
 ├── docs/
-│   ├── MANUAL_USUARIO.md       # Manual de usuario completo (Español)
+│   ├── MANUAL_USUARIO.md       # Complete user manual (Español)
 │   └── USER_MANUAL.md          # Full user manual (English)
-└── README.md                   # Este archivo
+└── README.md                   # This file
 ```
 
 ---
 
-## Compilar ejecutables standalone
+## Building standalone executables
 
-Los ejecutables se generan con PyInstaller a partir de `NecLab.spec`, que produce un `.app` en macOS o un `.exe` en Windows según la plataforma donde se ejecute.
+The executables are generated with PyInstaller from `NecLab.spec`, which produces a `.app` on macOS or a `.exe` on Windows depending on the platform it's run on.
 
-**Localmente:**
+**Locally:**
 ```
 pip install pyinstaller
 ./build_mac.sh          # macOS → dist/NecLab.app
 build_windows.bat       # Windows → dist\NecLab.exe
 ```
 
-**Automáticamente (GitHub Actions):** el workflow `.github/workflows/build.yml` compila ambos ejecutables al hacer push de un tag `v*` (y los publica en la Release correspondiente), o al hacer push a las ramas de desarrollo configuradas en ese archivo. También puede lanzarse manualmente desde la pestaña Actions ("Run workflow").
+**Automatically (GitHub Actions):** the `.github/workflows/build.yml` workflow builds both executables when a `v*` tag is pushed (and publishes them to the corresponding Release), or when pushing to the development branches configured in that file. It can also be triggered manually from the Actions tab ("Run workflow").
 
 ---
 
-## Solución de problemas
+## Troubleshooting
 
-**El programa no inicia / `ModuleNotFoundError: No module named 'customtkinter'`:**
-- Verifique que el ambiente virtual esté activado (debe ver `(neclab_env)` en la terminal)
-- Si instaló con conda antes de esta corrección, `customtkinter` no se instala vía `conda install` porque no existe en conda-forge; ejecute `pip install customtkinter` dentro del ambiente activado, o recree el ambiente con `conda env create -f environment.yml`
+**The program doesn't start / `ModuleNotFoundError: No module named 'customtkinter'`:**
+- Check that the virtual environment is activated (you should see `(neclab_env)` in the terminal)
+- If you installed with conda before this fix, `customtkinter` isn't installed via `conda install` because it doesn't exist on conda-forge; run `pip install customtkinter` inside the activated environment, or recreate the environment with `conda env create -f environment.yml`
 
-**Error de biblioteca no encontrada:**
-- Ejecute: `pip install nombre_de_la_biblioteca`
-- O reinstale el ambiente: `conda env remove -n neclab_env` y repita la instalación
+**Library not found error:**
+- Run: `pip install library_name`
+- Or reinstall the environment: `conda env remove -n neclab_env` and repeat the installation
 
-**La imagen no se visualiza correctamente:**
-- Verifique que el archivo sea formato OME-TIFF válido
-- Intente ajustar el brillo y contraste en el panel de controles
+**The image doesn't display correctly:**
+- Check that the file is a valid OME-TIFF format
+- Try adjusting the brightness and contrast in the controls panel
 
-**"Check for Updates" no encuentra nada / falla:**
-- Requiere conexión a internet y acceso a `api.github.com`; si su red bloquea GitHub, actualice manualmente con `git pull` o descargando un nuevo ZIP/ejecutable
+**"Check for Updates" doesn't find anything / fails:**
+- Requires an internet connection and access to `api.github.com`; if your network blocks GitHub, update manually with `git pull` or by downloading a new ZIP/executable
 
-**macOS dice que la app está dañada o de un desarrollador no identificado:**
-- La app no está firmada ni notarizada por Apple. Use clic derecho → "Abrir" en vez de doble clic la primera vez
+**macOS says the app is damaged or from an unidentified developer:**
+- The app isn't signed or notarized by Apple. Right-click → "Open" instead of double-clicking the first time
 
-**Cargar muchos archivos Excel en "Datos Múltiples" es lento:**
-- La carga y el guardado corren en un hilo en segundo plano con una ventana de progreso, pero archivos muy grandes o con muchas hojas seguirán tardando; espere a que la ventana de progreso se cierre antes de interactuar con la pestaña
+**Loading many Excel files in "Multiple Files" is slow:**
+- Loading and saving run on a background thread with a progress window, but very large files or files with many sheets will still take time; wait for the progress window to close before interacting with the tab
 
 ---
 
-## Datos de prueba
+## Test data
 
-Para probar el software puede descargar una imagen de ejemplo desde:
+To test the software you can download a sample image from:
 https://drive.google.com/file/d/1EP7TQMWQglbhgoRdJm2bY-10s2cYMDa3/view
 
 ---
 
-## Créditos
+## Credits
 
-Desarrollado en el laboratorio LansBiodyt, Facultad de Ciencias, UNAM.
+Developed at the LansBiodyt laboratory, Facultad de Ciencias, UNAM.
 
-Asesor: Dr. Sergio Rodolfo Cruz Gómez
+Advisor: Dr. Sergio Rodolfo Cruz Gómez
 
 ---
 
-## Licencia
+## License
 
-Este proyecto está bajo la licencia MIT incluida en el archivo [LICENSE](LICENSE).
+This project is under the MIT license included in the [LICENSE](LICENSE) file.

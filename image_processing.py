@@ -6,17 +6,17 @@ from PIL import Image, ImageOps
 
 def auto_contrast(img_array, cutoff=2, ignore=2):
     """
-    Aplica autocontraste a cada capa de la pila de imágenes.
-    Trabaja sobre una COPIA para no modificar los datos originales,
-    ya que el contraste es solo para visualización, no procesamiento.
+    Applies auto-contrast to each slice of the image stack.
+    Works on a COPY so the original data isn't modified,
+    since the contrast is only for display, not processing.
 
     Args:
-        img_array (numpy.ndarray): Pila de imágenes con forma (num_slices, height, width).
-        cutoff (int): Porcentaje de píxeles que se recortan de cada extremo del histograma.
-        ignore (int): Número de píxeles a ignorar en los extremos del histograma.
-    
+        img_array (numpy.ndarray): Image stack with shape (num_slices, height, width).
+        cutoff (int): Percentage of pixels to clip from each end of the histogram.
+        ignore (int): Number of pixels to ignore at the ends of the histogram.
+
     Returns:
-        numpy.ndarray: Copia del array con el autocontraste aplicado.
+        numpy.ndarray: Copy of the array with auto-contrast applied.
     """
     result = img_array.copy()
     for i in range(result.shape[0]):
@@ -30,41 +30,41 @@ def auto_contrast(img_array, cutoff=2, ignore=2):
 
 def show_histogram(img_array):
     """
-    Muestra el histograma de la varianza de la pila de imágenes.
-    Calcula la varianza a lo largo del eje 0 (pila) y luego grafica el histograma en 2D.
+    Shows the histogram of the variance of the image stack.
+    Computes the variance along axis 0 (stack) and then plots the 2D histogram.
 
     Args:
-        img_array (numpy.ndarray): Pila de imágenes con forma (num_slices, height, width).
+        img_array (numpy.ndarray): Image stack with shape (num_slices, height, width).
     """
     var_im = np.var(img_array, axis=0)
     plt.hist(var_im.ravel(), bins=50)
     plt.title("Histogram of Variance")
-    plt.xlabel("Varianza de píxel (flattened)")
-    plt.ylabel("Frecuencia")
+    plt.xlabel("Pixel variance (flattened)")
+    plt.ylabel("Frequency")
     plt.show()
 
 
 def binarize_variance(img_array, threshold=150):
     """
-    Calcula la varianza a lo largo de la pila (eje 0) y crea una imagen binaria
-    en 2D usando el umbral indicado.
+    Computes the variance along the stack (axis 0) and creates a 2D binary
+    image using the given threshold.
 
     Args:
-        img_array (numpy.ndarray): Pila de imágenes con forma (num_slices, height, width).
-        threshold (int): Umbral para la binarización de la varianza.
-    
+        img_array (numpy.ndarray): Image stack with shape (num_slices, height, width).
+        threshold (int): Threshold for binarizing the variance.
+
     Returns:
-        PIL.Image: Imagen binaria (RGB) resultante.
+        PIL.Image: Resulting binary (RGB) image.
     """
-    # Calcula la varianza por cada píxel a lo largo del eje 0
+    # Compute the variance per pixel along axis 0
     var_im = np.var(img_array, axis=0)
-    # Convierte a un vector 1D
+    # Convert to a 1D vector
     var_im_flat = var_im.ravel()
-    # Genera la máscara binaria según el umbral
+    # Generate the binary mask according to the threshold
     bin_mask = (var_im_flat > threshold).astype(np.uint8) * 255
-    # Reconvierte a 2D
+    # Reshape back to 2D
     bin_mask_2d = bin_mask.reshape(var_im.shape)
-    # Crea la imagen PIL
+    # Create the PIL image
     pil_img = Image.fromarray(bin_mask_2d)
     if pil_img.mode != 'RGB':
         pil_img = pil_img.convert('RGB')
@@ -72,25 +72,25 @@ def binarize_variance(img_array, threshold=150):
 
 def threshold_image_pil(image_2d, threshold=200):
     """
-    Aplica un umbral simple a una imagen 2D (una capa) y retorna la imagen binaria como PIL.Image.
+    Applies a simple threshold to a 2D image (one slice) and returns the binary image as a PIL.Image.
 
     Args:
-        image_2d (numpy.ndarray): Imagen 2D (altura x anchura).
-        threshold (int): Valor del umbral. Los píxeles con valor > threshold se convierten en 255 (blanco)
-                         y los demás en 0 (negro).
+        image_2d (numpy.ndarray): 2D image (height x width).
+        threshold (int): Threshold value. Pixels with value > threshold become 255 (white)
+                         and the rest become 0 (black).
 
     Returns:
-        PIL.Image: Imagen binaria en modo RGB.
+        PIL.Image: Binary image in RGB mode.
     """
-    # Aplana la imagen a un vector 1D
+    # Flatten the image to a 1D vector
     arr_flat = image_2d.ravel()
-    # Aplica el umbral y multiplica por 255 para obtener valores 0 o 255
+    # Apply the threshold and multiply by 255 to get values of 0 or 255
     bin_mask = (arr_flat > threshold).astype(np.uint8) * 255
-    # Reconstruye la imagen en su forma original (2D)
+    # Reconstruct the image in its original shape (2D)
     bin_mask_2d = bin_mask.reshape(image_2d.shape)
-    # Crea la imagen PIL
+    # Create the PIL image
     pil_img = Image.fromarray(bin_mask_2d)
-    # La imagen debe estar en modo RGB para la compatibilidad con Tkinter
+    # The image must be in RGB mode for compatibility with Tkinter
     if pil_img.mode != 'RGB':
         pil_img = pil_img.convert('RGB')
     return pil_img

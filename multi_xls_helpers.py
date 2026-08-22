@@ -1,7 +1,7 @@
 """
-Funciones auxiliares para cargar múltiples archivos Excel (.xls/.xlsx),
-elegir qué hojas cargar, y preparar sus columnas de datos para la
-pestaña "Datos Multiples".
+Helper functions to load multiple Excel files (.xls/.xlsx),
+choose which sheets to load, and prepare their data columns for the
+"Multiple Files" tab.
 """
 import os
 import numpy as np
@@ -18,9 +18,9 @@ def _is_csv_file(filepath):
 
 
 def _read_sheet_names(filepath):
-    """Devuelve la lista de nombres de hojas (tabs) de un archivo Excel. Un
-    archivo .csv no tiene hojas, así que se le asigna una única hoja
-    "pseudo" para que encaje en el mismo flujo de selección."""
+    """Returns the list of sheet (tab) names of an Excel file. A .csv
+    file has no sheets, so it is assigned a single "pseudo" sheet so it
+    fits into the same selection flow."""
     if _is_csv_file(filepath):
         return [_CSV_PSEUDO_SHEET]
     xl = pd.ExcelFile(filepath)
@@ -29,18 +29,18 @@ def _read_sheet_names(filepath):
 
 def _select_sheets_dialog(parent, file_sheet_map):
     """
-    Muestra un diálogo para elegir qué hojas de cada archivo Excel cargar.
+    Shows a dialog to choose which sheets from each Excel file to load.
 
     file_sheet_map: dict {filepath: [sheet_names]}
-    Devuelve: lista de tuplas (filepath, sheet_name) seleccionadas, o None si se cancela.
+    Returns: list of selected (filepath, sheet_name) tuples, or None if cancelled.
     """
     dialog = tk.Toplevel(parent)
-    dialog.title("Seleccionar Hojas a Cargar")
+    dialog.title("Select Sheets to Load")
     dialog.geometry("480x520")
     dialog.transient(parent)
     dialog.grab_set()
 
-    tk.Label(dialog, text="Selecciona las hojas (tabs) que deseas cargar:",
+    tk.Label(dialog, text="Select the sheets (tabs) you want to load:",
              font=('Arial', 11, 'bold')).pack(pady=(10, 4), padx=10, anchor='w')
 
     outer = tk.Frame(dialog)
@@ -76,15 +76,15 @@ def _select_sheets_dialog(parent, file_sheet_map):
 
     btns_top = tk.Frame(dialog)
     btns_top.pack(fill='x', padx=10)
-    tk.Button(btns_top, text="Seleccionar Todo",
+    tk.Button(btns_top, text="Select All",
               command=lambda: _set_all(True)).pack(side=tk.LEFT, padx=2, pady=4)
-    tk.Button(btns_top, text="Deseleccionar Todo",
+    tk.Button(btns_top, text="Deselect All",
               command=lambda: _set_all(False)).pack(side=tk.LEFT, padx=2)
 
     def on_ok():
         selected = [key for key, var in check_vars.items() if var.get()]
         if not selected:
-            messagebox.showwarning("Sin selección", "Selecciona al menos una hoja para cargar.")
+            messagebox.showwarning("No Selection", "Select at least one sheet to load.")
             return
         result['selection'] = selected
         dialog.destroy()
@@ -103,12 +103,12 @@ def _select_sheets_dialog(parent, file_sheet_map):
 
 
 def _load_sheet_dataframe(filepath, sheet_name):
-    """Lee una hoja de Excel (o un archivo .csv, tratado como su única
-    "hoja") sin fila de encabezado: no se asumen nombres de columna, así que
-    cada columna es una serie de datos identificada únicamente por su
-    posición (0, 1, 2, ...). Como todos los archivos cargados deben tener el
-    mismo número de columnas, esa posición es lo que hace corresponder una
-    columna de un archivo/hoja con la misma columna en otro."""
+    """Reads an Excel sheet (or a .csv file, treated as its single
+    "sheet") with no header row: no column names are assumed, so each
+    column is a data series identified solely by its position (0, 1, 2,
+    ...). Since all loaded files must have the same number of columns,
+    that position is what makes a column in one file/sheet correspond to
+    the same column in another."""
     if _is_csv_file(filepath):
         df = pd.read_csv(filepath, header=None)
     else:
@@ -120,15 +120,15 @@ def _load_sheet_dataframe(filepath, sheet_name):
 
 def pick_files_and_sheets(parent):
     """
-    Pide al usuario múltiples archivos .xls/.xlsx y qué hojas de cada uno
-    quiere cargar.
+    Prompts the user for multiple .xls/.xlsx files and which sheets from
+    each one to load.
 
-    Devuelve: lista de tuplas (filepath, sheet_name) seleccionadas, o None
-    si el usuario cancela o no hay hojas para elegir.
+    Returns: list of selected (filepath, sheet_name) tuples, or None if
+    the user cancels or there are no sheets to choose from.
     """
     filenames = filedialog.askopenfilenames(
         parent=parent,
-        title="Abrir Multiples Archivos (.xls / .csv)",
+        title="Open Multiple Files (.xls / .csv)",
         filetypes=[("Excel/CSV files", "*.xlsx *.xls *.csv"), ("Excel files", "*.xlsx *.xls"),
                    ("CSV files", "*.csv"), ("All files", "*.*")]
     )
@@ -140,7 +140,7 @@ def pick_files_and_sheets(parent):
         try:
             sheets = _read_sheet_names(filepath)
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo leer '{os.path.basename(filepath)}':\n{e}")
+            messagebox.showerror("Error", f"Could not read '{os.path.basename(filepath)}':\n{e}")
             continue
         if sheets:
             file_sheet_map[filepath] = sheets
@@ -152,18 +152,18 @@ def pick_files_and_sheets(parent):
 
 def load_selected_sheets(selection, progress_callback=None, error_callback=None):
     """
-    Carga cada hoja (filepath, sheet_name) de 'selection' en un dataset:
-        {'file': filepath, 'sheet': sheet_name, 'label': 'archivo - hoja',
+    Loads each (filepath, sheet_name) sheet from 'selection' into a dataset:
+        {'file': filepath, 'sheet': sheet_name, 'label': 'file - sheet',
          'df': DataFrame, 'column_names': [...]}
 
-    progress_callback(done, total, filepath, sheet_name), si se da, se llama
-    después de cargar cada hoja para poder actualizar una barra de progreso.
+    progress_callback(done, total, filepath, sheet_name), if given, is called
+    after loading each sheet so a progress bar can be updated.
 
-    error_callback(filepath, sheet_name, exception), si se da, se llama en
-    vez de mostrar el messagebox de error directamente - para cuando esta
-    función corre en un hilo aparte del principal (donde no es seguro crear
-    ventanas de Tk directamente) y quien llama prefiere reenviar el error al
-    hilo principal él mismo.
+    error_callback(filepath, sheet_name, exception), if given, is called
+    instead of showing the error messagebox directly - for when this
+    function runs on a thread other than the main one (where it isn't
+    safe to create Tk windows directly) and the caller prefers to forward
+    the error to the main thread itself.
     """
     datasets = []
     total = len(selection)
@@ -176,7 +176,7 @@ def load_selected_sheets(selection, progress_callback=None, error_callback=None)
             else:
                 messagebox.showerror(
                     "Error",
-                    f"No se pudo cargar la hoja '{sheet}' de '{os.path.basename(filepath)}':\n{e}"
+                    f"Could not load sheet '{sheet}' from '{os.path.basename(filepath)}':\n{e}"
                 )
             df = None
 
@@ -196,10 +196,10 @@ def load_selected_sheets(selection, progress_callback=None, error_callback=None)
 
 
 def common_column_names(datasets):
-    """Devuelve las columnas (identificadas por posición) comunes a todos los
-    datasets, preservando el orden de aparición del primer dataset. Como las
-    hojas no tienen encabezado, esto normalmente es solo 0..n-1 para el menor
-    número de columnas compartido por todas las hojas cargadas."""
+    """Returns the columns (identified by position) common to all
+    datasets, preserving the order of appearance from the first dataset.
+    Since the sheets have no header, this is normally just 0..n-1 for the
+    smallest number of columns shared by all the loaded sheets."""
     if not datasets:
         return []
     common = set(datasets[0]['column_names'])

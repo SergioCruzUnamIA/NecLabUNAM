@@ -6,9 +6,9 @@ from PIL import Image
 
 def load_ometiff_image():
     """
-    Abre un diálogo para seleccionar un archivo OME-TIFF y retorna la imagen y su metadata.
+    Opens a dialog to select an OME-TIFF file and returns the image and its metadata.
     """
-    filename = askopenfilename(title="Abrir archivo OME-TIFF", filetypes=[("OME-TIFF files", "*.tif"), ("All files", "*.*")])
+    filename = askopenfilename(title="Open OME-TIFF file", filetypes=[("OME-TIFF files", "*.tif"), ("All files", "*.*")])
     if not filename:
         return None, None, None
     reader = OMETIFFReader(fpath=filename)
@@ -17,7 +17,7 @@ def load_ometiff_image():
 
 def process_image_slice(img_array, slice_index, display_width, display_height):
     """
-    Convierte la capa indicada en una imagen procesada para visualización.
+    Converts the given slice into a processed image for display.
     """
     pil_img = Image.fromarray(img_array[slice_index, :, :])
     if pil_img.mode != 'RGB':
