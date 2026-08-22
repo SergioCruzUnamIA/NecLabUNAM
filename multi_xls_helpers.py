@@ -195,6 +195,70 @@ def load_selected_sheets(selection, progress_callback=None, error_callback=None)
     return datasets
 
 
+def load_single_data_file(parent):
+    """Prompts for a single .npy/.csv/.xlsx/.xls file and returns it as a
+    one-dataset list in the same shape load_selected_sheets() produces (or
+    None if the user cancels) - the 'Open Data' menu item's entry point
+    into the same Multiple Files pipeline used for multi-file loads."""
+    filename = filedialog.askopenfilename(
+        parent=parent,
+        title="Open Data",
+        filetypes=[("Data files", "*.npy *.csv *.xlsx *.xls"), ("Numpy files", "*.npy"),
+                   ("CSV files", "*.csv"), ("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+    )
+    if not filename:
+        return None
+
+    if filename.lower().endswith('.npy'):
+        try:
+            arr = np.load(filename, allow_pickle=True)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
+            return None
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        df = pd.DataFrame(arr).apply(pd.to_numeric, errors='coerce')
+        df.columns = [str(c) for c in df.columns]
+        sheet = '(NPY)'
+    elif _is_csv_file(filename):
+        try:
+            df = _load_sheet_dataframe(filename, None)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
+            return None
+        sheet = _CSV_PSEUDO_SHEET
+    else:
+        try:
+            sheet_names = pd.ExcelFile(filename).sheet_names
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
+            return None
+        sheet = sheet_names[0]
+        if len(sheet_names) > 1:
+            from visualization_helpers import _show_sheet_selection_dialog
+            chosen = _show_sheet_selection_dialog(parent, sheet_names)
+            if chosen is None:
+                return None
+            sheet = chosen
+        try:
+            df = _load_sheet_dataframe(filename, sheet)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
+            return None
+
+    if df.empty:
+        messagebox.showwarning("No Data", "The selected file has no data.")
+        return None
+
+    return [{
+        'file': filename,
+        'sheet': sheet,
+        'label': f"{os.path.splitext(os.path.basename(filename))[0]} - {sheet}",
+        'df': df,
+        'column_names': df.columns.tolist(),
+    }]
+
+
 def common_column_names(datasets):
     """Returns the columns (identified by position) common to all
     datasets, preserving the order of appearance from the first dataset.

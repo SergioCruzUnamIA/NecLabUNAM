@@ -94,10 +94,10 @@ _C = {
 
 # Local modules
 from pyometiff import OMETIFFReader
-from visualization_helpers import initialize_visualization
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
-from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
+from multi_xls_helpers import (pick_files_and_sheets, load_selected_sheets, common_column_names,
+                                load_single_data_file)
 
 # Try to import image processing modules if they exist
 try:
@@ -111,6 +111,35 @@ except ImportError:
 
 class NecLabApp:
     """Main class of the NecLab application - Unified version."""
+
+    # Parameter specs for each Peak Finder method (used by the parameter
+    # dialog and the per-method params cache in the Multiple Files tab).
+    _PEAK_PARAM_SPECS = {
+        'Elliptic Envelope': ('Elliptic Envelope Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ]),
+        'Peak Caller': ('Peak Caller Parameters', [
+            {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
+            {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
+            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
+            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
+        ]),
+        'Local Outlier Factor': ('Local Outlier Factor Parameters', [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ]),
+        'Peak Function 4': ('Peak Function 4 (Elliptic Envelope + SVR) Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
+        ]),
+        'Isolation Forest': ('Isolation Forest Parameters', [
+            {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
+        ]),
+        'Linear Model': ('Linear Model (SGDOneClassSVM) Parameters', [
+            {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
+        ]),
+        'Peak Function 7': ('Peak Function 7 (Lasso + LOF) Parameters', [
+            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
+        ]),
+    }
 
     def __init__(self, root):
         self.root = root
@@ -129,32 +158,6 @@ class NecLabApp:
         self.img_original = None  # Original, unmodified image
         self.img_array = None     # Working image (may have modifications)
         self.img_display = None   # Image for display (with contrast, etc.)
-
-        # State variables - Visualization data
-        self.loaded_data = None
-        self.current_column = 0
-        self.canvas = None
-        self.corr = None
-        self._data_fig = None
-        self._corr_fig = None
-        self._corr_df = None
-        self.selection_column_indices = []
-        self.plot_top_frame = None
-        self.plot_bottom_frame = None
-        self.corr_method_var = tk.StringVar(value='pearson')
-        self.peak_method_var = tk.StringVar(value='None')
-        self.show_corr_labels_var = tk.BooleanVar(value=True)
-        self.smoothing_var = tk.BooleanVar(value=False)
-        self.smoothing_points_var = tk.IntVar(value=2)
-        self.show_smoothing_points_var = tk.BooleanVar(value=True)
-        self._mouse_click = False       # flag to suppress double-redraw on mouse click
-        self.peak_method_combo = None
-        self.smoothing_points_spinbox = None
-        self.data_menu_vista = None
-        self.data_menu_guardar = None
-        self.peak_method_params = {}  # saved params per method name
-        self.plot_mid_frame = None
-        self._mid_fig = None
 
         # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
@@ -217,6 +220,29 @@ class NecLabApp:
         self.multi_xls_classifications = {}    # col_index -> {sheet label -> saved classification}
         self._multi_xls_syncing_class_row = False
 
+        # State variables - Multiple Files tab: Peak Finder / Smoothing points overlay
+        self.multi_xls_peak_method_var = tk.StringVar(value='None')
+        self.multi_xls_peak_method_combo = None
+        self.multi_xls_peak_method_params = {}  # saved params per method name
+        self.multi_xls_show_smoothing_points_var = tk.BooleanVar(value=True)
+
+        # State variables - Multiple Files tab: Correlation + Selection
+        self.multi_xls_corr_method_var = tk.StringVar(value='pearson')
+        self.multi_xls_show_corr_labels_var = tk.BooleanVar(value=True)
+        self.multi_xls_selection_listbox = None
+        self.multi_xls_selection_indices = []
+        self.multi_xls_correlation_frame = None
+        self._multi_xls_corr_fig = None
+        self._multi_xls_corr_df = None
+        self.btn_multi_xls_add_sel = None
+        self.btn_multi_xls_remove_sel = None
+        self.multi_xls_right_paned = None
+        # Middle (heatmap) and bottom (correlation) panes are hidden by
+        # default - only the top line plot shows until one of these View
+        # menu checkboxes is turned on.
+        self.multi_xls_show_heatmap_var = tk.BooleanVar(value=False)
+        self.multi_xls_show_correlation_var = tk.BooleanVar(value=False)
+
         # State variables - Dendrogram tab
         self.dendo_tab = None
         self.dendo_column_listbox = None
@@ -270,7 +296,7 @@ class NecLabApp:
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
             label='Open Data (.npy / .csv / .xlsx)',
-            command=self.open_visualization_data,
+            command=self.open_single_data_file,
             state=NORMAL
         )
         self.menu_archivo.add_command(
@@ -378,11 +404,6 @@ class NecLabApp:
         self.image_tab = tk.Frame(self.notebook, bg=_C['bg'])
         self.notebook.add(self.image_tab, text="  Image Processing  ")
         self._create_image_processing_layout()
-
-        # Tab 2: Data Visualization
-        self.data_tab = tk.Frame(self.notebook, bg=_C['bg'])
-        self.notebook.add(self.data_tab, text="  Data Visualization  ")
-        self._create_data_visualization_layout()
 
 
     def _create_image_processing_layout(self):
@@ -533,709 +554,14 @@ class NecLabApp:
                                    fg=_C['text'], justify='left', anchor='w', font=('Arial', 9))
         self.info_text.pack(fill='x')
 
-    def _create_data_visualization_layout(self):
-        """Create the layout for data visualization."""
-        Grid.rowconfigure(self.data_tab, 0, weight=0)
-        Grid.rowconfigure(self.data_tab, 1, weight=1)
-        Grid.columnconfigure(self.data_tab, 0, weight=0)
-        Grid.columnconfigure(self.data_tab, 1, weight=1)
-
-        # Local menu bar, docked at the top of the tab (same pattern as the
-        # Multiple Files tab's local menubar), grouping the Smoothing/Show
-        # points/Show Labels checkboxes and the Save Data/Correlation/Peaks
-        # actions that used to be stacked individually in the sidebar.
-        menubar = tk.Frame(self.data_tab, bg='#f5f5f5', height=26,
-                           highlightbackground=_C['border'], highlightthickness=1)
-        menubar.grid(row=0, column=0, columnspan=2, sticky='ew')
-        menubar.grid_propagate(False)
-
-        def add_tab_menu(label, build):
-            mb = tk.Menubutton(menubar, text=label, font=('Segoe UI', 9),
-                                bg='#f5f5f5', activebackground='#dbeafe',
-                                relief='flat', bd=0, padx=8, pady=3)
-            menu = tk.Menu(mb, tearoff=0, font=('Segoe UI', 9))
-            build(menu)
-            mb['menu'] = menu
-            mb.pack(side='left')
-            return menu
-
-        def build_vista_menu(m):
-            m.add_checkbutton(label="Smoothing", variable=self.smoothing_var,
-                               command=self._on_smoothing_toggle, state='disabled')
-            m.add_checkbutton(label="Show points", variable=self.show_smoothing_points_var,
-                               command=self._on_smoothing_toggle, state='disabled')
-            m.add_separator()
-            m.add_checkbutton(label="Show Labels (Correlation)", variable=self.show_corr_labels_var,
-                               command=self._update_correlation_display)
-
-        def build_guardar_menu(m):
-            m.add_command(label="Save Data Image...", command=self._save_data_image, state='disabled')
-            m.add_command(label="Save Correlation...", command=self._save_correlation_image, state='disabled')
-            m.add_separator()
-            m.add_command(label="Save Correlation Data...", command=self._save_correlation_data, state='disabled')
-            m.add_command(label="Save Peaks CSV...", command=self._save_peaks_csv, state='disabled')
-
-        self.data_menu_vista = add_tab_menu("View", build_vista_menu)
-        self.data_menu_guardar = add_tab_menu("Save", build_guardar_menu)
-
-        # ── Sidebar ──────────────────────────────────────────────────────────
-        sidebar_frame = tk.Frame(self.data_tab, bg=_C['panel'], width=250,
-                                 highlightbackground=_C['border'], highlightthickness=1)
-        sidebar_frame.grid(row=1, column=0, sticky='nsew', padx=(8, 0), pady=8)
-        sidebar_frame.grid_propagate(False)
-        sidebar_frame.columnconfigure(0, weight=1)
-
-        def _sec(parent, text, row):
-            tk.Label(parent, text=text, font=('Arial', 8, 'bold'),
-                     bg=_C['panel'], fg=_C['sub']).grid(row=row, column=0, sticky='w',
-                                                         padx=12, pady=(12, 2))
-            row += 1
-            tk.Frame(parent, bg=_C['border'], height=1).grid(row=row, column=0,
-                                                              sticky='ew', padx=10)
-            return row + 1
-
-        row = _sec(sidebar_frame, "DATA COLUMNS", 0)
-
-        # Column listbox
-        listbox_frame = tk.Frame(sidebar_frame, bg=_C['card'],
-                                 highlightbackground=_C['border'], highlightthickness=1)
-        listbox_frame.grid(row=row, column=0, sticky='nsew', padx=10, pady=(2, 4))
-        sidebar_frame.rowconfigure(row, weight=2)
-        listbox_frame.rowconfigure(0, weight=1)
-        listbox_frame.columnconfigure(0, weight=1)
-        row += 1
-
-        scrollbar = tk.Scrollbar(listbox_frame, relief='flat', width=10)
-        scrollbar.grid(row=0, column=1, sticky='ns')
-
-        self.column_listbox = tk.Listbox(
-            listbox_frame, yscrollcommand=scrollbar.set,
-            selectmode=tk.EXTENDED, font=('Arial', 10),
-            bg=_C['card'], fg=_C['text'],
-            selectbackground=_C['acc'], selectforeground='white',
-            relief='flat', bd=0, highlightthickness=0, activestyle='none'
-        )
-        self.column_listbox.grid(row=0, column=0, sticky='nsew')
-        self.column_listbox.bind('<ButtonPress-1>', lambda e: setattr(self, '_mouse_click', True))
-        self.column_listbox.bind('<<ListboxSelect>>', self.update_column_display)
-        self.column_listbox.bind('<ButtonRelease-1>', self._on_column_click)
-        scrollbar.config(command=self.column_listbox.yview)
-
-        # ── Peak Finder ──
-        row = _sec(sidebar_frame, "PEAK FINDER", row)
-
-        self.peak_method_combo = ttk.Combobox(
-            sidebar_frame, textvariable=self.peak_method_var,
-            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
-                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
-            state='readonly', width=22
-        )
-        self.peak_method_combo.grid(row=row, column=0, padx=10, pady=(2, 2), sticky='ew')
-        self.peak_method_combo.bind('<<ComboboxSelected>>', lambda e: self._run_peak_on_column(show_dialog=True))
-        self.peak_method_combo.config(state=DISABLED)
-        row += 1
-
-        # Smoothing row
-        smooth_frame = tk.Frame(sidebar_frame, bg=_C['panel'])
-        smooth_frame.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 2))
-        smooth_frame.columnconfigure(0, weight=1)
-        row += 1
-
-        points_frame = tk.Frame(smooth_frame, bg=_C['panel'])
-        points_frame.grid(row=0, column=0, sticky='w')
-        tk.Label(points_frame, text="Points:", bg=_C['panel'],
-                 fg=_C['sub'], font=('Arial', 8)).pack(side='left', padx=(0, 2))
-        self.smoothing_points_spinbox = ttk.Spinbox(
-            points_frame, from_=2, to=50, textvariable=self.smoothing_points_var,
-            width=4
-        )
-        self.smoothing_points_spinbox.pack(side='left')
-        self.smoothing_points_spinbox.config(state=DISABLED)
-        self.smoothing_points_var.trace_add('write', lambda *args: self._on_smoothing_toggle())
-
-        # ── Correlation ──
-        row = _sec(sidebar_frame, "CORRELATION", row)
-
-        corr_method_combo = ttk.Combobox(
-            sidebar_frame, textvariable=self.corr_method_var,
-            values=['pearson', 'kendall', 'spearman'], state='readonly', width=15
-        )
-        corr_method_combo.grid(row=row, column=0, padx=10, pady=(2, 8), sticky='w')
-        corr_method_combo.bind('<<ComboboxSelected>>', lambda e: self._update_correlation_display())
-        row += 1
-
-        # ── Selection ──
-        row = _sec(sidebar_frame, "SELECTION", row)
-
-        sel_listbox_frame = tk.Frame(sidebar_frame, bg=_C['card'],
-                                     highlightbackground=_C['border'], highlightthickness=1)
-        sel_listbox_frame.grid(row=row, column=0, sticky='nsew', padx=10, pady=(2, 4))
-        sidebar_frame.rowconfigure(row, weight=1)
-        sel_listbox_frame.rowconfigure(0, weight=1)
-        sel_listbox_frame.columnconfigure(0, weight=1)
-        row += 1
-
-        sel_scrollbar = tk.Scrollbar(sel_listbox_frame, relief='flat', width=10)
-        sel_scrollbar.grid(row=0, column=1, sticky='ns')
-
-        self.selection_listbox = tk.Listbox(
-            sel_listbox_frame, yscrollcommand=sel_scrollbar.set,
-            selectmode=tk.SINGLE, font=('Arial', 10),
-            bg=_C['card'], fg=_C['text'],
-            selectbackground=_C['acc'], selectforeground='white',
-            relief='flat', bd=0, highlightthickness=0, activestyle='none'
-        )
-        self.selection_listbox.grid(row=0, column=0, sticky='nsew')
-        sel_scrollbar.config(command=self.selection_listbox.yview)
-
-        self.btn_add_sel = ctk.CTkButton(
-            sidebar_frame, text="Add to Selection", height=28, corner_radius=6,
-            fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
-            font=ctk.CTkFont(size=11), state='disabled',
-            command=self._add_to_selection
-        )
-        self.btn_add_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(2, 2))
-        row += 1
-
-        self.btn_remove_sel = ctk.CTkButton(
-            sidebar_frame, text="Remove from Selection", height=28, corner_radius=6,
-            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
-            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
-            state='disabled', command=self._remove_from_selection
-        )
-        self.btn_remove_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 10))
-        row += 1
-
-        # Right side - main plot area
-        self.main_plot_frame = tk.Frame(self.data_tab, bg=_C['panel'],
-                                         highlightbackground=_C['border'],
-                                         highlightthickness=1)
-        self.main_plot_frame.grid(row=1, column=1, sticky='nsew', padx=8, pady=8)
-
-        tk.Label(self.main_plot_frame, text="Load a data file to start",
-                 font=('Arial', 18), bg=_C['panel'], fg=_C['sub']).pack(
-            fill=tk.BOTH, expand=True)
-
-    
-    # ==================== DATA VISUALIZATION METHODS ====================
-
-    def _on_column_click(self, event):
-        """Set current_column from the exact row under the mouse, then redraw."""
-        self._mouse_click = False
-        idx = self.column_listbox.nearest(event.y)
-        if idx < 0 or self.loaded_data is None:
+    def open_single_data_file(self):
+        """Open a single .npy/.csv/.xlsx/.xls file straight into the
+        Multiple Files tab (as a one-sheet load), so a lone file uses the
+        same pipeline/UI as multiple ones instead of a separate tab."""
+        dataset = load_single_data_file(self.root)
+        if not dataset:
             return
-        self.current_column = idx
-        self._run_peak_on_column()
-
-    def update_column_display(self, event=None):
-        """Update the data graph when a column is selected. Does not refresh correlation."""
-        if self._mouse_click:
-            return
-        if self.loaded_data is None:
-            if hasattr(self.root, 'loaded_data'):
-                self.loaded_data = self.root.loaded_data
-        if self.loaded_data is None:
-            return
-
-        selection = self.column_listbox.curselection()
-        if not selection:
-            return
-
-        # For keyboard navigation (arrow keys) use the last item in the selection.
-        # Mouse clicks are handled by _on_column_click which sets current_column first.
-        if self.current_column not in selection:
-            self.current_column = selection[-1]
-
-        # Delegate drawing to peak runner (handles None → raw data, or a peak method,
-        # and ensures the split layout frames exist before drawing).
-        self._run_peak_on_column()
-
-    def _ensure_plot_frames(self):
-        """Create the split top/mid/bottom plot layout on first use (or if destroyed)."""
-        if self.plot_top_frame is not None and self.plot_top_frame.winfo_exists():
-            return
-        for widget in list(self.main_plot_frame.winfo_children()):
-            widget.destroy()
-        self.main_plot_frame.rowconfigure(0, weight=2)
-        self.main_plot_frame.rowconfigure(1, weight=2)
-        self.main_plot_frame.rowconfigure(2, weight=2)
-        self.main_plot_frame.columnconfigure(0, weight=1)
-        self.plot_top_frame = tk.Frame(self.main_plot_frame)
-        self.plot_top_frame.grid(row=0, column=0, sticky='nsew')
-        self.plot_mid_frame = tk.Frame(self.main_plot_frame,
-                                       highlightbackground=_C['border'],
-                                       highlightthickness=1)
-        self.plot_mid_frame.grid(row=1, column=0, sticky='nsew')
-        self.plot_bottom_frame = tk.Frame(self.main_plot_frame, relief=tk.GROOVE, borderwidth=1)
-        self.plot_bottom_frame.grid(row=2, column=0, sticky='nsew')
-        self._update_correlation_display()
-
-    def _update_correlation_display(self):
-        """Refresh the Pearson correlation heatmap in the bottom frame."""
-        if self.plot_bottom_frame is None:
-            return
-
-        for widget in list(self.plot_bottom_frame.winfo_children()):
-            widget.destroy()
-
-        if self._corr_fig is not None:
-            plt.close(self._corr_fig)
-            self._corr_fig = None
-        self._corr_df = None
-
-        if len(self.selection_column_indices) < 2:
-            tk.Label(
-                self.plot_bottom_frame,
-                text="Add 2+ columns to Selection to see correlation",
-                font=('Arial', 12), bg=_C['panel'], fg=_C['sub']
-            ).pack(fill=tk.BOTH, expand=True)
-            if self.data_menu_guardar is not None:
-                self.data_menu_guardar.entryconfigure("Save Correlation Data...", state='disabled')
-            return
-
-        import pandas as pd
-        method = self.corr_method_var.get()
-        sel_indices = self.selection_column_indices
-        data_sel = self.loaded_data[:, sel_indices]
-        col_labels = [self.column_listbox.get(i) for i in sel_indices]
-        df = pd.DataFrame(data_sel, columns=col_labels)
-        corr = df.corr(method=method)
-        self._corr_df = corr
-        if self.data_menu_guardar is not None:
-            self.data_menu_guardar.entryconfigure("Save Correlation Data...", state='normal')
-
-        self._corr_fig, ax = plt.subplots()
-        cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
-        ax.set_xticks(range(len(col_labels)))
-        ax.set_yticks(range(len(col_labels)))
-        if self.show_corr_labels_var.get():
-            ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
-            ax.set_yticklabels(col_labels, fontsize=8)
-        else:
-            ax.set_xticklabels([])
-            ax.set_yticklabels([])
-        self._corr_fig.colorbar(cax, ax=ax, ticks=[-1, 0, 1], shrink=0.8)
-        ax.set_title(f'{method.capitalize()} Correlation (Selection)', pad=20)
-        self._corr_fig.tight_layout()
-
-        corr_canvas = FigureCanvasTkAgg(self._corr_fig, master=self.plot_bottom_frame)
-        corr_canvas.draw()
-        corr_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    def _add_to_selection(self):
-        """Add all highlighted Data Columns to the Selection list, keeping it sorted."""
-        sel = self.column_listbox.curselection()
-        if not sel:
-            return
-        changed = False
-        for idx in sel:
-            if idx not in self.selection_column_indices:
-                self.selection_column_indices.append(idx)
-                changed = True
-        if changed:
-            self.selection_column_indices.sort()
-            self.selection_listbox.delete(0, tk.END)
-            for idx in self.selection_column_indices:
-                self.selection_listbox.insert(tk.END, self.column_listbox.get(idx))
-            self._update_correlation_display()
-
-    def _remove_from_selection(self):
-        """Remove the highlighted entry from the Selection list."""
-        sel = self.selection_listbox.curselection()
-        if not sel:
-            return
-        list_idx = sel[0]
-        self.selection_listbox.delete(list_idx)
-        self.selection_column_indices.pop(list_idx)
-        self._update_correlation_display()
-
-    # Parameter specs for each peak method (used by the dialog and param cache)
-    _PEAK_PARAM_SPECS = {
-        'Elliptic Envelope': ('Elliptic Envelope Parameters', [
-            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
-        ]),
-        'Peak Caller': ('Peak Caller Parameters', [
-            {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
-            {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
-            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
-            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
-        ]),
-        'Local Outlier Factor': ('Local Outlier Factor Parameters', [
-            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
-        ]),
-        'Peak Function 4': ('Peak Function 4 (Elliptic Envelope + SVR) Parameters', [
-            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
-        ]),
-        'Isolation Forest': ('Isolation Forest Parameters', [
-            {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
-        ]),
-        'Linear Model': ('Linear Model (SGDOneClassSVM) Parameters', [
-            {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
-        ]),
-        'Peak Function 7': ('Peak Function 7 (Lasso + LOF) Parameters', [
-            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
-        ]),
-    }
-
-    def _on_smoothing_toggle(self):
-        """Enable/disable the points spinbox and redraw."""
-        enabled = self.smoothing_var.get()
-        if self.smoothing_points_spinbox:
-            self.smoothing_points_spinbox.config(state='normal' if enabled else DISABLED)
-        self._run_peak_on_column()
-
-    def _smooth_signal(self, signal, col_idx):
-        """Apply Convex Envelope smoothing when the checkbox is on."""
-        if not self.smoothing_var.get():
-            return signal
-        try:
-            n_points = self.smoothing_points_var.get()
-        except tk.TclError:
-            return signal
-        from peak_functions import _convex_envelope_detrend_signal
-        return _convex_envelope_detrend_signal(signal, n_points=n_points)
-
-    def _get_data_for_peak(self, col_idx):
-        """Return a data array with col_idx smoothed according to the current method."""
-        if not self.smoothing_var.get():
-            return self.loaded_data
-        data = self.loaded_data.copy()
-        data[:, col_idx] = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
-        return data
-
-    def _get_smoothing_points(self, col_idx):
-        """Return the (x, y) lowest points used by Convex Envelope smoothing,
-        in the original signal's scale, or None when smoothing is off or the
-        "Show points" checkbox is unchecked."""
-        if not self.smoothing_var.get() or not self.show_smoothing_points_var.get():
-            return None
-        try:
-            n_points = self.smoothing_points_var.get()
-        except tk.TclError:
-            return None
-        from peak_functions import convex_envelope_lowest_points
-        return convex_envelope_lowest_points(self.loaded_data[:, col_idx], n_points=n_points)
-
-    def _run_peak_on_column(self, show_dialog=False, event=None):
-        """Redraw the current column: plot_top_frame always shows the original
-        signal, plot_mid_frame always shows the processed signal (smoothed,
-        and/or the peak-finder method's own output). Smoothing is applied to
-        the column before the peak-finder method runs on it.
-        show_dialog=True forces the parameter dialog (used when the method changes).
-        show_dialog=False reuses cached params (used when the column changes)."""
-        if self.loaded_data is None:
-            return
-        self._ensure_plot_frames()
-
-        method = self.peak_method_var.get()
-        col_idx = self.current_column
-
-        if self._data_fig is not None:
-            plt.close(self._data_fig)
-            self._data_fig = None
-        for w in list(self.plot_top_frame.winfo_children()):
-            w.destroy()
-
-        if self._mid_fig is not None:
-            plt.close(self._mid_fig)
-            self._mid_fig = None
-        if self.plot_mid_frame and self.plot_mid_frame.winfo_exists():
-            for w in list(self.plot_mid_frame.winfo_children()):
-                w.destroy()
-
-        saved_params = None
-        if method != 'None':
-            # Show dialog only when method changes or no params saved yet
-            if show_dialog or method not in self.peak_method_params:
-                from peak_functions import show_parameter_dialog
-                spec = self._PEAK_PARAM_SPECS.get(method)
-                if spec:
-                    title, param_list = spec
-                    new_params = show_parameter_dialog(self.root, title, param_list)
-                    if new_params is None:
-                        # User cancelled — revert to no peak-finder method
-                        self.peak_method_var.set('None')
-                        method = 'None'
-                    else:
-                        self.peak_method_params[method] = new_params
-            if method != 'None':
-                saved_params = self.peak_method_params.get(method)
-
-        # Peaks are found on the already-smoothed column (if Smoothing is on),
-        # computed once so both plots mark the exact same peaks.
-        data_for_peak = None
-        peaks = None
-        if method != 'None' and saved_params is not None:
-            from peak_functions import compute_peaks
-            data_for_peak = self._get_data_for_peak(col_idx)
-            peaks = compute_peaks(data_for_peak, col_idx, method, saved_params)
-
-        self._draw_original_view(col_idx, peaks)
-        self._draw_processed_view(col_idx, method, saved_params, data_for_peak, peaks)
-
-    def _plot_smoothing_overlay(self, ax, col_idx, t):
-        """Overlay the Convex Envelope baseline line and its lowest points onto ax."""
-        points = self._get_smoothing_points(col_idx)
-        if points is None:
-            return
-        px, py = points
-        baseline = np.interp(t, px, py)
-        ax.plot(t, baseline, color='darkorange', linewidth=1.3, linestyle='--', label='Baseline')
-        ax.scatter(px, py, color='darkorange', s=25, zorder=5, label='Lowest points used')
-
-    def _draw_original_view(self, col_idx, peaks):
-        """Always plot the original signal in plot_top_frame, overlaying peak
-        markers (if a peak-finder method is active) and the smoothing
-        baseline/points (if Smoothing is enabled)."""
-        col_label = self.column_listbox.get(col_idx)
-        original = self.loaded_data[:, col_idx]
-        t = np.arange(len(original))
-
-        self._data_fig, ax = plt.subplots()
-        ax.plot(t, original, color='steelblue', linewidth=0.8, label='Original')
-        if peaks is not None and len(peaks) > 0:
-            ax.scatter(peaks, original[peaks], color='crimson', s=25, zorder=5, label='Peaks')
-        self._plot_smoothing_overlay(ax, col_idx, t)
-        ax.set_title(col_label)
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        if self.smoothing_var.get() or (peaks is not None and len(peaks) > 0):
-            ax.legend(fontsize=8, loc='upper right')
-        self._data_fig.tight_layout()
-        self.canvas = FigureCanvasTkAgg(self._data_fig, master=self.plot_top_frame)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    def _draw_processed_view(self, col_idx, method, params, data_for_peak, peaks):
-        """Always plot the processed signal in plot_mid_frame: the smoothed
-        signal alone, or the peak-finder method's own output run on the
-        already-smoothed column when one is active."""
-        if self.plot_mid_frame is None or not self.plot_mid_frame.winfo_exists():
-            return
-
-        if method == 'None':
-            self._draw_smoothed_preview(col_idx)
-            return
-
-        from peak_functions import (elliptic_envelope_peak, actual_peak_caller,
-                                    local_outlier_factor_peak, clf_peak,
-                                    isolation_forest_peak, linear_model_peak, lasso_peak)
-        method_map = {
-            'Elliptic Envelope': elliptic_envelope_peak,
-            'Peak Caller': actual_peak_caller,
-            'Local Outlier Factor': local_outlier_factor_peak,
-            'Peak Function 4': clf_peak,
-            'Isolation Forest': isolation_forest_peak,
-            'Linear Model': linear_model_peak,
-            'Peak Function 7': lasso_peak,
-        }
-        func = method_map.get(method)
-        if not func:
-            return
-
-        result = func(data_for_peak, col_idx,
-                      main_window=None, canvas=None,
-                      target_frame=self.plot_mid_frame,
-                      params=params)
-        if result is None:
-            return
-        mid_canvas, self._mid_fig = result
-        col_label = self.column_listbox.get(col_idx)
-        if self._mid_fig and self._mid_fig.axes:
-            ax = self._mid_fig.axes[0]
-            ax.set_title(col_label)
-
-            reference = data_for_peak[:, col_idx]
-            smoothing_on = self.smoothing_var.get()
-
-            # "Elliptic Envelope" applies its own further internal detrend on
-            # top of the data we hand it, so its own plot's line and outlier
-            # markers are a vertically-shifted version of `reference`. Correct
-            # them in place (rather than drawing a second, separate line)
-            # so its plot matches every other method's plot consistently.
-            if method == 'Elliptic Envelope':
-                lines = ax.get_lines()
-                if lines:
-                    lines[0].set_ydata(reference)
-                if len(lines) > 1:
-                    marker_x = lines[1].get_xdata().astype(int)
-                    lines[1].set_ydata(reference[marker_x])
-                ax.relim()
-                ax.autoscale_view()
-
-            if peaks is not None and len(peaks) > 0:
-                ax.scatter(peaks, reference[peaks], color='crimson', s=25, zorder=5, label='Peaks')
-            if smoothing_on:
-                points = self._get_smoothing_points(col_idx)
-                if points is not None:
-                    px, _ = points
-                    px_int = px.astype(int)
-                    ax.plot(px, reference[px_int], color='purple', linewidth=1.3, linestyle='--',
-                            label='Smoothed lowest points')
-                    ax.scatter(px, reference[px_int], color='purple', s=25, zorder=5)
-            ax.legend(fontsize=8, loc='upper right')
-            mid_canvas.draw()
-
-    def _draw_smoothed_preview(self, col_idx):
-        """Plot the smoothed (after) signal for col_idx in plot_mid_frame, so it's
-        visible even when no peak-finder method is selected."""
-        if self.plot_mid_frame is None or not self.plot_mid_frame.winfo_exists():
-            return
-        col_label = self.column_listbox.get(col_idx)
-        smoothed = self._smooth_signal(self.loaded_data[:, col_idx], col_idx)
-        t = np.arange(len(smoothed))
-
-        self._mid_fig, ax = plt.subplots()
-        ax.plot(t, smoothed, color='seagreen', linewidth=0.8, label='Smoothed')
-        points = self._get_smoothing_points(col_idx)
-        if points is not None:
-            px, _ = points
-            px_int = px.astype(int)
-            ax.plot(px, smoothed[px_int], color='darkorange', linewidth=1.3, linestyle='--',
-                    label='Baseline')
-            ax.scatter(px, smoothed[px_int], color='darkorange', s=25, zorder=5,
-                       label='Lowest points used (after smoothing)')
-        ax.set_title(f'{col_label} — smoothed')
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        ax.legend(fontsize=8, loc='upper right')
-        self._mid_fig.tight_layout()
-
-        c = FigureCanvasTkAgg(self._mid_fig, master=self.plot_mid_frame)
-        c.draw()
-        c.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    def _save_data_image(self):
-        """Save the current data / peak-finder plot to a file."""
-        if self._data_fig is None:
-            return
-        from tkinter.filedialog import asksaveasfilename
-        filename = asksaveasfilename(
-            defaultextension=".png",
-            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
-                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
-                       ("EPS files", "*.eps"), ("All Files", "*.*")],
-            title="Save Data Image"
-        )
-        if filename:
-            self._data_fig.savefig(filename, dpi=300, bbox_inches='tight')
-
-    def _save_correlation_image(self):
-        """Save the current correlation heatmap to a file."""
-        if self._corr_fig is None:
-            return
-        from tkinter.filedialog import asksaveasfilename
-        filename = asksaveasfilename(
-            defaultextension=".png",
-            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
-                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
-                       ("EPS files", "*.eps"), ("All Files", "*.*")],
-            title="Save Correlation Image"
-        )
-        if filename:
-            self._corr_fig.savefig(filename, dpi=300, bbox_inches='tight')
-
-    def _save_correlation_data(self):
-        """Save the current correlation matrix values to a CSV or Excel file."""
-        if self._corr_df is None:
-            return
-        from tkinter.filedialog import asksaveasfilename
-        filename = asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"),
-                       ("All Files", "*.*")],
-            title="Save Correlation Data"
-        )
-        if not filename:
-            return
-
-        if filename.lower().endswith(('.xlsx', '.xls')):
-            self._corr_df.to_excel(filename, sheet_name='Correlation', engine='xlsxwriter')
-        else:
-            self._corr_df.to_csv(filename)
-        messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
-
-    def open_visualization_data(self):
-        """Open data for peak visualization."""
-        canvas = initialize_visualization(
-            self.data_tab,
-            self.menu_visual,
-            self.canvas,
-            self.column_listbox,
-            self.update_column_display,
-            self.notebook
-        )
-        if canvas is not None:
-            self.canvas = canvas
-            self.notebook.select(self.data_tab)
-        if hasattr(self.root, 'loaded_data'):
-            self.loaded_data = self.root.loaded_data
-        if self.loaded_data is not None:
-            self.btn_add_sel.configure(state='normal')
-            self.btn_remove_sel.configure(state='normal')
-            self.data_menu_guardar.entryconfigure("Save Data Image...", state='normal')
-            self.data_menu_guardar.entryconfigure("Save Correlation...", state='normal')
-            self.data_menu_guardar.entryconfigure("Save Peaks CSV...", state='normal')
-            self.peak_method_combo.config(state='readonly')
-            self.data_menu_vista.entryconfigure("Smoothing", state='normal')
-            self.data_menu_vista.entryconfigure("Show points", state='normal')
-            self.menu_visual.entryconfig(
-                "Dendrogram",
-                command=self._run_dendogram_on_selection,
-                state=NORMAL
-            )
-            # The initial column is drawn by the legacy single-plot helper in
-            # visualization_helpers.py, which knows nothing about the
-            # smoothing/peak-finder split layout. Re-render through the same
-            # pipeline column clicks use, so the first column respects
-            # whichever Smoothing/peak-finder options are already selected.
-            self.current_column = 0
-            self._run_peak_on_column()
-    
-    def _save_peaks_csv(self):
-        """Run peak detection on every selection column and save peak indices to a CSV or Excel file."""
-        method = self.peak_method_var.get()
-        if method == 'None':
-            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
-            return
-        if not self.selection_column_indices:
-            messagebox.showwarning("No Selection", "Add columns to Selection first.")
-            return
-        params = self.peak_method_params.get(method)
-        if params is None:
-            messagebox.showwarning("No Parameters",
-                                   "Run the peak finder on a column first to set parameters.")
-            return
-
-        from tkinter.filedialog import asksaveasfilename
-        from peak_functions import compute_peaks
-        import pandas as pd
-
-        filename = asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
-            title="Save Peaks CSV"
-        )
-        if not filename:
-            return
-
-        n_time = self.loaded_data.shape[0]
-        data_dict = {'TIME': list(range(n_time))}
-        for col_idx in self.selection_column_indices:
-            col_name = self.column_listbox.get(col_idx)
-            data_for_peak = self._get_data_for_peak(col_idx)
-            peaks = compute_peaks(data_for_peak, col_idx, method, params)
-            flags = np.zeros(n_time, dtype=int)
-            flags[peaks] = 1
-            data_dict[col_name] = flags
-
-        df_peaks = pd.DataFrame(data_dict)
-        if filename.lower().endswith(('.xlsx', '.xls')):
-            df_peaks.to_excel(filename, index=False, engine='xlsxwriter')
-        else:
-            df_peaks.to_csv(filename, index=False)
-        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
+        self._on_multi_xls_load_complete(dataset)
 
     def _run_dendogram_on_selection(self):
         """Create the Dendrogram tab on first use, then switch to it."""
@@ -1258,7 +584,7 @@ class NecLabApp:
             self.btn_dendo_save_csv = None
             self._create_dendogram_layout()
             self._dendo_populate_columns()
-            if self.loaded_data is not None:
+            if self.multi_xls_common_columns:
                 self.btn_dendo_add_sel.configure(state='normal')
                 self.btn_dendo_remove_sel.configure(state='normal')
                 self.btn_dendo_save_img.configure(state='normal')
@@ -1405,13 +731,29 @@ class NecLabApp:
         self.dendo_column_listbox.bind('<<ListboxSelect>>', self._dendo_show_signal)
         self.dendo_column_listbox.bind('<ButtonRelease-1>', self._dendo_on_column_click)
 
+    def _dendo_build_matrix(self, column_indices):
+        """Build a (samples x columns) array by concatenating, for each
+        column index in 'column_indices', its cross-sheet series in the
+        same order/segments as the Multiple Files plot (see
+        _multi_xls_concatenated_column). Columns are trimmed to the
+        shortest one, which only differs when a column is missing from a
+        sheet that contributes to another (both are 'common' columns
+        normally, so this is a defensive minimum)."""
+        vectors = [self._multi_xls_concatenated_column(self.multi_xls_common_columns[i])
+                   for i in column_indices]
+        if not vectors:
+            return np.zeros((0, 0))
+        min_len = min(len(v) for v in vectors)
+        return np.column_stack([v[:min_len] for v in vectors])
+
     def _dendo_populate_columns(self):
-        """Fill the Dendrogram tab column listbox with the same names as the main tab."""
-        if self.dendo_column_listbox is None or self.loaded_data is None:
+        """Fill the Dendrogram tab column listbox with the same 'Column N'
+        names shown in the Multiple Files tab's Data (Columns) list."""
+        if self.dendo_column_listbox is None or not self.multi_xls_common_columns:
             return
         self.dendo_column_listbox.delete(0, tk.END)
-        for i in range(self.column_listbox.size()):
-            self.dendo_column_listbox.insert(tk.END, self.column_listbox.get(i))
+        for i in range(self.multi_xls_column_listbox.size()):
+            self.dendo_column_listbox.insert(tk.END, self.multi_xls_column_listbox.get(i))
 
     def _dendo_add_to_selection(self):
         """Add all highlighted columns to the dendrogram selection list, sorted."""
@@ -1444,7 +786,7 @@ class NecLabApp:
         """Set dendo_current_column from the exact row under the mouse, then redraw."""
         self._dendo_mouse_click = False
         idx = self.dendo_column_listbox.nearest(event.y)
-        if idx < 0 or self.loaded_data is None:
+        if idx < 0 or not self.multi_xls_common_columns:
             return
         self.dendo_current_column = idx
         self._dendo_draw_signal(idx)
@@ -1453,7 +795,7 @@ class NecLabApp:
         """Draw the clicked column's signal into the top frame (keyboard nav only)."""
         if self._dendo_mouse_click:
             return
-        if self.loaded_data is None or self.dendo_top_frame is None:
+        if not self.multi_xls_common_columns or self.dendo_top_frame is None:
             return
         sel = self.dendo_column_listbox.curselection()
         if not sel:
@@ -1463,8 +805,10 @@ class NecLabApp:
         self._dendo_draw_signal(col_idx)
 
     def _dendo_draw_signal(self, col_idx):
-        """Render the signal for col_idx into dendo_top_frame."""
-        if self.loaded_data is None or self.dendo_top_frame is None:
+        """Render the (concatenated, cross-sheet) signal for col_idx into
+        dendo_top_frame, one segment per loaded sheet like the Multiple
+        Files tab's own plot."""
+        if not self.multi_xls_common_columns or self.dendo_top_frame is None:
             return
 
         if self.dendo_signal_fig is not None:
@@ -1474,9 +818,15 @@ class NecLabApp:
             w.destroy()
 
         col_label = self.dendo_column_listbox.get(col_idx)
+        col_name = self.multi_xls_common_columns[col_idx]
         self.dendo_signal_fig, ax = plt.subplots()
-        ax.plot(np.array(range(len(self.loaded_data[:, col_idx]))).reshape(-1, 1),
-                self.loaded_data[:, col_idx])
+        offset = 0
+        for _, values in self._compute_multi_xls_series(col_name):
+            n = len(values)
+            ax.plot(np.arange(offset, offset + n), values, linewidth=0.8)
+            if offset > 0:
+                ax.axvline(offset, color=_C['sub'], linestyle='--', linewidth=1, alpha=0.6)
+            offset += n
         ax.set_title(col_label)
         ax.set_xlabel('Time')
         ax.set_ylabel('Value')
@@ -1487,7 +837,7 @@ class NecLabApp:
 
     def _dendo_update_plot(self):
         """Render the dendrogram in the bottom frame once selection has 2+ columns."""
-        if self.loaded_data is None or self.dendo_bottom_frame is None:
+        if not self.multi_xls_common_columns or self.dendo_bottom_frame is None:
             return
 
         if self.dendo_fig is not None:
@@ -1506,7 +856,7 @@ class NecLabApp:
 
         from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
 
-        plot_data = self.loaded_data[:, self.dendo_selection_indices]
+        plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
         clustering = AgglomerativeClustering(
             distance_threshold=0, n_clusters=None
         ).fit(plot_data.T)
@@ -1542,16 +892,16 @@ class NecLabApp:
 
     def _dendo_save_csv(self):
         """Save dendrogram clustering data (labels + linkage matrix) to a CSV or Excel file."""
-        if self.loaded_data is None:
+        if not self.multi_xls_common_columns:
             return
         from corr_dendo_functions import AgglomerativeClustering
         from tkinter.filedialog import asksaveasfilename
         import pandas as pd
 
         if len(self.dendo_selection_indices) >= 2:
-            plot_data = self.loaded_data[:, self.dendo_selection_indices]
+            plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
         else:
-            plot_data = self.loaded_data
+            plot_data = self._dendo_build_matrix(range(len(self.multi_xls_common_columns)))
 
         filename = asksaveasfilename(
             defaultextension=".csv",
@@ -1590,8 +940,15 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
 
     def load_correlation_matrix_wrapper(self):
-        """Wrapper to load a correlation matrix."""
-        load_correlation_matrix(self.data_tab, self.canvas)
+        """Open a precomputed correlation matrix file into its own window
+        (a dendrogram + heatmap of the loaded matrix), independent of
+        whichever tab is currently selected."""
+        win = tk.Toplevel(self.root)
+        win.title("Loaded Correlation Matrix")
+        win.geometry("700x900")
+        frame = tk.Frame(win, bg=_C['panel'])
+        frame.pack(fill=tk.BOTH, expand=True)
+        load_correlation_matrix(self.root, None, target_frame=frame)
 
     # ==================== MULTIPLE FILES (XLS) TAB ====================
 
@@ -1620,6 +977,11 @@ class NecLabApp:
 
         self._populate_multi_xls_columns()
         self.notebook.select(self.multi_xls_tab)
+
+        self.menu_visual.entryconfig(
+            "Dendrogram", command=self._run_dendogram_on_selection, state=NORMAL)
+        if self.dendo_tab is not None and self.dendo_tab.winfo_exists():
+            self._dendo_populate_columns()
 
     def _run_with_progress_window(self, title, message, maximum, worker_fn,
                                    on_complete, on_error=None):
@@ -1754,6 +1116,13 @@ class NecLabApp:
             return menu
 
         def build_vista_menu(m):
+            m.add_checkbutton(label="Show Middle Plot (Heatmap)",
+                               variable=self.multi_xls_show_heatmap_var,
+                               command=self._on_multi_xls_show_heatmap_toggle)
+            m.add_checkbutton(label="Show Bottom Plot (Correlation)",
+                               variable=self.multi_xls_show_correlation_var,
+                               command=self._on_multi_xls_show_correlation_toggle)
+            m.add_separator()
             m.add_checkbutton(label="Show Data Names",
                                variable=self.multi_xls_show_labels_var,
                                command=self._on_multi_xls_show_labels_toggle)
@@ -1762,6 +1131,13 @@ class NecLabApp:
                                command=self._on_multi_xls_smoothing_toggle)
             m.add_command(label="Smoothing Points...",
                           command=self._open_multi_xls_smoothing_points_dialog)
+            m.add_checkbutton(label="Show smoothing points",
+                               variable=self.multi_xls_show_smoothing_points_var,
+                               command=self._on_multi_xls_smoothing_toggle)
+            m.add_separator()
+            m.add_checkbutton(label="Show Labels (Correlation)",
+                               variable=self.multi_xls_show_corr_labels_var,
+                               command=self._update_multi_xls_correlation_display)
             m.add_separator()
             m.add_checkbutton(label="Shared Color Scale (heatmap)",
                                variable=self.multi_xls_shared_scale_var,
@@ -1796,9 +1172,13 @@ class NecLabApp:
                           command=self._save_multi_xls_plot_image)
             m.add_command(label="Save Heatmap Image...", state='disabled',
                           command=self._save_multi_xls_heatmap_image)
+            m.add_command(label="Save Correlation Image...", state='disabled',
+                          command=self._save_multi_xls_correlation_image)
             m.add_separator()
             m.add_command(label="Save Smoothed Data (XLSX/CSV)...", state='disabled',
                           command=self._save_multi_xls_smoothed_data)
+            m.add_command(label="Save Correlation Data...", state='disabled',
+                          command=self._save_multi_xls_correlation_data)
 
         def build_datos_menu(m):
             m.add_command(label="Edit Classifications...",
@@ -1808,6 +1188,9 @@ class NecLabApp:
                           command=self._save_multi_xls_classifications)
             m.add_command(label="Load Classifications...", state='disabled',
                           command=self._load_multi_xls_classifications)
+            m.add_separator()
+            m.add_command(label="Save Peaks CSV...", state='disabled',
+                          command=self._save_multi_xls_peaks_csv)
 
         add_tab_menu("View", build_vista_menu)
         self.multi_xls_menu_grafica = add_tab_menu("Plot", build_grafica_menu)
@@ -1826,17 +1209,24 @@ class NecLabApp:
                            highlightbackground=_C['border'], highlightthickness=1)
         sidebar.columnconfigure(0, weight=1)
 
-        tk.Label(sidebar, text="DATA (COLUMNS)", font=('Arial', 8, 'bold'),
-                 bg=_C['panel'], fg=_C['sub']).grid(row=0, column=0, sticky='w',
-                                                     padx=12, pady=(12, 2))
-        tk.Frame(sidebar, bg=_C['border'], height=1).grid(row=1, column=0, sticky='ew', padx=10)
+        def _sec(text, row):
+            tk.Label(sidebar, text=text, font=('Arial', 8, 'bold'),
+                     bg=_C['panel'], fg=_C['sub']).grid(row=row, column=0, sticky='w',
+                                                         padx=12, pady=(12, 2))
+            row += 1
+            tk.Frame(sidebar, bg=_C['border'], height=1).grid(row=row, column=0,
+                                                               sticky='ew', padx=10)
+            return row + 1
+
+        row = _sec("DATA (COLUMNS)", 0)
 
         lb_frame = tk.Frame(sidebar, bg=_C['card'],
                             highlightbackground=_C['border'], highlightthickness=1)
-        lb_frame.grid(row=2, column=0, sticky='nsew', padx=10, pady=(6, 10))
-        sidebar.rowconfigure(2, weight=1)
+        lb_frame.grid(row=row, column=0, sticky='nsew', padx=10, pady=(6, 10))
+        sidebar.rowconfigure(row, weight=2)
         lb_frame.rowconfigure(0, weight=1)
         lb_frame.columnconfigure(0, weight=1)
+        row += 1
 
         scrollbar = tk.Scrollbar(lb_frame, relief='flat', width=10)
         scrollbar.grid(row=0, column=1, sticky='ns')
@@ -1852,6 +1242,75 @@ class NecLabApp:
         scrollbar.config(command=self.multi_xls_column_listbox.yview)
         self.multi_xls_column_listbox.bind('<<ListboxSelect>>', self._on_multi_xls_column_select)
 
+        # ── Peak Finder ──
+        row = _sec("PEAK FINDER", row)
+
+        self.multi_xls_peak_method_combo = ttk.Combobox(
+            sidebar, textvariable=self.multi_xls_peak_method_var,
+            values=['None', 'Elliptic Envelope', 'Peak Caller', 'Local Outlier Factor',
+                    'Peak Function 4', 'Isolation Forest', 'Linear Model', 'Peak Function 7'],
+            state='readonly', width=22
+        )
+        self.multi_xls_peak_method_combo.grid(row=row, column=0, padx=10, pady=(2, 10), sticky='ew')
+        self.multi_xls_peak_method_combo.bind(
+            '<<ComboboxSelected>>', lambda e: self._on_multi_xls_peak_method_change(show_dialog=True))
+        self.multi_xls_peak_method_combo.config(state=DISABLED)
+        row += 1
+
+        # ── Correlation ──
+        row = _sec("CORRELATION", row)
+
+        multi_xls_corr_method_combo = ttk.Combobox(
+            sidebar, textvariable=self.multi_xls_corr_method_var,
+            values=['pearson', 'kendall', 'spearman'], state='readonly', width=15
+        )
+        multi_xls_corr_method_combo.grid(row=row, column=0, padx=10, pady=(2, 10), sticky='w')
+        multi_xls_corr_method_combo.bind(
+            '<<ComboboxSelected>>', lambda e: self._update_multi_xls_correlation_display())
+        row += 1
+
+        # ── Selection ──
+        row = _sec("SELECTION", row)
+
+        sel_lb_frame = tk.Frame(sidebar, bg=_C['card'],
+                                highlightbackground=_C['border'], highlightthickness=1)
+        sel_lb_frame.grid(row=row, column=0, sticky='nsew', padx=10, pady=(6, 4))
+        sidebar.rowconfigure(row, weight=1)
+        sel_lb_frame.rowconfigure(0, weight=1)
+        sel_lb_frame.columnconfigure(0, weight=1)
+        row += 1
+
+        sel_scrollbar = tk.Scrollbar(sel_lb_frame, relief='flat', width=10)
+        sel_scrollbar.grid(row=0, column=1, sticky='ns')
+
+        self.multi_xls_selection_listbox = tk.Listbox(
+            sel_lb_frame, yscrollcommand=sel_scrollbar.set,
+            selectmode=tk.SINGLE, font=('Arial', 10),
+            bg=_C['card'], fg=_C['text'],
+            selectbackground=_C['acc'], selectforeground='white',
+            relief='flat', bd=0, highlightthickness=0, activestyle='none'
+        )
+        self.multi_xls_selection_listbox.grid(row=0, column=0, sticky='nsew')
+        sel_scrollbar.config(command=self.multi_xls_selection_listbox.yview)
+
+        self.btn_multi_xls_add_sel = ctk.CTkButton(
+            sidebar, text="Add to Selection", height=28, corner_radius=6,
+            fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
+            font=ctk.CTkFont(size=11), state='disabled',
+            command=self._add_to_multi_xls_selection
+        )
+        self.btn_multi_xls_add_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(2, 2))
+        row += 1
+
+        self.btn_multi_xls_remove_sel = ctk.CTkButton(
+            sidebar, text="Remove from Selection", height=28, corner_radius=6,
+            fg_color=_C['card'], hover_color=_C['border'], text_color=_C['text'],
+            border_width=1, border_color=_C['border'], font=ctk.CTkFont(size=11),
+            state='disabled', command=self._remove_from_multi_xls_selection
+        )
+        self.btn_multi_xls_remove_sel.grid(row=row, column=0, sticky='ew', padx=10, pady=(0, 10))
+        row += 1
+
         # Right side - stacked plot areas (line plot on top, heatmap below),
         # in their own vertical PanedWindow so that split can be resized by
         # dragging too, instead of being stuck at a fixed 3:2 ratio. Both
@@ -1862,19 +1321,31 @@ class NecLabApp:
 
         paned.add(sidebar, weight=0)
         paned.add(right_paned, weight=1)
-        # Give the sidebar a sensible starting width (same as the old fixed
-        # width); the user can drag the sash to resize it from here.
-        self.root.after(50, lambda: paned.sashpos(0, 250))
+
+        # Size the sidebar to fit its widest label/button exactly - no more
+        # (wasted space) and no less (clipped text) - instead of a fixed
+        # width unrelated to what's actually in it. "Remove from Selection"
+        # is normally the widest control; "Column 999" stands in for column
+        # names, which are only ever a couple of digits long. The only
+        # padding added on top of the raw text width is what the button
+        # itself actually needs: its grid padx (10 each side) plus its
+        # rounded corner_radius (6 each side, so the label clears the
+        # curve) - both match the literal values used when the buttons are
+        # created above, not a guessed constant.
+        _button_padx, _button_corner_radius = 10, 6
+        sidebar_content_w = max(
+            tkfont.Font(family='Arial', size=10).measure('Column 999'),
+            tkfont.Font(family='Arial', size=11).measure('Remove from Selection'),
+        ) + 2 * (_button_padx + _button_corner_radius)
+        self.root.after(50, lambda: paned.sashpos(0, sidebar_content_w))
 
         # ttk.PanedWindow has no built-in minsize per pane, so enforce one by
         # snapping the sash back whenever the sidebar is dragged narrower
-        # than what "Column 999" needs to display without truncating.
-        sidebar_min_w = tkfont.Font(family='Arial', size=10).measure('Column 999') + 60
-
+        # than that same content width (the user can still drag it wider).
         def _enforce_sidebar_min_width(event=None):
             w = sidebar.winfo_width()
-            if 0 < w < sidebar_min_w:
-                paned.sashpos(0, sidebar_min_w)
+            if 0 < w < sidebar_content_w:
+                paned.sashpos(0, sidebar_content_w)
 
         sidebar.bind('<Configure>', _enforce_sidebar_min_width)
 
@@ -1946,24 +1417,45 @@ class NecLabApp:
             font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
         self.multi_xls_heatmap_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        right_paned.add(self.multi_xls_plot_frame, weight=3)
-        right_paned.add(self.multi_xls_heatmap_frame, weight=2)
-        # Same 3:2 starting ratio the old fixed Grid rows used.
-        self.root.after(50, lambda: right_paned.sashpos(0, int(right_paned.winfo_height() * 0.6)))
+        # Bottom-most pane: Pearson/Kendall/Spearman correlation matrix
+        # across the columns added to Selection, same role as Data
+        # Visualization's plot_bottom_frame.
+        self.multi_xls_correlation_frame = tk.Frame(right_paned, bg=_C['panel'],
+                                                     highlightbackground=_C['border'],
+                                                     highlightthickness=1)
+        self.multi_xls_correlation_placeholder = tk.Label(
+            self.multi_xls_correlation_frame,
+            text="Add 2+ columns to Selection to see correlation",
+            font=('Arial', 14), bg=_C['panel'], fg=_C['sub'])
+        self.multi_xls_correlation_placeholder.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Keep both panels at a legible minimum height, same idea as the
-        # sidebar's minimum width above.
+        self.multi_xls_right_paned = right_paned
+        # Only the top (line plot) pane is shown by default; the heatmap
+        # and correlation panes are added on demand by their View-menu
+        # checkboxes (see _on_multi_xls_show_heatmap_toggle /
+        # _on_multi_xls_show_correlation_toggle), each unchecked by
+        # default so a fresh load shows the upper plot alone.
+        right_paned.add(self.multi_xls_plot_frame, weight=3)
+
+        # Keep every visible panel at a legible minimum height, same idea
+        # as the sidebar's minimum width above.
         right_min_h = 160
 
         def _enforce_right_paned_min_height(event=None):
             total = right_paned.winfo_height()
-            if total <= 1:
+            n_sashes = len(right_paned.panes()) - 1
+            if total <= 1 or n_sashes < 1:
                 return
-            pos = right_paned.sashpos(0)
-            if pos < right_min_h:
-                right_paned.sashpos(0, right_min_h)
-            elif total - pos < right_min_h:
-                right_paned.sashpos(0, total - right_min_h)
+            positions = [right_paned.sashpos(i) for i in range(n_sashes)]
+            prev = 0
+            for i, pos in enumerate(positions):
+                if pos - prev < right_min_h:
+                    pos = prev + right_min_h
+                    right_paned.sashpos(i, pos)
+                positions[i] = pos
+                prev = pos
+            if total - prev < right_min_h and n_sashes >= 1:
+                right_paned.sashpos(n_sashes - 1, max(prev, total - right_min_h))
 
         self.multi_xls_plot_frame.bind('<Configure>', _enforce_right_paned_min_height, add='+')
 
@@ -2010,9 +1502,14 @@ class NecLabApp:
             self.multi_xls_menu_grafica.entryconfigure("Save Plot Image...", state='normal')
             self.multi_xls_menu_grafica.entryconfigure("Save Heatmap Image...", state='normal')
             self.multi_xls_menu_grafica.entryconfigure("Save Smoothed Data (XLSX/CSV)...", state='normal')
+            self.multi_xls_menu_grafica.entryconfigure("Save Correlation Image...", state='normal')
             self.btn_multi_xls_next_column.configure(state='normal')
             self.multi_xls_menu_datos.entryconfigure("Save Classifications...", state='normal')
             self.multi_xls_menu_datos.entryconfigure("Load Classifications...", state='normal')
+            self.multi_xls_menu_datos.entryconfigure("Save Peaks CSV...", state='normal')
+            self.multi_xls_peak_method_combo.config(state='readonly')
+            self.btn_multi_xls_add_sel.configure(state='normal')
+            self.btn_multi_xls_remove_sel.configure(state='normal')
 
     def _rebuild_multi_xls_class_row(self):
         """Recreate the classification combobox for each loaded sheet (one
@@ -2378,6 +1875,60 @@ class NecLabApp:
         tk.Button(btns, text="Cancel", command=dialog.destroy, width=8).pack(side='left', padx=4)
         tk.Button(btns, text="Apply", command=apply_range, width=8).pack(side='left', padx=4)
 
+    def _distribute_multi_xls_right_paned_evenly(self):
+        """Give every currently visible pane (the plot, and whichever of
+        heatmap/correlation are toggled on) an equal share of the height,
+        instead of ttk.PanedWindow's default of handing a newly added pane
+        a small sliver. Scheduled with a short delay (like the tab's other
+        one-shot sash positioning) since a pane just added/removed hasn't
+        settled into its final geometry yet."""
+        paned = self.multi_xls_right_paned
+        if paned is None:
+            return
+        n = len(paned.panes())
+        if n < 2:
+            return
+        total = paned.winfo_height()
+        if total <= 1:
+            return
+        for i in range(1, n):
+            paned.sashpos(i - 1, int(total * i / n))
+
+    def _on_multi_xls_show_heatmap_toggle(self):
+        """Add or remove the middle (heatmap) pane from the vertical
+        PanedWindow, inserting it before the correlation pane if that one
+        is already shown so the top-to-bottom order (plot, heatmap,
+        correlation) stays fixed regardless of toggle order."""
+        paned = self.multi_xls_right_paned
+        if paned is None:
+            return
+        panes = paned.panes()
+        shown = str(self.multi_xls_heatmap_frame) in panes
+        if self.multi_xls_show_heatmap_var.get() and not shown:
+            if str(self.multi_xls_correlation_frame) in panes:
+                paned.insert(self.multi_xls_correlation_frame, self.multi_xls_heatmap_frame, weight=2)
+            else:
+                paned.add(self.multi_xls_heatmap_frame, weight=2)
+            self._draw_multi_xls_heatmap()
+        elif not self.multi_xls_show_heatmap_var.get() and shown:
+            paned.forget(self.multi_xls_heatmap_frame)
+        self.root.after(50, self._distribute_multi_xls_right_paned_evenly)
+
+    def _on_multi_xls_show_correlation_toggle(self):
+        """Add or remove the bottom (correlation) pane from the vertical
+        PanedWindow - always goes at the end, so plain .add() is enough
+        regardless of whether the heatmap pane is shown."""
+        paned = self.multi_xls_right_paned
+        if paned is None:
+            return
+        shown = str(self.multi_xls_correlation_frame) in paned.panes()
+        if self.multi_xls_show_correlation_var.get() and not shown:
+            paned.add(self.multi_xls_correlation_frame, weight=2)
+            self._update_multi_xls_correlation_display()
+        elif not self.multi_xls_show_correlation_var.get() and shown:
+            paned.forget(self.multi_xls_correlation_frame)
+        self.root.after(50, self._distribute_multi_xls_right_paned_evenly)
+
     def _on_multi_xls_show_labels_toggle(self):
         """Redraw both plots to show or hide each sheet's label under the
         X axis, without touching the data list's names."""
@@ -2392,6 +1943,26 @@ class NecLabApp:
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
         self._draw_multi_xls_heatmap()
+
+    def _on_multi_xls_peak_method_change(self, show_dialog=False):
+        """Show the parameter dialog for the newly chosen Peak Finder
+        method (reusing the same _PEAK_PARAM_SPECS/show_parameter_dialog
+        Data Visualization used), cache the params, and redraw the top
+        plot with peaks overlaid on every sheet's segment."""
+        method = self.multi_xls_peak_method_var.get()
+        if method != 'None':
+            if show_dialog or method not in self.multi_xls_peak_method_params:
+                from peak_functions import show_parameter_dialog
+                spec = self._PEAK_PARAM_SPECS.get(method)
+                if spec:
+                    title, param_list = spec
+                    new_params = show_parameter_dialog(self.root, title, param_list)
+                    if new_params is None:
+                        self.multi_xls_peak_method_var.set('None')
+                    else:
+                        self.multi_xls_peak_method_params[method] = new_params
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
 
     def _open_multi_xls_smoothing_points_dialog(self):
         """Dialog to adjust the number of points used by the Convex
@@ -2684,11 +2255,23 @@ class NecLabApp:
             # without telling Tk to resize the canvas widget.
             self.multi_xls_fig.set_size_inches(fig_width, fig_height, forward=False)
 
+        peak_method = self.multi_xls_peak_method_var.get()
+        peak_params = (self.multi_xls_peak_method_params.get(peak_method)
+                        if peak_method != 'None' else None)
+        show_smoothing_points = (self.multi_xls_smoothing_var.get()
+                                  and self.multi_xls_show_smoothing_points_var.get())
+        try:
+            smoothing_points_n = self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            smoothing_points_n = None
+
         ax = self._multi_xls_plot_ax
         offset = 0
         tick_positions = []
         tick_labels = []
         bounds = []
+        peak_legend_added = False
+        baseline_legend_added = False
         for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
             x = np.arange(offset, offset + n)
@@ -2698,7 +2281,35 @@ class NecLabApp:
             tick_positions.append(offset + n / 2)
             tick_labels.append(label)
             bounds.append((offset, offset + n))
+
+            if peak_params is not None:
+                from peak_functions import compute_peaks
+                peaks = compute_peaks(values.reshape(-1, 1), 0, peak_method, peak_params)
+                if peaks:
+                    peaks = np.asarray(peaks, dtype=int)
+                    ax.scatter(offset + peaks, values[peaks], color='crimson', s=20, zorder=5,
+                               label=None if peak_legend_added else 'Peaks')
+                    peak_legend_added = True
+
+            if show_smoothing_points and smoothing_points_n is not None and n >= 2:
+                from peak_functions import convex_envelope_lowest_points
+                try:
+                    px, py = convex_envelope_lowest_points(values, n_points=smoothing_points_n)
+                except Exception:
+                    px = None
+                if px is not None and len(px) > 0:
+                    baseline = np.interp(np.arange(n), px, py)
+                    first = not baseline_legend_added
+                    ax.plot(x, baseline, color='darkorange', linewidth=1.1, linestyle='--',
+                            label='Baseline' if first else None)
+                    ax.scatter(offset + px, py, color='darkorange', s=18, zorder=5,
+                               label='Lowest points used' if first else None)
+                    baseline_legend_added = True
+
             offset += n
+
+        if peak_legend_added or baseline_legend_added:
+            ax.legend(fontsize=7, loc='upper right')
 
         ax.set_xticks(tick_positions)
         if show_labels:
@@ -3119,6 +2730,190 @@ class NecLabApp:
             on_complete=lambda fn: messagebox.showinfo("Saved", f"Data saved to:\n{fn}"),
             on_error=lambda exc: messagebox.showerror("Error", f"Could not save the file:\n{exc}"),
         )
+
+    def _multi_xls_concatenated_column(self, col_name):
+        """Return the single concatenated vector for 'col_name' across
+        every loaded sheet, in the same order/segments as the top plot
+        (via _compute_multi_xls_series) - used for correlation and the
+        Dendrogram tab, both of which need one full-length vector per
+        selected column rather than per-sheet segments."""
+        series = self._compute_multi_xls_series(col_name)
+        if not series:
+            return np.array([])
+        return np.concatenate([values for _, values in series])
+
+    def _add_to_multi_xls_selection(self):
+        """Add the highlighted Data Column to the Selection list (single
+        selection, so at most one new entry per click)."""
+        sel = self.multi_xls_column_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx not in self.multi_xls_selection_indices:
+            self.multi_xls_selection_indices.append(idx)
+            self.multi_xls_selection_indices.sort()
+            self.multi_xls_selection_listbox.delete(0, tk.END)
+            for i in self.multi_xls_selection_indices:
+                self.multi_xls_selection_listbox.insert(tk.END, self.multi_xls_column_listbox.get(i))
+            self._update_multi_xls_correlation_display()
+
+    def _remove_from_multi_xls_selection(self):
+        """Remove the highlighted entry from the Selection list."""
+        sel = self.multi_xls_selection_listbox.curselection()
+        if not sel:
+            return
+        list_idx = sel[0]
+        self.multi_xls_selection_listbox.delete(list_idx)
+        self.multi_xls_selection_indices.pop(list_idx)
+        self._update_multi_xls_correlation_display()
+
+    def _update_multi_xls_correlation_display(self):
+        """Refresh the correlation heatmap in the bottom-most pane, computed
+        over the concatenated cross-sheet series of every column currently
+        in Selection (see _multi_xls_concatenated_column)."""
+        if self.multi_xls_correlation_frame is None:
+            return
+
+        for widget in list(self.multi_xls_correlation_frame.winfo_children()):
+            widget.destroy()
+
+        if self._multi_xls_corr_fig is not None:
+            plt.close(self._multi_xls_corr_fig)
+            self._multi_xls_corr_fig = None
+        self._multi_xls_corr_df = None
+        if self.multi_xls_menu_grafica is not None:
+            self.multi_xls_menu_grafica.entryconfigure("Save Correlation Data...", state='disabled')
+
+        if len(self.multi_xls_selection_indices) < 2:
+            tk.Label(
+                self.multi_xls_correlation_frame,
+                text="Add 2+ columns to Selection to see correlation",
+                font=('Arial', 12), bg=_C['panel'], fg=_C['sub']
+            ).pack(fill=tk.BOTH, expand=True)
+            return
+
+        import pandas as pd
+        method = self.multi_xls_corr_method_var.get()
+        col_labels = [self.multi_xls_column_listbox.get(i) for i in self.multi_xls_selection_indices]
+        cols = {label: self._multi_xls_concatenated_column(self.multi_xls_common_columns[i])
+                for i, label in zip(self.multi_xls_selection_indices, col_labels)}
+        min_len = min(len(v) for v in cols.values())
+        if min_len == 0:
+            tk.Label(
+                self.multi_xls_correlation_frame,
+                text="Selected columns have no overlapping data",
+                font=('Arial', 12), bg=_C['panel'], fg=_C['sub']
+            ).pack(fill=tk.BOTH, expand=True)
+            return
+        df = pd.DataFrame({label: v[:min_len] for label, v in cols.items()})
+        corr = df.corr(method=method)
+        self._multi_xls_corr_df = corr
+        if self.multi_xls_menu_grafica is not None:
+            self.multi_xls_menu_grafica.entryconfigure("Save Correlation Data...", state='normal')
+
+        self._multi_xls_corr_fig, ax = plt.subplots()
+        cax = ax.matshow(corr.values, cmap='jet', vmin=-1, vmax=1)
+        ax.set_xticks(range(len(col_labels)))
+        ax.set_yticks(range(len(col_labels)))
+        if self.multi_xls_show_corr_labels_var.get():
+            ax.set_xticklabels(col_labels, rotation=45, ha='left', fontsize=8)
+            ax.set_yticklabels(col_labels, fontsize=8)
+        else:
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+        self._multi_xls_corr_fig.colorbar(cax, ax=ax, ticks=[-1, 0, 1], shrink=0.8)
+        ax.set_title(f'{method.capitalize()} Correlation (Selection)', pad=20)
+        self._multi_xls_corr_fig.tight_layout()
+
+        corr_canvas = FigureCanvasTkAgg(self._multi_xls_corr_fig, master=self.multi_xls_correlation_frame)
+        corr_canvas.draw()
+        corr_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def _save_multi_xls_correlation_image(self):
+        """Save the current correlation heatmap to a file."""
+        if self._multi_xls_corr_fig is None:
+            messagebox.showwarning("No Plot", "Add 2+ columns to Selection first.")
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"),
+                       ("TIFF files", "*.tiff"), ("SVG files", "*.svg"),
+                       ("EPS files", "*.eps"), ("All Files", "*.*")],
+            title="Save Correlation Image"
+        )
+        if filename:
+            self._multi_xls_corr_fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    def _save_multi_xls_correlation_data(self):
+        """Save the current correlation matrix values to a CSV or Excel file."""
+        if self._multi_xls_corr_df is None:
+            return
+        from tkinter.filedialog import asksaveasfilename
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"),
+                       ("All Files", "*.*")],
+            title="Save Correlation Data"
+        )
+        if not filename:
+            return
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            self._multi_xls_corr_df.to_excel(filename, sheet_name='Correlation', engine='xlsxwriter')
+        else:
+            self._multi_xls_corr_df.to_csv(filename)
+        messagebox.showinfo("Saved", f"Correlation matrix saved to:\n{filename}")
+
+    def _save_multi_xls_peaks_csv(self):
+        """Run the current Peak Finder method on every column in Selection,
+        for every loaded sheet, and save the peak flags (one row per
+        sample, 1 where a peak was found) to a CSV or Excel file - the
+        Multiple Files equivalent of Data Visualization's per-column peak
+        export, expanded across sheets."""
+        method = self.multi_xls_peak_method_var.get()
+        if method == 'None':
+            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
+            return
+        if not self.multi_xls_selection_indices:
+            messagebox.showwarning("No Selection", "Add columns to Selection first.")
+            return
+        params = self.multi_xls_peak_method_params.get(method)
+        if params is None:
+            messagebox.showwarning("No Parameters",
+                                   "Choose the peak finder method on a column first to set parameters.")
+            return
+
+        from tkinter.filedialog import asksaveasfilename
+        from peak_functions import compute_peaks
+        import pandas as pd
+
+        filename = asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
+            title="Save Peaks CSV"
+        )
+        if not filename:
+            return
+
+        rows = []
+        for idx in self.multi_xls_selection_indices:
+            col_name = self.multi_xls_common_columns[idx]
+            col_label = self.multi_xls_column_listbox.get(idx)
+            for label, values in self._compute_multi_xls_series(col_name):
+                peaks = compute_peaks(values.reshape(-1, 1), 0, method, params)
+                flags = np.zeros(len(values), dtype=int)
+                if peaks:
+                    flags[np.asarray(peaks, dtype=int)] = 1
+                for sample_idx, flag in enumerate(flags):
+                    rows.append({'Column': col_label, 'Sheet': label,
+                                 'Sample_Index': sample_idx, 'Peak_Flag': flag})
+
+        df_peaks = pd.DataFrame(rows)
+        if filename.lower().endswith(('.xlsx', '.xls')):
+            df_peaks.to_excel(filename, index=False, engine='xlsxwriter')
+        else:
+            df_peaks.to_csv(filename, index=False)
+        messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
 
     def _save_multi_xls_classifications(self):
         """Save, for each data column and each loaded sheet, the chosen
