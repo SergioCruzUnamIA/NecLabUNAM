@@ -5,6 +5,7 @@ on:
     tags:
       - 'v*'        # triggers on tags like v1.0, v1.2.3, etc.
     branches:
+      - 'main'
       - 'claude/smoothing-normalization-analysis-6w26xx'
       - 'claude/visualizacion-datos-tab-menu-pxdelm'
       - 'claude/csv-xls-sheet-selection-54rlhx'
