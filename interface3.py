@@ -1326,11 +1326,17 @@ class NecLabApp:
         # (wasted space) and no less (clipped text) - instead of a fixed
         # width unrelated to what's actually in it. "Remove from Selection"
         # is normally the widest control; "Column 999" stands in for column
-        # names, which are only ever a couple of digits long.
+        # names, which are only ever a couple of digits long. The only
+        # padding added on top of the raw text width is what the button
+        # itself actually needs: its grid padx (10 each side) plus its
+        # rounded corner_radius (6 each side, so the label clears the
+        # curve) - both match the literal values used when the buttons are
+        # created above, not a guessed constant.
+        _button_padx, _button_corner_radius = 10, 6
         sidebar_content_w = max(
             tkfont.Font(family='Arial', size=10).measure('Column 999'),
             tkfont.Font(family='Arial', size=11).measure('Remove from Selection'),
-        ) + 50
+        ) + 2 * (_button_padx + _button_corner_radius)
         self.root.after(50, lambda: paned.sashpos(0, sidebar_content_w))
 
         # ttk.PanedWindow has no built-in minsize per pane, so enforce one by
