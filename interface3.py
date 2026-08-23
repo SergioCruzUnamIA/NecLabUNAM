@@ -2335,7 +2335,11 @@ class NecLabApp:
             ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
         else:
             ax.set_xticklabels([])
-        ax.set_title(display_label)
+        if auc_annotations:
+            total_auc = sum(area for *_rest, area, _color in auc_annotations)
+            ax.set_title(f'{display_label}\nTotal AUC = {total_auc:,.2f}')
+        else:
+            ax.set_title(display_label)
         norm_mode = self.multi_xls_norm_mode_var.get()
         if norm_mode == 'sheet':
             ax.set_ylabel('Value / minimum of the entire sheet')
