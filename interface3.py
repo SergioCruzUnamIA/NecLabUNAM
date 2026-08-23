@@ -2289,7 +2289,6 @@ class NecLabApp:
         bounds = []
         peak_legend_added = False
         baseline_legend_added = False
-        auc_legend_added = False
         auc_annotations = []
         for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
@@ -2303,9 +2302,6 @@ class NecLabApp:
 
             if show_auc and n >= 2:
                 area = float(_trapz(values, x))
-                ax.fill_between(x, values, 0, color=line.get_color(), alpha=0.15,
-                                 label='Area Under Curve' if not auc_legend_added else None)
-                auc_legend_added = True
                 auc_annotations.append((offset + n / 2, area, line.get_color()))
 
             if peak_params is not None:
@@ -2334,7 +2330,7 @@ class NecLabApp:
 
             offset += n
 
-        if peak_legend_added or baseline_legend_added or auc_legend_added:
+        if peak_legend_added or baseline_legend_added:
             ax.legend(fontsize=7, loc='upper right')
 
         ax.set_xticks(tick_positions)
@@ -2363,15 +2359,18 @@ class NecLabApp:
         if self.multi_xls_ylim is not None:
             ax.set_ylim(self.multi_xls_ylim)
 
-        # AUC value labels are placed once the final y-limits are known
-        # (manual override or autoscaled), so they sit just above the
-        # bottom axis instead of drifting mid-loop before all sheets'
-        # data had been added.
+        # AUC value labels are drawn last, once the final y-limits are known
+        # (manual override or autoscaled), as boxed text near the top of
+        # each sheet's segment - this only draws a label on top of the
+        # existing plot, it never changes the curve itself (no shading/fill).
         if auc_annotations:
-            y_bottom = ax.get_ylim()[0]
+            y_top = ax.get_ylim()[1]
             for mid_x, area, color in auc_annotations:
-                ax.text(mid_x, y_bottom, f'AUC={area:,.2f}',
-                        fontsize=6.5, ha='center', va='bottom', color=color)
+                ax.text(mid_x, y_top, f'AUC = {area:,.2f}',
+                        fontsize=7, ha='center', va='top', color=color,
+                        fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.25', facecolor='white',
+                                  edgecolor=color, linewidth=0.8, alpha=0.9))
 
         # Margins are computed in inches (not tight_layout's auto-padding or a
         # fixed fraction) so the axes always use as much of the panel as
