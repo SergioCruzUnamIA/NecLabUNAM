@@ -101,6 +101,10 @@ _C = {
     'border': '#e2e8f0',   # divider lines
 }
 
+# numpy 2.0 renamed trapz to trapezoid (trapz stays as a deprecated alias
+# for now, but isn't guaranteed to survive future numpy releases).
+_trapz = getattr(np, 'trapezoid', None) or np.trapz
+
 # Local modules
 from pyometiff import OMETIFFReader
 from variability_functions import show_variability_analysis, get_variability_methods
@@ -233,6 +237,7 @@ class NecLabApp:
         self.multi_xls_peak_method_combo = None
         self.multi_xls_peak_method_params = {}  # saved params per method name
         self.multi_xls_show_smoothing_points_var = tk.BooleanVar(value=True)
+        self.multi_xls_show_auc_var = tk.BooleanVar(value=False)
 
         # State variables - Multiple Files tab: Correlation + Selection
         self.multi_xls_corr_method_var = tk.StringVar(value='pearson')
@@ -1129,6 +1134,10 @@ class NecLabApp:
                                variable=self.multi_xls_show_smoothing_points_var,
                                command=self._on_multi_xls_smoothing_toggle)
             m.add_separator()
+            m.add_checkbutton(label="Show Area Under Curve",
+                               variable=self.multi_xls_show_auc_var,
+                               command=self._on_multi_xls_show_auc_toggle)
+            m.add_separator()
             m.add_checkbutton(label="Show Labels (Correlation)",
                                variable=self.multi_xls_show_corr_labels_var,
                                command=self._update_multi_xls_correlation_display)
@@ -1938,6 +1947,13 @@ class NecLabApp:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
         self._draw_multi_xls_heatmap()
 
+    def _on_multi_xls_show_auc_toggle(self):
+        """Redraw the top plot with the area under each sheet's curve
+        shaded and labeled (or removed), when 'Show Area Under Curve' is
+        toggled."""
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+
     def _on_multi_xls_peak_method_change(self, show_dialog=False):
         """Show the parameter dialog for the newly chosen Peak Finder
         method (reusing the same _PEAK_PARAM_SPECS/show_parameter_dialog
@@ -2264,6 +2280,7 @@ class NecLabApp:
             smoothing_points_n = self.multi_xls_smoothing_points_var.get()
         except tk.TclError:
             smoothing_points_n = None
+        show_auc = self.multi_xls_show_auc_var.get()
 
         ax = self._multi_xls_plot_ax
         offset = 0
@@ -2272,15 +2289,20 @@ class NecLabApp:
         bounds = []
         peak_legend_added = False
         baseline_legend_added = False
+        auc_annotations = []
         for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
             x = np.arange(offset, offset + n)
-            ax.plot(x, values, linewidth=0.8)
+            line, = ax.plot(x, values, linewidth=0.8)
             if offset > 0:
                 ax.axvline(offset, color=_C['sub'], linestyle='--', linewidth=1, alpha=0.6)
             tick_positions.append(offset + n / 2)
             tick_labels.append(label)
             bounds.append((offset, offset + n))
+
+            if show_auc and n >= 2:
+                area = float(_trapz(values, x))
+                auc_annotations.append((x, values, offset + n / 2, area, line.get_color()))
 
             if peak_params is not None:
                 from peak_functions import compute_peaks
@@ -2308,15 +2330,16 @@ class NecLabApp:
 
             offset += n
 
-        if peak_legend_added or baseline_legend_added:
-            ax.legend(fontsize=7, loc='upper right')
-
         ax.set_xticks(tick_positions)
         if show_labels:
             ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
         else:
             ax.set_xticklabels([])
-        ax.set_title(display_label)
+        if auc_annotations:
+            total_auc = sum(area for *_rest, area, _color in auc_annotations)
+            ax.set_title(f'{display_label}\nTotal AUC = {total_auc:,.2f}')
+        else:
+            ax.set_title(display_label)
         norm_mode = self.multi_xls_norm_mode_var.get()
         if norm_mode == 'sheet':
             ax.set_ylabel('Value / minimum of the entire sheet')
@@ -2336,6 +2359,32 @@ class NecLabApp:
             ax.set_xlim(0, offset)
         if self.multi_xls_ylim is not None:
             ax.set_ylim(self.multi_xls_ylim)
+
+        # AUC shading/labels are added last, once the final y-limits are
+        # known (manual override or autoscaled). The shaded area is capped
+        # at the axis's own floor (y_bottom) instead of 0, so it never pulls
+        # the y-axis down to show the curve all the way to zero - the
+        # visible range stays whatever it already was without this option.
+        # The AUC value itself is still the true area down to zero
+        # (trapezoidal rule), only its shading is capped.
+        if auc_annotations:
+            y_bottom, y_top = ax.get_ylim()
+            auc_legend_added = False
+            for x, values, mid_x, area, color in auc_annotations:
+                ax.fill_between(x, values, y_bottom, color=color, alpha=0.15,
+                                 label='Area Under Curve' if not auc_legend_added else None)
+                auc_legend_added = True
+                ax.text(mid_x, y_top, f'AUC = {area:,.2f}',
+                        fontsize=7, ha='center', va='top', color=color,
+                        fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.25', facecolor='white',
+                                  edgecolor=color, linewidth=0.8, alpha=0.9))
+            ax.set_ylim(y_bottom, y_top)
+
+        if peak_legend_added or baseline_legend_added or auc_annotations:
+            # Lower right, since the AUC boxed labels (when shown) sit at
+            # the top of the plot and would collide with an upper legend.
+            ax.legend(fontsize=7, loc='lower right')
 
         # Margins are computed in inches (not tight_layout's auto-padding or a
         # fixed fraction) so the axes always use as much of the panel as
