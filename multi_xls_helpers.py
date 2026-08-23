@@ -1,5 +1,5 @@
 """
-Helper functions to load multiple Excel files (.xls/.xlsx),
+Helper functions to load one or more data files (.npy/.xls/.xlsx/.csv),
 choose which sheets to load, and prepare their data columns for the
 "Multiple Files" tab.
 """
@@ -11,18 +11,25 @@ from tkinter import filedialog, messagebox
 
 
 _CSV_PSEUDO_SHEET = '(CSV)'
+_NPY_PSEUDO_SHEET = '(NPY)'
 
 
 def _is_csv_file(filepath):
     return filepath.lower().endswith('.csv')
 
 
+def _is_npy_file(filepath):
+    return filepath.lower().endswith('.npy')
+
+
 def _read_sheet_names(filepath):
-    """Returns the list of sheet (tab) names of an Excel file. A .csv
-    file has no sheets, so it is assigned a single "pseudo" sheet so it
-    fits into the same selection flow."""
+    """Returns the list of sheet (tab) names of an Excel file. A .csv or
+    .npy file has no sheets, so each is assigned a single "pseudo" sheet
+    so it fits into the same selection flow."""
     if _is_csv_file(filepath):
         return [_CSV_PSEUDO_SHEET]
+    if _is_npy_file(filepath):
+        return [_NPY_PSEUDO_SHEET]
     xl = pd.ExcelFile(filepath)
     return xl.sheet_names
 
@@ -103,14 +110,19 @@ def _select_sheets_dialog(parent, file_sheet_map):
 
 
 def _load_sheet_dataframe(filepath, sheet_name):
-    """Reads an Excel sheet (or a .csv file, treated as its single
-    "sheet") with no header row: no column names are assumed, so each
-    column is a data series identified solely by its position (0, 1, 2,
-    ...). Since all loaded files must have the same number of columns,
+    """Reads an Excel sheet (or a .csv/.npy file, each treated as its own
+    single "sheet") with no header row: no column names are assumed, so
+    each column is a data series identified solely by its position (0, 1,
+    2, ...). Since all loaded files must have the same number of columns,
     that position is what makes a column in one file/sheet correspond to
     the same column in another."""
     if _is_csv_file(filepath):
         df = pd.read_csv(filepath, header=None)
+    elif _is_npy_file(filepath):
+        arr = np.load(filepath, allow_pickle=True)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        df = pd.DataFrame(arr)
     else:
         df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
     df = df.apply(pd.to_numeric, errors='coerce')
@@ -120,17 +132,18 @@ def _load_sheet_dataframe(filepath, sheet_name):
 
 def pick_files_and_sheets(parent):
     """
-    Prompts the user for multiple .xls/.xlsx files and which sheets from
-    each one to load.
+    Prompts the user for one or more .npy/.xls/.xlsx/.csv files and which
+    sheets from each one to load (a single selected file works the same
+    way - it's just a file_sheet_map with one entry).
 
     Returns: list of selected (filepath, sheet_name) tuples, or None if
     the user cancels or there are no sheets to choose from.
     """
     filenames = filedialog.askopenfilenames(
         parent=parent,
-        title="Open Multiple Files (.xls / .csv)",
-        filetypes=[("Excel/CSV files", "*.xlsx *.xls *.csv"), ("Excel files", "*.xlsx *.xls"),
-                   ("CSV files", "*.csv"), ("All files", "*.*")]
+        title="Open Data Files (.npy / .xls / .csv)",
+        filetypes=[("Data files", "*.npy *.xlsx *.xls *.csv"), ("Numpy files", "*.npy"),
+                   ("Excel files", "*.xlsx *.xls"), ("CSV files", "*.csv"), ("All files", "*.*")]
     )
     if not filenames:
         return None
@@ -193,70 +206,6 @@ def load_selected_sheets(selection, progress_callback=None, error_callback=None)
             progress_callback(i, total, filepath, sheet)
 
     return datasets
-
-
-def load_single_data_file(parent):
-    """Prompts for a single .npy/.csv/.xlsx/.xls file and returns it as a
-    one-dataset list in the same shape load_selected_sheets() produces (or
-    None if the user cancels) - the 'Open Data' menu item's entry point
-    into the same Multiple Files pipeline used for multi-file loads."""
-    filename = filedialog.askopenfilename(
-        parent=parent,
-        title="Open Data",
-        filetypes=[("Data files", "*.npy *.csv *.xlsx *.xls"), ("Numpy files", "*.npy"),
-                   ("CSV files", "*.csv"), ("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-    )
-    if not filename:
-        return None
-
-    if filename.lower().endswith('.npy'):
-        try:
-            arr = np.load(filename, allow_pickle=True)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
-            return None
-        if arr.ndim == 1:
-            arr = arr.reshape(-1, 1)
-        df = pd.DataFrame(arr).apply(pd.to_numeric, errors='coerce')
-        df.columns = [str(c) for c in df.columns]
-        sheet = '(NPY)'
-    elif _is_csv_file(filename):
-        try:
-            df = _load_sheet_dataframe(filename, None)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
-            return None
-        sheet = _CSV_PSEUDO_SHEET
-    else:
-        try:
-            sheet_names = pd.ExcelFile(filename).sheet_names
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
-            return None
-        sheet = sheet_names[0]
-        if len(sheet_names) > 1:
-            from visualization_helpers import _show_sheet_selection_dialog
-            chosen = _show_sheet_selection_dialog(parent, sheet_names)
-            if chosen is None:
-                return None
-            sheet = chosen
-        try:
-            df = _load_sheet_dataframe(filename, sheet)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not read '{os.path.basename(filename)}':\n{e}")
-            return None
-
-    if df.empty:
-        messagebox.showwarning("No Data", "The selected file has no data.")
-        return None
-
-    return [{
-        'file': filename,
-        'sheet': sheet,
-        'label': f"{os.path.splitext(os.path.basename(filename))[0]} - {sheet}",
-        'df': df,
-        'column_names': df.columns.tolist(),
-    }]
 
 
 def common_column_names(datasets):

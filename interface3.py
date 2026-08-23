@@ -105,8 +105,7 @@ _C = {
 from pyometiff import OMETIFFReader
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
-from multi_xls_helpers import (pick_files_and_sheets, load_selected_sheets, common_column_names,
-                                load_single_data_file)
+from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
 
 # Try to import image processing modules if they exist
 try:
@@ -304,19 +303,13 @@ class NecLabApp:
         )
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label='Open Data (.npy / .csv / .xlsx)',
-            command=self.open_single_data_file,
+            label='Open Data Files (.npy / .xls / .csv)',
+            command=self.open_multiple_xls_files,
             state=NORMAL
         )
         self.menu_archivo.add_command(
             label='Load Correlation Matrix',
             command=self.load_correlation_matrix_wrapper,
-            state=NORMAL
-        )
-        self.menu_archivo.add_separator()
-        self.menu_archivo.add_command(
-            label='Open Multiple Files (.xls / .csv)',
-            command=self.open_multiple_xls_files,
             state=NORMAL
         )
         self.menu_archivo.add_separator()
@@ -562,15 +555,6 @@ class NecLabApp:
         self.info_text = tk.Label(inner, text="No image loaded", bg=_C['panel'],
                                    fg=_C['text'], justify='left', anchor='w', font=('Arial', 9))
         self.info_text.pack(fill='x')
-
-    def open_single_data_file(self):
-        """Open a single .npy/.csv/.xlsx/.xls file straight into the
-        Multiple Files tab (as a one-sheet load), so a lone file uses the
-        same pipeline/UI as multiple ones instead of a separate tab."""
-        dataset = load_single_data_file(self.root)
-        if not dataset:
-            return
-        self._on_multi_xls_load_complete(dataset)
 
     def _run_dendogram_on_selection(self):
         """Create the Dendrogram tab on first use, then switch to it."""
@@ -962,9 +946,10 @@ class NecLabApp:
     # ==================== MULTIPLE FILES (XLS) TAB ====================
 
     def open_multiple_xls_files(self):
-        """Open multiple .xls/.xlsx/.csv files, let the user choose which
-        sheets to load (a .csv counts as its own single sheet), and show
-        their data columns in the 'Multiple Files' tab."""
+        """Open one or more .npy/.xls/.xlsx/.csv files, let the user choose
+        which sheets to load from each (a .csv or .npy file counts as its
+        own single sheet), and show their data columns in the 'Multiple
+        Files' tab."""
         selection = pick_files_and_sheets(self.root)
         if not selection:
             return
@@ -1094,7 +1079,7 @@ class NecLabApp:
                 selection, progress_callback=_on_progress, error_callback=_on_error)
 
         self._run_with_progress_window(
-            title="Loading Files", message="Loading Excel sheets...",
+            title="Loading Files", message="Loading data...",
             maximum=len(selection), worker_fn=worker, on_complete=on_complete)
 
     def _create_multi_xls_layout(self):
