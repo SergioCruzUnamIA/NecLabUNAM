@@ -41,7 +41,11 @@ _MULTI_XLS_BOTTOM_IN_LABELS = 0.85    # rotated per-sheet name labels
 _MULTI_XLS_BOTTOM_IN_NOLABELS = 0.22  # no labels: just the tick marks
 _MULTI_XLS_CBAR_GAP_IN = 0.15         # gap between axes and colorbar
 _MULTI_XLS_CBAR_WIDTH_IN = 0.22       # colorbar width
-_MULTI_XLS_CBAR_TICKLABEL_IN = 0.25   # room for its "-1"/"0"/"1" tick labels
+_MULTI_XLS_CBAR_TICKLABEL_IN = 0.55    # room for its tick labels - these are
+                                        # normalized values (data / minimum),
+                                        # auto-ticked by matplotlib, so they
+                                        # can run several digits wide (e.g.
+                                        # "12.5"), not just "-1"/"0"/"1"
 # Reserved on the heatmap plot when its colorbar will be drawn: exactly
 # what the colorbar takes (gap + width + tick labels), not a flat guess.
 # The line plot above it never draws a colorbar of its own, so it always
