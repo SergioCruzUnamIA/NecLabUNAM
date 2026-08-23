@@ -2302,7 +2302,7 @@ class NecLabApp:
 
             if show_auc and n >= 2:
                 area = float(_trapz(values, x))
-                auc_annotations.append((offset + n / 2, area, line.get_color()))
+                auc_annotations.append((x, values, offset + n / 2, area, line.get_color()))
 
             if peak_params is not None:
                 from peak_functions import compute_peaks
@@ -2330,9 +2330,6 @@ class NecLabApp:
 
             offset += n
 
-        if peak_legend_added or baseline_legend_added:
-            ax.legend(fontsize=7, loc='upper right')
-
         ax.set_xticks(tick_positions)
         if show_labels:
             ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=8)
@@ -2359,18 +2356,31 @@ class NecLabApp:
         if self.multi_xls_ylim is not None:
             ax.set_ylim(self.multi_xls_ylim)
 
-        # AUC value labels are drawn last, once the final y-limits are known
-        # (manual override or autoscaled), as boxed text near the top of
-        # each sheet's segment - this only draws a label on top of the
-        # existing plot, it never changes the curve itself (no shading/fill).
+        # AUC shading/labels are added last, once the final y-limits are
+        # known (manual override or autoscaled). The shaded area is capped
+        # at the axis's own floor (y_bottom) instead of 0, so it never pulls
+        # the y-axis down to show the curve all the way to zero - the
+        # visible range stays whatever it already was without this option.
+        # The AUC value itself is still the true area down to zero
+        # (trapezoidal rule), only its shading is capped.
         if auc_annotations:
-            y_top = ax.get_ylim()[1]
-            for mid_x, area, color in auc_annotations:
+            y_bottom, y_top = ax.get_ylim()
+            auc_legend_added = False
+            for x, values, mid_x, area, color in auc_annotations:
+                ax.fill_between(x, values, y_bottom, color=color, alpha=0.15,
+                                 label='Area Under Curve' if not auc_legend_added else None)
+                auc_legend_added = True
                 ax.text(mid_x, y_top, f'AUC = {area:,.2f}',
                         fontsize=7, ha='center', va='top', color=color,
                         fontweight='bold',
                         bbox=dict(boxstyle='round,pad=0.25', facecolor='white',
                                   edgecolor=color, linewidth=0.8, alpha=0.9))
+            ax.set_ylim(y_bottom, y_top)
+
+        if peak_legend_added or baseline_legend_added or auc_annotations:
+            # Lower right, since the AUC boxed labels (when shown) sit at
+            # the top of the plot and would collide with an upper legend.
+            ax.legend(fontsize=7, loc='lower right')
 
         # Margins are computed in inches (not tight_layout's auto-padding or a
         # fixed fraction) so the axes always use as much of the panel as
