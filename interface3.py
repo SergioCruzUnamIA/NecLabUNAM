@@ -1088,10 +1088,11 @@ class NecLabApp:
             maximum=len(selection), worker_fn=worker, on_complete=on_complete)
 
     def _create_multi_xls_layout(self):
-        """Build the 'Multiple Files' tab: a local menu ('View', 'Plot',
-        'Data') with the controls that used to be buttons/checkboxes in the
-        sidebar, a resizable column list on the left (by dragging the
-        divider) and the combined plot on the right."""
+        """Build the 'Multiple Files' tab: a local menu ('Processing',
+        'Visualization', 'Save Data') with the controls that used to be
+        buttons/checkboxes in the sidebar, a resizable column list on the
+        left (by dragging the divider) and the combined plot on the
+        right."""
         Grid.rowconfigure(self.multi_xls_tab, 0, weight=0)
         Grid.rowconfigure(self.multi_xls_tab, 1, weight=1)
         Grid.columnconfigure(self.multi_xls_tab, 0, weight=1)
@@ -1138,10 +1139,6 @@ class NecLabApp:
                                variable=self.multi_xls_show_auc_var,
                                command=self._on_multi_xls_show_auc_toggle)
             m.add_separator()
-            m.add_checkbutton(label="Show Labels (Correlation)",
-                               variable=self.multi_xls_show_corr_labels_var,
-                               command=self._update_multi_xls_correlation_display)
-            m.add_separator()
             m.add_checkbutton(label="Shared Color Scale (heatmap)",
                                variable=self.multi_xls_shared_scale_var,
                                command=self._on_multi_xls_shared_scale_toggle)
@@ -1171,6 +1168,10 @@ class NecLabApp:
             m.add_command(label="Color Limits (Heatmap)...",
                           command=self._open_multi_xls_heatmap_range_dialog)
             m.add_separator()
+            m.add_checkbutton(label="Show Labels (Correlation)",
+                               variable=self.multi_xls_show_corr_labels_var,
+                               command=self._update_multi_xls_correlation_display)
+            m.add_separator()
             m.add_command(label="Save Plot Image...", state='disabled',
                           command=self._save_multi_xls_plot_image)
             m.add_command(label="Save Heatmap Image...", state='disabled',
@@ -1195,9 +1196,9 @@ class NecLabApp:
             m.add_command(label="Save Peaks CSV...", state='disabled',
                           command=self._save_multi_xls_peaks_csv)
 
-        add_tab_menu("View", build_vista_menu)
-        self.multi_xls_menu_grafica = add_tab_menu("Plot", build_grafica_menu)
-        self.multi_xls_menu_datos = add_tab_menu("Data", build_datos_menu)
+        add_tab_menu("Processing", build_vista_menu)
+        self.multi_xls_menu_grafica = add_tab_menu("Visualization", build_grafica_menu)
+        self.multi_xls_menu_datos = add_tab_menu("Save Data", build_datos_menu)
 
         self.multi_xls_smoothing_points_var.trace_add(
             'write', lambda *args: self._on_multi_xls_smoothing_toggle())

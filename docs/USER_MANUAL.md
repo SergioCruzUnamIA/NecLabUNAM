@@ -212,7 +212,7 @@ Created the first time you use `File → Open Multiple Files (.xls)`. Lets you l
 
 ### 6.2 Tab's local menu
 
-- **View**
+- **Processing**
   - `Show Data Names` (default off): shows/hides per-sheet x-axis labels on both plots.
   - `Smoothing` (default **on**): applies convex-envelope smoothing to both the line plot and the heatmap.
   - `Smoothing Points...`: opens a dialog with a spinbox (2–50, default 2) for the smoothing point count.
@@ -224,13 +224,14 @@ Created the first time you use `File → Open Multiple Files (.xls)`. Lets you l
     | By Sheet (minimum of the entire sheet) | divides by the minimum across the whole sheet |
     | By Column Across All Sheets (shared minimum) | divides by that column's minimum pooled across every loaded sheet |
     | Global (minimum of all columns and sheets) | divides by the minimum of the entire loaded dataset |
-- **Plot**
+- **Visualization**
   - `Axis Limits (Top Plot)...`: manually sets X/Y limits for the line plot ("Auto" button to revert).
   - `Color Limits (Heatmap)...`: manually sets the heatmap's color range, showing the range currently in use ("Auto" button to revert).
+  - `Show Labels (Correlation)`: shows/hides axis labels on the correlation heatmap.
   - `Save Plot Image...`: saves the line plot (PNG/PDF/TIFF/SVG/EPS).
   - `Save Heatmap Image...`: saves the heatmap.
   - `Save Smoothed Data (XLSX/CSV)...`: exports **every** common column from **every** loaded sheet, processed exactly as shown on screen (interpolated, normalized per the active mode, smoothed if enabled), into a single file, each source sheet's block separated by 20 blank rows. Runs in a background thread with a progress window.
-- **Data**
+- **Save Data**
   - `Edit Classifications...`: add, rename, or delete classification labels used to tag each loaded sheet; changes propagate to every column.
   - `Save Classifications...` / `Load Classifications...`: persist/restore, per data column, which classification label is assigned to each sheet (XLSX/CSV).
 
