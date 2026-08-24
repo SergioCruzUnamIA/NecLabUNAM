@@ -1201,112 +1201,57 @@ def compute_sccd_metrics(values, peaks, decay_fraction=0.6):
             'events': events, 'iei': iei}
 
 
-def _annotate_sccd_metrics(ax, values, metrics):
+def draw_sccd_metrics_overlay(ax, x_offset, values, metrics, show_legend_labels):
     """Draw amplitude (a), inter-event-interval (b), resting fluorescence
-    (c), rise time (d) and fall time (e) directly on an already-plotted
-    trace, all on the one axes -- the layout approved for Fig. 3A-style
-    review before this was wired into the app."""
+    (c), rise time (d) and fall time (e) directly onto an already-plotted
+    trace segment of the Multiple Files top plot -- the same axes the peaks
+    scatter is drawn on, at the segment's own x_offset (each sheet is
+    plotted side by side on one shared x-axis), instead of a separate
+    window. Returns the y position used for the IEI brackets, so the caller
+    can extend the axes' y-limits to fit every sheet's brackets.
+
+    Args:
+        ax: the Multiple Files top plot's axes (matplotlib Axes).
+        x_offset: this sheet segment's starting x position on that axes.
+        values: this sheet's 1-D signal.
+        metrics: return value of compute_sccd_metrics for this segment.
+        show_legend_labels: only the first sheet segment sets legend labels,
+            so the legend doesn't repeat one entry per sheet.
+    """
     events = metrics['events']
     resting_mean, resting_std = metrics['resting_mean'], metrics['resting_std']
     n = len(values)
 
-    ax.axhspan(resting_mean - resting_std, resting_mean + resting_std,
-               color='violet', alpha=0.22, zorder=0,
-               label=f'c: resting fluorescence (mean±SD) = {resting_mean:.3g}±{resting_std:.3g}')
-    ax.axhline(resting_mean, color='purple', linewidth=1, linestyle=':', zorder=1)
+    ax.fill_between([x_offset, x_offset + n], resting_mean - resting_std, resting_mean + resting_std,
+                     color='violet', alpha=0.18, zorder=0,
+                     label='c: resting fluorescence' if show_legend_labels else None)
 
-    y_top = float(np.max(values))
     y_bottom = float(np.min(values))
-    span = max(y_top - y_bottom, 1e-9)
-    y_iei = y_bottom - 0.12 * span
-    ax.set_ylim(y_iei - 0.08 * span, y_top + 0.08 * span)
+    span = max(float(np.ptp(values)), 1e-9)
+    y_iei = y_bottom - 0.10 * span
 
     for i, e in enumerate(events):
         onset_i, p_i = e['onset_i'], e['peak_i']
-        ax.plot(p_i, e['peak_val'], 'o', color='crimson', markersize=7, zorder=4,
-                 label='a: amplitude (point)' if i == 0 else None)
-        ax.plot([p_i, p_i], [e['onset_val'], e['peak_val']],
+        ax.plot(x_offset + p_i, e['peak_val'], 'o', color='crimson', markersize=6, zorder=6,
+                 markeredgecolor='white', markeredgewidth=0.5,
+                 label='a: amplitude' if (show_legend_labels and i == 0) else None)
+        ax.plot([x_offset + p_i, x_offset + p_i], [e['onset_val'], e['peak_val']],
                  color='crimson', linewidth=1, alpha=0.5, zorder=2)
-        ax.plot(onset_i, e['onset_val'], '|', color='magenta', markersize=14,
-                 markeredgewidth=2, zorder=4, label='Event onset' if i == 0 else None)
+        ax.plot(x_offset + onset_i, e['onset_val'], '|', color='magenta', markersize=12,
+                 markeredgewidth=2, zorder=6,
+                 label='Event onset' if (show_legend_labels and i == 0) else None)
 
-        label = f"a={e['amplitude']:.3g}\nd={e['rise_time']:.0f}  e={e['fall_time']:.0f}"
-        ax.annotate(label, (p_i, e['peak_val']), textcoords="offset points",
-                     xytext=(6, 8), fontsize=8, color='black', ha='left', va='bottom',
-                     bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='crimson', alpha=0.85))
+        label = f"a={e['amplitude']:.2g}\nd={e['rise_time']:.0f} e={e['fall_time']:.0f}"
+        ax.annotate(label, (x_offset + p_i, e['peak_val']), textcoords="offset points",
+                     xytext=(4, 6), fontsize=6.5, color='black', ha='left', va='bottom',
+                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.85, lw=0.7))
 
-    onset_positions = [e['onset_i'] for e in events]
+    onset_positions = [x_offset + e['onset_i'] for e in events]
     for i in range(len(onset_positions) - 1):
         x0, x1 = onset_positions[i], onset_positions[i + 1]
         ax.annotate('', xy=(x1, y_iei), xytext=(x0, y_iei),
-                     arrowprops=dict(arrowstyle='<->', color='black', lw=1.2))
-        ax.text((x0 + x1) / 2, y_iei - 0.05 * span, f"b={x1 - x0:.0f}",
-                 ha='center', fontsize=8, fontweight='bold')
+                     arrowprops=dict(arrowstyle='<->', color='black', lw=1))
+        ax.text((x0 + x1) / 2, y_iei, f"b={x1 - x0:.0f}", ha='center', va='top',
+                 fontsize=6.5, fontweight='bold')
 
-    ax.set_xlim(0, n)
-    ax.legend(loc='upper left', fontsize=7, framealpha=0.9, ncol=2)
-
-
-def show_sccd_metrics_window(parent, series, peak_method, peak_params, column_label):
-    """Open a scrollable Toplevel with one annotated SCCD-metrics plot
-    (amplitude/IEI/resting fluorescence/rise time/fall time, all on the
-    same graph) per loaded sheet, for the peaks the currently selected
-    Peak Finder method/parameters find in each sheet's series of the given
-    column.
-
-    Args:
-        parent: parent Tk window.
-        series: list of (label, values) tuples, one per loaded sheet, as
-            returned by NecLabApp._compute_multi_xls_series.
-        peak_method: name of the peak finder method (must not be 'None').
-        peak_params: params dict for that method (as produced by
-            show_parameter_dialog).
-        column_label: display name of the column, used in the window title.
-    """
-    win = tk.Toplevel(parent)
-    win.title(f"SCCD Metrics — {column_label}")
-    win.geometry("1100x750")
-
-    outer = tk.Frame(win)
-    outer.pack(fill=tk.BOTH, expand=True)
-
-    canvas_scroll = tk.Canvas(outer, highlightthickness=0)
-    vbar = ttk.Scrollbar(outer, orient='vertical', command=canvas_scroll.yview)
-    inner = tk.Frame(canvas_scroll)
-    inner.bind('<Configure>', lambda e: canvas_scroll.configure(scrollregion=canvas_scroll.bbox('all')))
-    canvas_scroll.create_window((0, 0), window=inner, anchor='nw')
-    canvas_scroll.configure(yscrollcommand=vbar.set)
-    canvas_scroll.pack(side='left', fill='both', expand=True)
-    vbar.pack(side='right', fill='y')
-
-    any_events = False
-    for label, values in series:
-        peaks = compute_peaks(np.asarray(values).reshape(-1, 1), 0, peak_method, peak_params)
-        metrics = compute_sccd_metrics(values, peaks) if peaks else None
-
-        fig, ax = plt.subplots(figsize=(10, 4.2))
-        ax.plot(values, color='black', linewidth=0.8, zorder=1, label='Signal')
-
-        if metrics and metrics['events']:
-            any_events = True
-            _annotate_sccd_metrics(ax, values, metrics)
-            ax.set_title(f"{label} — {len(metrics['events'])} event(s) detected")
-        else:
-            ax.set_title(f"{label} — no events detected with current peak finder settings")
-
-        ax.set_xlabel('Sample index')
-        ax.set_ylabel('Value')
-        fig.tight_layout()
-
-        chart_frame = tk.Frame(inner, highlightbackground='#cccccc', highlightthickness=1)
-        chart_frame.pack(fill='x', padx=10, pady=10)
-        fig_canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        fig_canvas.draw()
-        fig_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    if not any_events:
-        tk.Label(inner, fg='firebrick', font=('Arial', 10, 'bold'), wraplength=1000,
-                 text="No calcium-transient events were detected in any sheet with the "
-                      "current Peak Finder method/parameters.").pack(pady=20)
-
-    return win
+    return y_iei
