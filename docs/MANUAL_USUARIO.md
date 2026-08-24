@@ -212,7 +212,7 @@ Se crea la primera vez que usa `File → Open Multiple Files (.xls)`. Permite ca
 
 ### 6.2 Menú local de la pestaña
 
-- **View** (Vista)
+- **Processing** (Procesamiento)
   - `Show Data Names` (Mostrar Nombres de Datos, por defecto apagado): muestra/oculta las etiquetas de hoja en el eje X de ambas gráficas.
   - `Smoothing` (por defecto **encendido**): aplica suavizado por envolvente convexa a la gráfica de líneas y al mapa de calor.
   - `Smoothing Points...` (Puntos de Smoothing): abre un diálogo con un spinbox (2–50, por defecto 2) para el número de puntos del suavizado.
@@ -224,13 +224,14 @@ Se crea la primera vez que usa `File → Open Multiple Files (.xls)`. Permite ca
     | By Sheet (Por Hoja) | divide entre el mínimo de toda la hoja |
     | By Column Across All Sheets (Por Columna en Todas las Hojas) | divide entre el mínimo de esa columna combinando todas las hojas cargadas |
     | Global | divide entre el mínimo de todo el conjunto de datos cargado |
-- **Plot** (Gráfica)
+- **Visualization** (Visualización)
   - `Axis Limits (Top Plot)...` (Límites de Ejes — Gráfica Superior): fija manualmente los límites X/Y de la gráfica de líneas (botón "Auto" para revertir).
   - `Color Limits (Heatmap)...` (Límites de Color — Heatmap): fija manualmente el rango de color del mapa de calor, mostrando el rango actualmente en uso (botón "Auto" para revertir).
+  - `Show Labels (Correlation)` (Mostrar Etiquetas — Correlación): muestra/oculta las etiquetas de los ejes en el mapa de calor de correlación.
   - `Save Plot Image...`: guarda la gráfica de líneas (PNG/PDF/TIFF/SVG/EPS).
   - `Save Heatmap Image...`: guarda el mapa de calor.
   - `Save Smoothed Data (XLSX/CSV)...` (Guardar Datos Suavizados): exporta **todas** las columnas comunes de **todas** las hojas cargadas, procesadas igual que en pantalla (interpoladas, normalizadas según el modo activo, suavizadas si aplica), en un solo archivo, cada hoja de origen separada por 20 filas en blanco. Corre en segundo plano con ventana de progreso.
-- **Data** (Datos)
+- **Save Data** (Guardar Datos)
   - `Edit Classifications...` (Editar Clasificaciones): agregar, renombrar o eliminar etiquetas de clasificación (para etiquetar cada hoja cargada); los cambios se propagan a todas las columnas.
   - `Save Classifications...` / `Load Classifications...` (Guardar/Cargar Clasificaciones): guardar/cargar, por columna de datos, qué clasificación tiene asignada cada hoja (XLSX/CSV).
 
