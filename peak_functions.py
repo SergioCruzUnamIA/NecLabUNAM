@@ -1207,8 +1207,9 @@ def draw_sccd_metrics_overlay(ax, x_offset, values, metrics, show_legend_labels)
     trace segment of the Multiple Files top plot -- the same axes the peaks
     scatter is drawn on, at the segment's own x_offset (each sheet is
     plotted side by side on one shared x-axis), instead of a separate
-    window. Returns the y position used for the IEI brackets, so the caller
-    can extend the axes' y-limits to fit every sheet's brackets.
+    window. The IEI bracket row is drawn at the segment's own data minimum
+    rather than below it, so it never needs the axes' y-limits to grow -
+    the plot keeps whatever vertical space it already had.
 
     Args:
         ax: the Multiple Files top plot's axes (matplotlib Axes).
@@ -1226,9 +1227,10 @@ def draw_sccd_metrics_overlay(ax, x_offset, values, metrics, show_legend_labels)
                      color='violet', alpha=0.18, zorder=0,
                      label='c: resting fluorescence' if show_legend_labels else None)
 
-    y_bottom = float(np.min(values))
-    span = max(float(np.ptp(values)), 1e-9)
-    y_iei = y_bottom - 0.10 * span
+    # Sitting right at the segment's own minimum (not below it) keeps this
+    # inside whatever vertical space the trace already occupies, instead of
+    # forcing the axes taller and leaving a band of empty space under it.
+    y_iei = float(np.min(values))
 
     for i, e in enumerate(events):
         onset_i, p_i = e['onset_i'], e['peak_i']

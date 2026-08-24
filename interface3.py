@@ -2316,7 +2316,6 @@ class NecLabApp:
         peak_legend_added = False
         baseline_legend_added = False
         sccd_legend_added = False
-        sccd_y_mins = []
         auc_annotations = []
         for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
@@ -2345,10 +2344,9 @@ class NecLabApp:
                         from peak_functions import compute_sccd_metrics, draw_sccd_metrics_overlay
                         metrics = compute_sccd_metrics(values, peaks)
                         if metrics and metrics['events']:
-                            y_iei = draw_sccd_metrics_overlay(
+                            draw_sccd_metrics_overlay(
                                 ax, offset, values, metrics, show_legend_labels=not sccd_legend_added)
                             sccd_legend_added = True
-                            sccd_y_mins.append(y_iei)
 
             if show_smoothing_points and smoothing_points_n is not None and n >= 2:
                 from peak_functions import convex_envelope_lowest_points
@@ -2417,16 +2415,6 @@ class NecLabApp:
                         bbox=dict(boxstyle='round,pad=0.25', facecolor='white',
                                   edgecolor=color, linewidth=0.8, alpha=0.9))
             ax.set_ylim(y_bottom, y_top)
-
-        # SCCD's inter-event-interval brackets sit below the lowest data
-        # point of each sheet; extend the visible range to fit them, unless
-        # the user pinned the y-axis manually via "Axis Limits" - that
-        # override is left alone rather than fought.
-        if sccd_y_mins and self.multi_xls_ylim is None:
-            y_bottom, y_top = ax.get_ylim()
-            span = abs(y_top - y_bottom)
-            new_bottom = min(y_bottom, min(sccd_y_mins) - 0.06 * span)
-            ax.set_ylim(new_bottom, y_top)
 
         if peak_legend_added or baseline_legend_added or auc_annotations or sccd_legend_added:
             # SCCD's IEI brackets occupy the bottom of the plot, so push the
