@@ -238,6 +238,7 @@ class NecLabApp:
         self.multi_xls_peak_method_params = {}  # saved params per method name
         self.multi_xls_show_smoothing_points_var = tk.BooleanVar(value=True)
         self.multi_xls_show_auc_var = tk.BooleanVar(value=False)
+        self.multi_xls_show_sccd_var = tk.BooleanVar(value=False)
 
         # State variables - Multiple Files tab: Correlation + Selection
         self.multi_xls_corr_method_var = tk.StringVar(value='pearson')
@@ -1134,6 +1135,13 @@ class NecLabApp:
                                variable=self.multi_xls_show_smoothing_points_var,
                                command=self._on_multi_xls_smoothing_toggle)
             m.add_separator()
+            # Only meaningful once a Peak Finder method is actually selected
+            # (see _on_multi_xls_peak_method_change), since the amplitude/
+            # rise/fall/IEI metrics are computed from its detected peaks.
+            m.add_checkbutton(label="Show SCCD Metrics (a,b,c,d,e)", state='disabled',
+                               variable=self.multi_xls_show_sccd_var,
+                               command=self._on_multi_xls_show_sccd_toggle)
+            m.add_separator()
             m.add_checkbutton(label="Show Area Under Curve",
                                variable=self.multi_xls_show_auc_var,
                                command=self._on_multi_xls_show_auc_toggle)
@@ -1195,7 +1203,7 @@ class NecLabApp:
             m.add_command(label="Save Peaks CSV...", state='disabled',
                           command=self._save_multi_xls_peaks_csv)
 
-        add_tab_menu("View", build_vista_menu)
+        self.multi_xls_menu_vista = add_tab_menu("View", build_vista_menu)
         self.multi_xls_menu_grafica = add_tab_menu("Plot", build_grafica_menu)
         self.multi_xls_menu_datos = add_tab_menu("Data", build_datos_menu)
 
@@ -1954,6 +1962,13 @@ class NecLabApp:
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
+    def _on_multi_xls_show_sccd_toggle(self):
+        """Redraw the top plot with amplitude/IEI/resting fluorescence/rise
+        time/fall time drawn directly on each sheet's segment (or removed),
+        when 'Show SCCD Metrics' is toggled."""
+        if self.multi_xls_current_index is not None:
+            self._draw_multi_xls_plot(self.multi_xls_current_index)
+
     def _on_multi_xls_peak_method_change(self, show_dialog=False):
         """Show the parameter dialog for the newly chosen Peak Finder
         method (reusing the same _PEAK_PARAM_SPECS/show_parameter_dialog
@@ -1971,6 +1986,16 @@ class NecLabApp:
                         self.multi_xls_peak_method_var.set('None')
                     else:
                         self.multi_xls_peak_method_params[method] = new_params
+        # SCCD Metrics needs an actually-selected peak finder method (its
+        # amplitude/rise/fall/IEI values come from that method's detected
+        # peaks) - re-read the var since a cancelled parameter dialog above
+        # may have reset it back to 'None'.
+        method_selected = self.multi_xls_peak_method_var.get() != 'None'
+        self.multi_xls_menu_vista.entryconfigure(
+            "Show SCCD Metrics (a,b,c,d,e)", state='normal' if method_selected else 'disabled')
+        if not method_selected:
+            self.multi_xls_show_sccd_var.set(False)
+
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
 
@@ -2281,6 +2306,7 @@ class NecLabApp:
         except tk.TclError:
             smoothing_points_n = None
         show_auc = self.multi_xls_show_auc_var.get()
+        show_sccd = self.multi_xls_show_sccd_var.get()
 
         ax = self._multi_xls_plot_ax
         offset = 0
@@ -2289,6 +2315,7 @@ class NecLabApp:
         bounds = []
         peak_legend_added = False
         baseline_legend_added = False
+        sccd_legend_added = False
         auc_annotations = []
         for label, values in self._compute_multi_xls_series(col_name):
             n = len(values)
@@ -2312,6 +2339,14 @@ class NecLabApp:
                     ax.scatter(offset + peaks, values[peaks], color='crimson', s=20, zorder=5,
                                label=None if peak_legend_added else 'Peaks')
                     peak_legend_added = True
+
+                    if show_sccd:
+                        from peak_functions import compute_sccd_metrics, draw_sccd_metrics_overlay
+                        metrics = compute_sccd_metrics(values, peaks)
+                        if metrics and metrics['events']:
+                            draw_sccd_metrics_overlay(
+                                ax, offset, values, metrics, show_legend_labels=not sccd_legend_added)
+                            sccd_legend_added = True
 
             if show_smoothing_points and smoothing_points_n is not None and n >= 2:
                 from peak_functions import convex_envelope_lowest_points
@@ -2381,10 +2416,13 @@ class NecLabApp:
                                   edgecolor=color, linewidth=0.8, alpha=0.9))
             ax.set_ylim(y_bottom, y_top)
 
-        if peak_legend_added or baseline_legend_added or auc_annotations:
-            # Lower right, since the AUC boxed labels (when shown) sit at
+        if peak_legend_added or baseline_legend_added or auc_annotations or sccd_legend_added:
+            # SCCD's IEI brackets occupy the bottom of the plot, so push the
+            # legend to the top when that overlay is on; otherwise keep it
+            # at the bottom, since the AUC boxed labels (when shown) sit at
             # the top of the plot and would collide with an upper legend.
-            ax.legend(fontsize=7, loc='lower right')
+            legend_loc = 'upper right' if sccd_legend_added else 'lower right'
+            ax.legend(fontsize=7, loc=legend_loc)
 
         # Margins are computed in inches (not tight_layout's auto-padding or a
         # fixed fraction) so the axes always use as much of the panel as

@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.optimize import curve_fit
 from sklearn import svm
 from sklearn.linear_model import Lasso, ElasticNet
 from sklearn.covariance import EllipticEnvelope
@@ -1046,3 +1047,213 @@ def save_peaks_csv(peaks, time_data, signal_data):
             df.to_csv(filename, index=False)
         from tkinter import messagebox
         messagebox.showinfo("Success", f"Peaks saved to {os.path.basename(filename)}")
+
+
+def compute_sccd_metrics(values, peaks, decay_fraction=0.6):
+    """
+    Compute the single-cell calcium dynamics (SCCD) metrics of Patel et al.
+    2015 (J. Neurosci. Methods 243:26-38), Fig. 3A, from an already-detected
+    list of peak indices:
+        a) amplitude          - peak value minus the value at event onset
+        b) inter-event-interval (IEI) - spacing between consecutive onsets
+        c) resting fluorescence - mean of the signal outside every event
+        d) rise time           - onset -> first crossing of half amplitude
+        e) fall time            - tau of an exponential decay fit to the
+                                   decay phase; falls back to the
+                                   interpolated time-to-half-amplitude if the
+                                   fit is poor (R^2 < 0.9)
+
+    There is no explicit sampling rate/time axis for the generic column data
+    this operates on, so all durations (rise time, fall time, IEI) are
+    reported in samples, matching the sample-index x-axis already used
+    elsewhere in the app (e.g. the peak scatter on the Multiple Files plot).
+
+    Args:
+        values: 1-D array-like signal.
+        peaks: iterable of peak sample indices (as returned by compute_peaks).
+        decay_fraction: fraction of the gap to the next onset (or to the end
+            of the series, for the last event) treated as "still decaying"
+            and excluded, together with the event itself, when estimating
+            resting fluorescence (c).
+
+    Returns:
+        dict with 'resting_mean', 'resting_std', 'iei' (np.ndarray) and
+        'events' (list of dicts with onset_i, peak_i, onset_val, peak_val,
+        amplitude, rise_time, fall_time, r2), or None if no peaks were given.
+    """
+    values = np.asarray(values, dtype=float)
+    n = len(values)
+    peaks = sorted(set(int(p) for p in peaks if 0 <= int(p) < n))
+    if not peaks:
+        return None
+
+    # Onset = the local trough immediately before the rise: walking
+    # backward from the peak, the signal descends (bar noise) until the
+    # base of the rise, then fluctuates around baseline. That trough is
+    # found without needing to know the recording's sampling rate or scan
+    # the whole preceding gap (which would just find the deepest noise dip
+    # anywhere in it). The walk is done on a lightly smoothed copy and
+    # tracks a running minimum, tolerating small backward up-ticks (within
+    # the segment's own noise level) so a single noisy sample on the rising
+    # edge doesn't stop it prematurely; it only stops once the smoothed
+    # signal has clearly turned back up. The reported onset index/value
+    # still come from the raw signal.
+    def _find_onset(seg_start, p_i):
+        seg = values[seg_start:p_i + 1]
+        m = len(seg)
+        if m < 3:
+            return seg_start
+        win = min(9, m)
+        if win > 1 and win % 2 == 0:
+            win -= 1
+        if win > 1:
+            # Edge-padded (not zero-padded) so the smoothed value right at
+            # the peak isn't pulled down by an implicit zero outside the
+            # window - that would falsely look like a downturn and stop
+            # the backward walk immediately, at the peak itself.
+            pad = win // 2
+            padded = np.pad(seg, (pad, pad), mode='edge')
+            kernel = np.ones(win) / win
+            smoothed = np.convolve(padded, kernel, mode='valid')
+        else:
+            smoothed = seg
+        diffs = np.diff(smoothed)
+        tol = 1.5 * float(np.std(diffs)) if len(diffs) > 1 else 0.0
+        i = m - 1
+        running_min = smoothed[i]
+        best_i = i
+        while i > 0:
+            i -= 1
+            if smoothed[i] <= running_min:
+                running_min = smoothed[i]
+                best_i = i
+            elif smoothed[i] > running_min + tol:
+                break
+        return seg_start + best_i
+
+    events = []
+    prev_boundary = 0
+    for p_i in peaks:
+        seg_start = prev_boundary if prev_boundary < p_i else max(0, p_i - 1)
+        onset_i = _find_onset(seg_start, p_i)
+        events.append({'onset_i': onset_i, 'peak_i': p_i})
+        prev_boundary = p_i
+
+    # c) Resting fluorescence: mean of the signal outside every event window.
+    quiet_mask = np.ones(n, dtype=bool)
+    for k, e in enumerate(events):
+        onset_i = e['onset_i']
+        next_onset_i = events[k + 1]['onset_i'] if k + 1 < len(events) else n
+        excl_end = min(n, onset_i + max(1, int(decay_fraction * max(1, next_onset_i - onset_i))))
+        quiet_mask[onset_i:excl_end] = False
+    resting_vals = values[quiet_mask] if quiet_mask.any() else values
+    resting_mean = float(resting_vals.mean())
+    resting_std = float(resting_vals.std())
+
+    def exp_decay(tt, amp, tau, c):
+        return amp * np.exp(-tt / tau) + c
+
+    for k, e in enumerate(events):
+        onset_i, p_i = e['onset_i'], e['peak_i']
+        onset_val, peak_val = float(values[onset_i]), float(values[p_i])
+        amplitude = peak_val - onset_val
+        half_val = onset_val + amplitude / 2.0
+
+        # d) rise time
+        rise_seg = values[onset_i:p_i + 1]
+        cross = np.where(rise_seg >= half_val)[0]
+        rise_time = float(cross[0]) if len(cross) else float(p_i - onset_i)
+
+        # e) fall time: exponential fit on the decay phase, peak -> next
+        # onset (or end of series), with an R^2 >= 0.9 acceptance threshold.
+        next_onset_i = events[k + 1]['onset_i'] if k + 1 < len(events) else n
+        decay_end = min(n, max(p_i + 2, next_onset_i))
+        tt_decay = np.arange(decay_end - p_i, dtype=float)
+        y_decay = values[p_i:decay_end]
+
+        fall_time, r2 = None, None
+        if len(tt_decay) >= 4 and amplitude > 0:
+            try:
+                popt, _ = curve_fit(
+                    exp_decay, tt_decay, y_decay,
+                    p0=[amplitude, max(1.0, len(tt_decay) / 4), resting_mean],
+                    bounds=([0, 0.1, -np.inf], [np.inf, len(tt_decay) * 5, np.inf]),
+                    maxfev=5000)
+                y_fit = exp_decay(tt_decay, *popt)
+                ss_res = np.sum((y_decay - y_fit) ** 2)
+                ss_tot = np.sum((y_decay - y_decay.mean()) ** 2)
+                r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+                if r2 >= 0.9:
+                    fall_time = abs(popt[1])
+            except Exception:
+                pass
+        if fall_time is None:
+            below = np.where(y_decay <= half_val)[0]
+            fall_time = float(below[0]) if len(below) else float(decay_end - p_i)
+
+        e.update(onset_val=onset_val, peak_val=peak_val, amplitude=amplitude,
+                 rise_time=rise_time, fall_time=float(fall_time), r2=r2)
+
+    onset_indices = np.array([e['onset_i'] for e in events], dtype=float)
+    iei = np.diff(onset_indices)
+
+    return {'resting_mean': resting_mean, 'resting_std': resting_std,
+            'events': events, 'iei': iei}
+
+
+def draw_sccd_metrics_overlay(ax, x_offset, values, metrics, show_legend_labels):
+    """Draw amplitude (a), inter-event-interval (b), resting fluorescence
+    (c), rise time (d) and fall time (e) directly onto an already-plotted
+    trace segment of the Multiple Files top plot -- the same axes the peaks
+    scatter is drawn on, at the segment's own x_offset (each sheet is
+    plotted side by side on one shared x-axis), instead of a separate
+    window. The IEI bracket row is drawn at the segment's own data minimum
+    rather than below it, so it never needs the axes' y-limits to grow -
+    the plot keeps whatever vertical space it already had.
+
+    Args:
+        ax: the Multiple Files top plot's axes (matplotlib Axes).
+        x_offset: this sheet segment's starting x position on that axes.
+        values: this sheet's 1-D signal.
+        metrics: return value of compute_sccd_metrics for this segment.
+        show_legend_labels: only the first sheet segment sets legend labels,
+            so the legend doesn't repeat one entry per sheet.
+    """
+    events = metrics['events']
+    resting_mean, resting_std = metrics['resting_mean'], metrics['resting_std']
+    n = len(values)
+
+    ax.fill_between([x_offset, x_offset + n], resting_mean - resting_std, resting_mean + resting_std,
+                     color='violet', alpha=0.18, zorder=0,
+                     label='c: resting fluorescence' if show_legend_labels else None)
+
+    # Sitting right at the segment's own minimum (not below it) keeps this
+    # inside whatever vertical space the trace already occupies, instead of
+    # forcing the axes taller and leaving a band of empty space under it.
+    y_iei = float(np.min(values))
+
+    for i, e in enumerate(events):
+        onset_i, p_i = e['onset_i'], e['peak_i']
+        ax.plot(x_offset + p_i, e['peak_val'], 'o', color='crimson', markersize=6, zorder=6,
+                 markeredgecolor='white', markeredgewidth=0.5,
+                 label='a: amplitude' if (show_legend_labels and i == 0) else None)
+        ax.plot([x_offset + p_i, x_offset + p_i], [e['onset_val'], e['peak_val']],
+                 color='crimson', linewidth=1, alpha=0.5, zorder=2)
+        ax.plot(x_offset + onset_i, e['onset_val'], '|', color='magenta', markersize=12,
+                 markeredgewidth=2, zorder=6,
+                 label='Event onset' if (show_legend_labels and i == 0) else None)
+
+        label = f"a={e['amplitude']:.2g}\nd={e['rise_time']:.0f} e={e['fall_time']:.0f}"
+        ax.annotate(label, (x_offset + p_i, e['peak_val']), textcoords="offset points",
+                     xytext=(4, 6), fontsize=6.5, color='black', ha='left', va='bottom',
+                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.85, lw=0.7))
+
+    onset_positions = [x_offset + e['onset_i'] for e in events]
+    for i in range(len(onset_positions) - 1):
+        x0, x1 = onset_positions[i], onset_positions[i + 1]
+        ax.annotate('', xy=(x1, y_iei), xytext=(x0, y_iei),
+                     arrowprops=dict(arrowstyle='<->', color='black', lw=1))
+        ax.text((x0 + x1) / 2, y_iei, f"b={x1 - x0:.0f}", ha='center', va='top',
+                 fontsize=6.5, fontweight='bold')
+
+    return y_iei

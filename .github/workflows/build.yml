@@ -10,6 +10,7 @@ on:
       - 'claude/visualizacion-datos-tab-menu-pxdelm'
       - 'claude/csv-xls-sheet-selection-54rlhx'
       - 'claude/signal-area-under-curve-y7bb41'
+      - 'claude/signal-analysis-calcs-dqb7l0'
   workflow_dispatch:  # allow manual runs from GitHub Actions UI
 
 jobs:
