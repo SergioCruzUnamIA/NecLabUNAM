@@ -1134,6 +1134,12 @@ class NecLabApp:
                                variable=self.multi_xls_show_smoothing_points_var,
                                command=self._on_multi_xls_smoothing_toggle)
             m.add_separator()
+            # Only meaningful once a Peak Finder method is actually selected
+            # (see _on_multi_xls_peak_method_change), since the amplitude/
+            # rise/fall/IEI metrics are computed from its detected peaks.
+            m.add_command(label="Show SCCD Metrics (a,b,c,d,e)...", state='disabled',
+                          command=self._open_multi_xls_sccd_metrics_window)
+            m.add_separator()
             m.add_checkbutton(label="Show Area Under Curve",
                                variable=self.multi_xls_show_auc_var,
                                command=self._on_multi_xls_show_auc_toggle)
@@ -1182,12 +1188,6 @@ class NecLabApp:
                           command=self._save_multi_xls_smoothed_data)
             m.add_command(label="Save Correlation Data...", state='disabled',
                           command=self._save_multi_xls_correlation_data)
-            m.add_separator()
-            # Only meaningful once a Peak Finder method is actually selected
-            # (see _on_multi_xls_peak_method_change), since the amplitude/
-            # rise/fall/IEI metrics are computed from its detected peaks.
-            m.add_command(label="Show SCCD Metrics (a,b,c,d,e)...", state='disabled',
-                          command=self._open_multi_xls_sccd_metrics_window)
 
         def build_datos_menu(m):
             m.add_command(label="Edit Classifications...",
@@ -1201,7 +1201,7 @@ class NecLabApp:
             m.add_command(label="Save Peaks CSV...", state='disabled',
                           command=self._save_multi_xls_peaks_csv)
 
-        add_tab_menu("View", build_vista_menu)
+        self.multi_xls_menu_vista = add_tab_menu("View", build_vista_menu)
         self.multi_xls_menu_grafica = add_tab_menu("Plot", build_grafica_menu)
         self.multi_xls_menu_datos = add_tab_menu("Data", build_datos_menu)
 
@@ -1985,7 +1985,7 @@ class NecLabApp:
         # peaks) - re-read the var since a cancelled parameter dialog above
         # may have reset it back to 'None'.
         sccd_state = 'normal' if self.multi_xls_peak_method_var.get() != 'None' else 'disabled'
-        self.multi_xls_menu_grafica.entryconfigure("Show SCCD Metrics (a,b,c,d,e)...", state=sccd_state)
+        self.multi_xls_menu_vista.entryconfigure("Show SCCD Metrics (a,b,c,d,e)...", state=sccd_state)
 
     def _open_multi_xls_smoothing_points_dialog(self):
         """Dialog to adjust the number of points used by the Convex
