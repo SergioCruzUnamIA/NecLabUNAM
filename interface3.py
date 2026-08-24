@@ -1182,6 +1182,12 @@ class NecLabApp:
                           command=self._save_multi_xls_smoothed_data)
             m.add_command(label="Save Correlation Data...", state='disabled',
                           command=self._save_multi_xls_correlation_data)
+            m.add_separator()
+            # Only meaningful once a Peak Finder method is actually selected
+            # (see _on_multi_xls_peak_method_change), since the amplitude/
+            # rise/fall/IEI metrics are computed from its detected peaks.
+            m.add_command(label="Show SCCD Metrics (a,b,c,d,e)...", state='disabled',
+                          command=self._open_multi_xls_sccd_metrics_window)
 
         def build_datos_menu(m):
             m.add_command(label="Edit Classifications...",
@@ -1973,6 +1979,13 @@ class NecLabApp:
                         self.multi_xls_peak_method_params[method] = new_params
         if self.multi_xls_current_index is not None:
             self._draw_multi_xls_plot(self.multi_xls_current_index)
+
+        # SCCD Metrics needs an actually-selected peak finder method (its
+        # amplitude/rise/fall/IEI values come from that method's detected
+        # peaks) - re-read the var since a cancelled parameter dialog above
+        # may have reset it back to 'None'.
+        sccd_state = 'normal' if self.multi_xls_peak_method_var.get() != 'None' else 'disabled'
+        self.multi_xls_menu_grafica.entryconfigure("Show SCCD Metrics (a,b,c,d,e)...", state=sccd_state)
 
     def _open_multi_xls_smoothing_points_dialog(self):
         """Dialog to adjust the number of points used by the Convex
@@ -2963,6 +2976,32 @@ class NecLabApp:
         else:
             df_peaks.to_csv(filename, index=False)
         messagebox.showinfo("Saved", f"Peak data saved to:\n{filename}")
+
+    def _open_multi_xls_sccd_metrics_window(self):
+        """Open the SCCD Metrics window (amplitude, inter-event-interval,
+        resting fluorescence, rise time and fall time, all plotted directly
+        on the trace) for the column currently shown in the top plot, using
+        the currently selected Peak Finder method/parameters. The menu item
+        that calls this is kept disabled until a real method is chosen (see
+        _on_multi_xls_peak_method_change), so these guards are a defensive
+        backstop rather than the primary gate."""
+        method = self.multi_xls_peak_method_var.get()
+        if method == 'None':
+            messagebox.showwarning("No Peak Method", "Select a peak finder method first.")
+            return
+        if self.multi_xls_current_column is None:
+            messagebox.showwarning("No Data", "Load data and select a column first.")
+            return
+        params = self.multi_xls_peak_method_params.get(method)
+        if params is None:
+            messagebox.showwarning("No Parameters",
+                                   "Choose the peak finder method on a column first to set parameters.")
+            return
+
+        from peak_functions import show_sccd_metrics_window
+        series = self._compute_multi_xls_series(self.multi_xls_current_column)
+        display_label = self.multi_xls_column_listbox.get(self.multi_xls_current_index)
+        show_sccd_metrics_window(self.root, series, method, params, display_label)
 
     def _save_multi_xls_classifications(self):
         """Save, for each data column and each loaded sheet, the chosen
