@@ -27,9 +27,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
+from neclab_core import analysis as core_analysis
 from neclab_core import correlation, events, normalization, segmentation, signals, stages, variability
 from neclab_core.validation import ValidationError
-from neclab_core.project import OUT_OF_DATE
+from neclab_core.project import DONE, LOADED, OUT_OF_DATE
 
 # Detection mode -> (label, split method passed to neclab_core.segmentation).
 _DETECTION_MODES = {
@@ -144,8 +145,12 @@ class VariabilityAnalysisWindow:
         self.norm_description = "raw"
         self.lowest_points_used = {}  # {column: frame indices of the lowest points used}
         self.events_df = None       # peaks of the normalized signals (stage 6 events), or None
-        self.peak_method = events.NO_PEAKS
-        self.peak_params = {}       # {method: params} last used for each peak method
+        self.analysis_result = None      # neclab_core.analysis.AnalysisResult behind norm_df/events_df
+        self.current_corr_matrix = None  # correlation of the normalized signals (stage 7), or None
+        self.current_method = None       # its method, for display ("Pearson")
+        self.corr_window = None
+        self._analyzer = core_analysis.Analyzer()   # stage 6, with each cell's peaks cached
+        self._load_analysis_settings()
         self.current_fig = None
 
         self.create_window()
@@ -171,7 +176,7 @@ class VariabilityAnalysisWindow:
                 self.info_label.config(text=f"Loaded {source}")
             self.update_display()
         self._auto_signals = True
-        self._update_signals_stage()   # restored selection: only if stage 5 doesn't already match
+        self._update_pipeline()   # restored selection: only the stages that don't already match
 
     # ------------------------------------------------------------ helpers
 
@@ -217,6 +222,7 @@ class VariabilityAnalysisWindow:
         self.mask = mask
         self.cell_pix = segmentation.cell_pixels(labels)
         self._signal_cache = {}
+        self._analyzer.clear()
         self.detection_info = info
         self.selected_clusters = []
         self.cluster_colors = self._generate_cluster_colors(self.cell_id_list)
@@ -231,7 +237,9 @@ class VariabilityAnalysisWindow:
         self.signals_df = None
         self.norm_df = None
         self.norm_description = "raw"
+        self.lowest_points_used = {}
         self.events_df = None
+        self.analysis_result = None
         self.current_corr_matrix = None
         self.current_method = None
 
@@ -560,6 +568,7 @@ class VariabilityAnalysisWindow:
             return
         self.img_array = loaded.data
         self._signal_cache = {}
+        self._analyzer.clear()
         if self.on_recording_attached is not None:
             self.on_recording_attached(loaded.data, loaded.path, loaded.metadata)
         elif self.project is not None:
@@ -579,7 +588,7 @@ class VariabilityAnalysisWindow:
         self._update_title()
         self.info_label.config(text=msg)
         self.update_display()
-        self._update_signals_stage()   # signals of the cells already selected
+        self._update_pipeline()   # stages 5-7 of the cells already selected
 
     def load_map(self):
         """Start from a saved variability map (stage 2)."""
@@ -777,7 +786,7 @@ class VariabilityAnalysisWindow:
 
     def update_selection_list(self):
         self._report_selection()
-        self._update_signals_stage()
+        self._update_pipeline()
         self.selected_listbox.delete(0, tk.END)
         for cid in self._selected_sorted():
             self.selected_listbox.insert(tk.END, f"Cell {cid} ({len(self.cell_pix[cid])} pts)")
@@ -870,6 +879,134 @@ class VariabilityAnalysisWindow:
             return
         self._report_signals(df, ids)
 
+    # ---- stages 6-7 follow the selection too
+
+    def _load_analysis_settings(self):
+        """Stage 6 and 7 settings: those the project was saved with, else
+        the defaults (no normalization, no peaks, Pearson)."""
+        rec = self.project.get("analysis") if self.project is not None else None
+        self.analysis_settings = core_analysis.settings_from_params(rec.params if rec is not None else None)
+        self.peak_params = {}       # {method: params} last used for each peak method
+        if self.analysis_settings["peak_method"] in events.PEAK_METHODS:
+            self.peak_params[self.analysis_settings["peak_method"]] = dict(self.analysis_settings["peak_params"])
+        rec = self.project.get("correlation") if self.project is not None else None
+        method = str(rec.params.get("method") or "").lower() if rec is not None else ""
+        self.corr_method = method if method in correlation.CORRELATION_METHODS else "pearson"
+
+    def _update_pipeline(self):
+        """Stages 5, 6 and 7 follow the selection (see _update_signals_stage
+        and _update_analysis_stages)."""
+        self._update_signals_stage()
+        self._update_analysis_stages()
+
+    def _needs_update(self, key):
+        """True if stage `key` should be (re)computed: not run, out of date
+        or missing. A stage that is up to date (computed or loaded) is kept."""
+        return self.project is not None and self.project.status(key) not in (DONE, LOADED)
+
+    def _clear_computed(self, key):
+        rec = self.project.get(key) if self.project is not None else None
+        if rec is not None and rec.origin == "computed":
+            self.project.clear_stage(key)
+
+    def _update_analysis_stages(self):
+        """Stages 6 (normalization & events) and 7 (correlation) follow the
+        selection, with the last settings chosen in the correlation window
+        (or the project's): whenever stage 5 changes they are recomputed
+        and recorded, and an open correlation window is redrawn. Stages
+        that are still up to date (e.g. a project just reopened) are left
+        as they are. With no cells selected both are cleared; with a
+        single cell there is no correlation, so stage 7 is cleared."""
+        if not self._auto_signals or self.labels is None or self.img_array is None:
+            return
+        window_open = self._corr_window_open()
+        if not self.selected_clusters:
+            self.signals_df = self.norm_df = self.events_df = None
+            self.lowest_points_used = {}
+            self.current_corr_matrix = None
+            self._clear_computed("analysis")
+            self._clear_computed("correlation")
+            if window_open:
+                self._redraw_correlation()
+            return
+        need_analysis = self._needs_update("analysis")
+        need_corr = need_analysis or self._needs_update("correlation")
+        if not (need_analysis or need_corr or window_open):
+            return
+        if not self._compute_results():
+            return
+        self._record_results(analysis=need_analysis, corr=need_corr)
+        if window_open:
+            self._redraw_correlation()
+
+    def _note(self, text):
+        """A message about the automatic stages, in the window's info line."""
+        self.info_label.config(text=text)
+
+    def _compute_results(self, interactive=False):
+        """Signals of the selected cells, their normalization and events
+        (stage 6) and correlation (stage 7), in memory. `interactive`:
+        problems are shown in dialogs (the correlation window's buttons)
+        instead of the info line. False if the signals can't be extracted."""
+        try:
+            self.signals_df = self._extract_selected()
+        except Exception as e:      # e.g. recording and cells don't match
+            self.signals_df = None
+            self._note(f"Could not extract signals: {e}")
+            return False
+        self._run_analysis(interactive)
+        self._compute_correlation()
+        return True
+
+    def _run_analysis(self, interactive=False):
+        """Stage 6 of self.signals_df with self.analysis_settings. If a
+        signal can't be normalized (e.g. its lowest-points baseline reaches
+        zero), the raw signals are used and the user is told."""
+        parent = self.corr_window if self._corr_window_open() else self.window
+        try:
+            result = self._analyzer.run(self.signals_df, self.analysis_settings)
+        except ValueError as e:
+            raw = {**self.analysis_settings, "method": "none", "smooth": False, "subtract": False}
+            if interactive:
+                messagebox.showwarning("Can't Normalize", f"{e}\n\nShowing the raw signals instead.",
+                                       parent=parent)
+                self.analysis_settings = raw
+                self._set_controls_from_settings()
+            else:
+                self._note(f"Can't normalize ({e}): using the raw signals")
+            result = self._analyzer.run(self.signals_df, raw)
+        if result.events_error:
+            if interactive:
+                messagebox.showwarning("Can't Detect Peaks", result.events_error, parent=parent)
+            else:
+                self._note(result.events_error)
+        self.analysis_result = result
+        self.norm_df = result.norm_df
+        self.events_df = result.events_df
+        self.norm_description = result.description
+        self.lowest_points_used = result.lowest_points_used
+        self._update_peak_label()
+
+    def _compute_correlation(self):
+        """Stage 7: correlation of the normalized signals (2+ cells)."""
+        if self.norm_df is not None and self.norm_df.shape[1] >= 2:
+            self.current_corr_matrix = correlation.correlation_matrix(self.norm_df, self.corr_method)
+            self.current_method = self.corr_method.capitalize()
+        else:
+            self.current_corr_matrix = None
+
+    def _record_results(self, analysis=True, corr=True):
+        """Record stage 6 and/or 7 from the results in memory."""
+        if self.project is None or self.signals_df is None:
+            return
+        if analysis:
+            self._report("analysis", self.analysis_result.items, params=self.analysis_result.params)
+        if corr:
+            if self.current_corr_matrix is not None:
+                self._report_correlation(self.current_corr_matrix, self.corr_method)
+            else:
+                self._clear_computed("correlation")
+
     def _report_correlation(self, corr_matrix, method):
         self._report("correlation", {"correlation": corr_matrix},
                      params={"method": method.lower(), "signals": self.norm_description,
@@ -935,8 +1072,8 @@ class VariabilityAnalysisWindow:
         control_frame = tk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=(0, 10))
 
-        info_text = f"Analyzing correlations between {len(self.selected_clusters)} selected cells"
-        tk.Label(control_frame, text=info_text, font=("Arial", 12, "bold")).pack(pady=5)
+        self.corr_info_label = tk.Label(control_frame, text="", font=("Arial", 12, "bold"))
+        self.corr_info_label.pack(pady=5)
 
         corr_button_frame = tk.Frame(control_frame)
         corr_button_frame.pack(fill=tk.X, pady=5)
@@ -961,24 +1098,13 @@ class VariabilityAnalysisWindow:
         tk.Button(corr_button_frame, text="Generate Report",
                   command=self.generate_report).pack(side=tk.LEFT, padx=5)
 
-        # Normalization (stage 6) applied before computing correlations
+        # Normalization (stage 6) applied before computing correlations. The
+        # controls start from the last settings applied (or the project's).
         norm_frame = tk.Frame(control_frame)
         norm_frame.pack(fill=tk.X, pady=5)
-        method, points, smooth, subtract = "none", normalization.DEFAULT_LOWEST_POINTS, False, False
-        analysis = self.project.get("analysis") if self.project is not None else None
-        saved_method = analysis.params.get("method") if analysis is not None else None
-        if saved_method == normalization.LEGACY_SUBTRACT_METHOD:      # saved by an earlier version
-            saved_method, subtract = "none", True
-        if saved_method in normalization.NORMALIZATION_METHODS:
-            method = saved_method
-            smoothing_points = int(analysis.params.get("smoothing_points") or 0)
-            smooth = smoothing_points > 0
-            subtract = subtract or bool(analysis.params.get("subtract_baseline"))
-            points = int(analysis.params.get("lowest_points") or smoothing_points or points)
-        saved_peaks = analysis.params.get("peak_method") if analysis is not None else None
-        if saved_peaks in events.PEAK_METHODS:
-            self.peak_method = saved_peaks
-            self.peak_params[saved_peaks] = dict(analysis.params.get("peak_params") or {})
+        settings = self.analysis_settings
+        method, points = settings["method"], int(settings["lowest_points"])
+        smooth, subtract = bool(settings["smooth"]), bool(settings["subtract"])
         self._norm_keys = list(normalization.NORMALIZATION_METHODS)
         self._norm_labels = list(normalization.NORMALIZATION_METHODS.values())
         tk.Label(norm_frame, text="Normalization:").pack(side=tk.LEFT, padx=(0, 5))
@@ -1006,7 +1132,7 @@ class VariabilityAnalysisWindow:
         peak_frame = tk.Frame(control_frame)
         peak_frame.pack(fill=tk.X, pady=5)
         tk.Label(peak_frame, text="Peaks:").pack(side=tk.LEFT, padx=(0, 5))
-        self.peak_method_var = tk.StringVar(value=self.peak_method)
+        self.peak_method_var = tk.StringVar(value=settings["peak_method"])
         peak_box = ttk.Combobox(peak_frame, textvariable=self.peak_method_var,
                                 values=[events.NO_PEAKS] + list(events.PEAK_METHODS),
                                 state='readonly', width=24)
@@ -1023,91 +1149,57 @@ class VariabilityAnalysisWindow:
         self.corr_viz_frame = tk.Frame(main_frame)
         self.corr_viz_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.show_initial_time_series()
+        # Stages 5-7 normally already follow the selection; compute them in
+        # memory for the plots, and record those that aren't up to date.
+        if self._compute_results(interactive=True):
+            need_analysis = self._needs_update("analysis")
+            self._record_results(analysis=need_analysis,
+                                 corr=need_analysis or self._needs_update("correlation"))
+        self._redraw_correlation()
 
     @property
     def cluster_labels(self):
         return [f"Cell {signals.parse_cell_column(c)}" for c in self.signals_df.columns]
 
-    # ---- normalization (stage 6)
+    # ---- normalization & events (stage 6): the window's controls
 
-    def _norm_settings(self):
-        """(method key, smoothing points or None, lowest points, subtract
-        baseline) from the controls. Smoothing is ignored when the baseline
-        is subtracted, or with "Divide by lowest-points baseline": either
-        already removes that same baseline."""
-        label = self.norm_method_var.get() if hasattr(self, 'norm_method_var') else None
-        method = self._norm_keys[self._norm_labels.index(label)] if label in getattr(self, '_norm_labels', []) else "none"
+    def _corr_window_open(self):
         try:
-            points = int(self.norm_points_var.get()) if hasattr(self, 'norm_points_var') else 0
+            return self.corr_window is not None and bool(self.corr_window.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def _read_controls(self):
+        """Settings from the correlation window's controls into
+        self.analysis_settings (on Apply or when a peak method is chosen)."""
+        if not self._corr_window_open():
+            return
+        label = self.norm_method_var.get()
+        method = self._norm_keys[self._norm_labels.index(label)] if label in self._norm_labels else "none"
+        try:
+            points = int(self.norm_points_var.get())
         except (tk.TclError, ValueError):
             points = 0
         if points < 2:
             points = normalization.DEFAULT_LOWEST_POINTS
-        smooth = bool(self.norm_smooth_var.get()) if hasattr(self, 'norm_smooth_var') else False
-        subtract = bool(self.norm_subtract_var.get()) if hasattr(self, 'norm_subtract_var') else False
-        smoothing = (points if smooth and not subtract and method not in normalization.LOWEST_POINTS_METHODS
-                     else None)
-        return method, smoothing, points, subtract
+        peak_method = self.peak_method_var.get()
+        if peak_method not in events.PEAK_METHODS:
+            peak_method = events.NO_PEAKS
+        self.analysis_settings = {
+            "method": method, "lowest_points": points,
+            "smooth": bool(self.norm_smooth_var.get()), "subtract": bool(self.norm_subtract_var.get()),
+            "peak_method": peak_method, "peak_params": dict(self.peak_params.get(peak_method, {})),
+        }
 
-    def _normalize(self):
-        """Normalize the selected cells' signals with the current settings
-        (neclab_core.normalization) and record stage 6. With no
-        normalization and no smoothing the raw signals are used as is and
-        stage 6 is cleared. If a signal can't be normalized (e.g. its
-        lowest-points baseline reaches zero), say so and use raw values."""
-        method, smoothing, points, subtract = self._norm_settings()
-        self.lowest_points_used = {}
-        if not normalization.is_identity(method, smoothing, subtract):
-            try:
-                self.norm_df = normalization.normalize_signals(self.signals_df, method, smoothing, points,
-                                                               subtract_baseline=subtract)
-            except ValueError as e:
-                messagebox.showwarning("Can't Normalize", f"{e}\n\nShowing the raw signals instead.",
-                                       parent=self.window)
-                self.norm_method_var.set(normalization.NORMALIZATION_METHODS["none"])
-                self.norm_smooth_var.set(False)
-                self.norm_subtract_var.set(False)
-                method, smoothing, subtract = "none", None, False
-        identity = normalization.is_identity(method, smoothing, subtract)
-        if identity:
-            self.norm_df = self.signals_df
-        self._detect_events()
-        self._report_analysis(identity, {"method": method, "smoothing_points": smoothing or 0,
-                                         "lowest_points": points, "subtract_baseline": subtract})
-        if identity:
-            self.norm_description = "raw"
+    def _set_controls_from_settings(self):
+        if not self._corr_window_open():
             return
-
-        descriptions = []
-        if method == "lowest_points":
-            descriptions.append(f"divided by lowest-points baseline ({points} points)")
-        elif method != "none":
-            descriptions.append(normalization.NORMALIZATION_METHODS[method])
-        if subtract:
-            descriptions.append(f"lowest-points baseline subtracted ({points} points)")
-        if smoothing:
-            descriptions.append(f"smoothed ({smoothing} lowest points)")
-        self.norm_description = ", ".join(descriptions)
-        # Positions of the lowest points used, to mark them on the plot: on
-        # the normalized (before subtraction/smoothing) signal when the
-        # baseline is subtracted or smoothed, on the raw signal when it only
-        # divides.
-        lowest_method = method in normalization.LOWEST_POINTS_METHODS
-        if lowest_method or smoothing or subtract:
-            base = (self.signals_df if lowest_method and not subtract
-                    else normalization.normalize_signals(self.signals_df, method, None, points))
-            for col in base.columns:
-                if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:
-                    self.lowest_points_used[col] = normalization.lowest_points_baseline(base[col], points)[1]
-
-    # ---- events (stage 6)
-
-    def _peak_settings(self):
-        method = self.peak_method_var.get() if hasattr(self, 'peak_method_var') else self.peak_method
-        if method not in events.PEAK_METHODS:
-            return events.NO_PEAKS, {}
-        return method, {**events.default_params(method), **self.peak_params.get(method, {})}
+        s = self.analysis_settings
+        self.norm_method_var.set(normalization.NORMALIZATION_METHODS[s["method"]])
+        self.norm_points_var.set(int(s["lowest_points"]))
+        self.norm_smooth_var.set(bool(s["smooth"]))
+        self.norm_subtract_var.set(bool(s["subtract"]))
+        self.peak_method_var.set(s["peak_method"])
 
     def _on_peak_method_change(self, ask=False):
         """A peak method was chosen (or Parameters... clicked): ask for its
@@ -1122,77 +1214,62 @@ class VariabilityAnalysisWindow:
             if new_params:
                 self.peak_params[method] = new_params
             elif method not in self.peak_params:   # cancelled before ever choosing parameters
-                self.peak_method_var.set(self.peak_method)
+                self.peak_method_var.set(self.analysis_settings["peak_method"])
                 return
         self.apply_normalization()
 
-    def _detect_events(self):
-        """Peaks of the normalized signals with the current peak method."""
-        method, params = self._peak_settings()
-        self.peak_method = method
-        self.events_df = None
-        if method != events.NO_PEAKS and self.norm_df is not None and not self.norm_df.empty:
-            try:
-                self.events_df = events.detect_events(self.norm_df, method, params)
-            except Exception as e:
-                messagebox.showwarning("Can't Detect Peaks", f"{method} failed:\n{e}",
-                                       parent=getattr(self, 'corr_window', None) or self.window)
+    def _update_peak_label(self):
         label = getattr(self, 'peak_info_label', None)
-        if label is not None:
-            if self.events_df is None:
-                label.config(text="")
-            else:
-                n_cells = self.events_df["cell_id"].nunique() if len(self.events_df) else 0
-                label.config(text=f"{len(self.events_df)} peaks in {n_cells} of "
-                                  f"{self.norm_df.shape[1]} cells")
-
-    def _report_analysis(self, identity, norm_params):
-        """Record stage 6: the normalized signals (unless they are the raw
-        ones) and the events (if a peak method is chosen); cleared when
-        there is neither."""
-        if self.project is None:
+        if label is None or not self._corr_window_open():
             return
-        items, params = {}, dict(norm_params)
-        if not identity:
-            items["normalized_signals"] = self.norm_df
-        if self.events_df is not None:
-            items["events"] = self.events_df
-            params["peak_method"] = self.peak_method
-            params["peak_params"] = self._peak_settings()[1]
-            params["peaks_on"] = "raw signals" if identity else "normalized signals"
-        if items:
-            self._report("analysis", items, params=params)
+        if self.events_df is None:
+            label.config(text="")
         else:
-            self.project.clear_stage("analysis")
+            n_cells = self.events_df["cell_id"].nunique() if len(self.events_df) else 0
+            label.config(text=f"{len(self.events_df)} peaks in {n_cells} of {self.norm_df.shape[1]} cells")
 
     def export_events(self):
         """Save the detected peaks (stage 6 events format)."""
         if self.events_df is None:
             messagebox.showwarning("No Events", "Choose a peak method (Peaks) first.",
-                                   parent=getattr(self, 'corr_window', None) or self.window)
+                                   parent=self.corr_window if self._corr_window_open() else self.window)
             return
         self._save("events", self.events_df, "Export Events", initialfile="events.csv")
 
     def _redraw_correlation(self):
-        """Redraw the current view (e.g. after toggling 'Show lowest points')."""
-        if self.signals_df is None:
+        """Redraw the correlation window from the results in memory (after
+        a selection change, Apply, a correlation button, or toggling
+        'Show lowest points' / 'Show peaks')."""
+        if not self._corr_window_open():
             return
-        method = getattr(self, 'current_method', None)
-        if getattr(self, 'current_corr_matrix', None) is not None and method and self.norm_df.shape[1] > 1:
-            self.update_correlation_display(self.current_corr_matrix, method)
+        n = len(self.selected_clusters)
+        self.corr_info_label.config(text=f"Analyzing correlations between {n} selected cells")
+        self._update_peak_label()
+        if self.signals_df is None or self.norm_df is None or self.norm_df.shape[1] == 0:
+            for widget in self.corr_viz_frame.winfo_children():
+                widget.destroy()
+            if getattr(self, 'current_corr_fig', None) is not None:
+                plt.close(self.current_corr_fig)
+                self.current_corr_fig = None
+            tk.Label(self.corr_viz_frame, fg='gray', font=("Arial", 12),
+                     text="No cells selected.\n\nSelect cells in the cell detection window "
+                          "(click, drag or Select All): this window follows the selection.").pack(expand=True)
+            return
+        if self.current_corr_matrix is not None:
+            self.update_correlation_display(self.current_corr_matrix, self.current_method)
         else:
-            self.show_initial_time_series(recompute_signals=False)
+            self.show_initial_time_series()
 
     def apply_normalization(self):
-        """Re-normalize and recompute the current correlation."""
+        """Apply the window's normalization and peak settings: recompute
+        stages 6 and 7 and record them."""
         if self.signals_df is None:
             return
-        self._normalize()
-        method = (getattr(self, 'current_method', None) or 'pearson').lower()
-        if self.norm_df.shape[1] > 1:
-            self.calculate_correlation(method)
-        else:
-            self.show_initial_time_series(recompute_signals=False)
+        self._read_controls()
+        self._run_analysis(interactive=True)
+        self._compute_correlation()
+        self._record_results(analysis=True, corr=True)
+        self._redraw_correlation()
 
     def _plot_signals(self, ax):
         show_points = bool(getattr(self, 'norm_show_points_var', None) and self.norm_show_points_var.get())
@@ -1217,7 +1294,7 @@ class VariabilityAnalysisWindow:
                 peaks_labelled = True
         title = f'Time Series of Selected Cells ({self.norm_description})'
         if self.events_df is not None:
-            title += f' - {len(self.events_df)} peaks ({self.peak_method})'
+            title += f' - {len(self.events_df)} peaks ({self.analysis_result.settings["peak_method"]})'
         ax.set_title(title)
         ax.set_xlabel('Frame')
         ax.set_ylabel('Average Intensity' if self.norm_description == "raw" else 'Normalized value')
@@ -1248,36 +1325,27 @@ class VariabilityAnalysisWindow:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.current_corr_fig = fig
 
-    def show_initial_time_series(self, recompute_signals=True):
-        """Signals of the selected cells + a preliminary Pearson matrix."""
-        if recompute_signals or self.signals_df is None:
-            self.signals_df = self._selected_signals()
-            self._normalize()
-
+    def show_initial_time_series(self):
+        """Signals of the selected cells, when there are too few for a correlation."""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
         self._plot_signals(ax1)
         ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-
-        if self.norm_df.shape[1] > 1:
-            corr_matrix = correlation.correlation_matrix(self.norm_df, 'pearson')
-            self._plot_corr_matrix(ax2, corr_matrix, 'Preliminary Correlation Matrix (Pearson)')
-            self.current_corr_matrix = corr_matrix
-            self.current_method = 'Pearson'
-            self._report_correlation(corr_matrix, 'pearson')
-        else:
-            ax2.text(0.5, 0.5, 'Select at least 2 cells\nfor correlation analysis',
-                     ha='center', va='center', transform=ax2.transAxes)
-            ax2.set_title('Correlation Matrix')
-
+        ax2.text(0.5, 0.5, 'Select at least 2 cells\nfor correlation analysis',
+                 ha='center', va='center', transform=ax2.transAxes)
+        ax2.set_title('Correlation Matrix')
         self._show_corr_figure(fig)
 
     def calculate_correlation(self, method):
-        if self.signals_df is None or self.signals_df.shape[1] < 2:
-            messagebox.showwarning("Warning", "You need at least 2 selected cells")
+        """A correlation button: use `method` from now on (also when the
+        selection changes), record stage 7 and redraw."""
+        if self.norm_df is None or self.norm_df.shape[1] < 2:
+            messagebox.showwarning("Warning", "You need at least 2 selected cells",
+                                   parent=self.corr_window if self._corr_window_open() else self.window)
             return
-        corr_matrix = correlation.correlation_matrix(self.norm_df, method)
-        self._report_correlation(corr_matrix, method)
-        self.update_correlation_display(corr_matrix, method.capitalize())
+        self.corr_method = method.lower()
+        self._compute_correlation()
+        self._record_results(analysis=False, corr=True)
+        self._redraw_correlation()
 
     def update_correlation_display(self, corr_matrix, method_name):
         """Signals, correlation matrix, histogram of correlations, dendrogram."""
@@ -1355,7 +1423,8 @@ class VariabilityAnalysisWindow:
             f.write(f"Selected cells: {len(self.selected_clusters)}\n")
             f.write(f"Signals: {self.norm_description}\n")
             if self.events_df is not None:
-                method, params = self._peak_settings()
+                settings = self.analysis_result.settings
+                method, params = settings["peak_method"], core_analysis.peak_params(settings)
                 f.write(f"Peaks: {method} ({', '.join(f'{k}={v}' for k, v in params.items())}), "
                         f"{len(self.events_df)} in total\n")
             f.write(f"Correlation method: {self.current_method}\n")
