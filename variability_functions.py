@@ -873,12 +873,16 @@ class VariabilityAnalysisWindow:
         # Normalization (stage 6) applied before computing correlations
         norm_frame = tk.Frame(control_frame)
         norm_frame.pack(fill=tk.X, pady=5)
-        method, points, smooth = "none", normalization.DEFAULT_LOWEST_POINTS, False
+        method, points, smooth, subtract = "none", normalization.DEFAULT_LOWEST_POINTS, False, False
         analysis = self.project.get("analysis") if self.project is not None else None
-        if analysis is not None and analysis.params.get("method") in normalization.NORMALIZATION_METHODS:
-            method = analysis.params["method"]
+        saved_method = analysis.params.get("method") if analysis is not None else None
+        if saved_method == normalization.LEGACY_SUBTRACT_METHOD:      # saved by an earlier version
+            saved_method, subtract = "none", True
+        if saved_method in normalization.NORMALIZATION_METHODS:
+            method = saved_method
             smoothing_points = int(analysis.params.get("smoothing_points") or 0)
             smooth = smoothing_points > 0
+            subtract = subtract or bool(analysis.params.get("subtract_baseline"))
             points = int(analysis.params.get("lowest_points") or smoothing_points or points)
         self._norm_keys = list(normalization.NORMALIZATION_METHODS)
         self._norm_labels = list(normalization.NORMALIZATION_METHODS.values())
@@ -893,6 +897,9 @@ class VariabilityAnalysisWindow:
         self.norm_smooth_var = tk.BooleanVar(value=smooth)
         tk.Checkbutton(norm_frame, text="Smoothing (subtract lowest-points baseline)",
                        variable=self.norm_smooth_var).pack(side=tk.LEFT, padx=(0, 10))
+        self.norm_subtract_var = tk.BooleanVar(value=subtract)
+        tk.Checkbutton(norm_frame, text="Subtract lowest-points baseline (lowest points → 0)",
+                       variable=self.norm_subtract_var).pack(side=tk.LEFT, padx=(0, 10))
         self.norm_show_points_var = tk.BooleanVar(value=True)
         tk.Checkbutton(norm_frame, text="Show lowest points", variable=self.norm_show_points_var,
                        command=self._redraw_correlation).pack(side=tk.LEFT, padx=(0, 10))
@@ -912,10 +919,10 @@ class VariabilityAnalysisWindow:
     # ---- normalization (stage 6)
 
     def _norm_settings(self):
-        """(method key, smoothing points or None, lowest points) from the
-        controls. Smoothing is ignored with the lowest-points methods: the
-        signal is already divided by / has already had that same baseline
-        subtracted."""
+        """(method key, smoothing points or None, lowest points, subtract
+        baseline) from the controls. Smoothing is ignored when the baseline
+        is subtracted, or with "Divide by lowest-points baseline": either
+        already removes that same baseline."""
         label = self.norm_method_var.get() if hasattr(self, 'norm_method_var') else None
         method = self._norm_keys[self._norm_labels.index(label)] if label in getattr(self, '_norm_labels', []) else "none"
         try:
@@ -925,8 +932,10 @@ class VariabilityAnalysisWindow:
         if points < 2:
             points = normalization.DEFAULT_LOWEST_POINTS
         smooth = bool(self.norm_smooth_var.get()) if hasattr(self, 'norm_smooth_var') else False
-        smoothing = points if smooth and method not in normalization.LOWEST_POINTS_METHODS else None
-        return method, smoothing, points
+        subtract = bool(self.norm_subtract_var.get()) if hasattr(self, 'norm_subtract_var') else False
+        smoothing = (points if smooth and not subtract and method not in normalization.LOWEST_POINTS_METHODS
+                     else None)
+        return method, smoothing, points, subtract
 
     def _normalize(self):
         """Normalize the selected cells' signals with the current settings
@@ -934,18 +943,20 @@ class VariabilityAnalysisWindow:
         normalization and no smoothing the raw signals are used as is and
         stage 6 is cleared. If a signal can't be normalized (e.g. its
         lowest-points baseline reaches zero), say so and use raw values."""
-        method, smoothing, points = self._norm_settings()
+        method, smoothing, points, subtract = self._norm_settings()
         self.lowest_points_used = {}
-        if not normalization.is_identity(method, smoothing):
+        if not normalization.is_identity(method, smoothing, subtract):
             try:
-                self.norm_df = normalization.normalize_signals(self.signals_df, method, smoothing, points)
+                self.norm_df = normalization.normalize_signals(self.signals_df, method, smoothing, points,
+                                                               subtract_baseline=subtract)
             except ValueError as e:
                 messagebox.showwarning("Can't Normalize", f"{e}\n\nShowing the raw signals instead.",
                                        parent=self.window)
                 self.norm_method_var.set(normalization.NORMALIZATION_METHODS["none"])
                 self.norm_smooth_var.set(False)
-                method, smoothing = "none", None
-        if normalization.is_identity(method, smoothing):
+                self.norm_subtract_var.set(False)
+                method, smoothing, subtract = "none", None, False
+        if normalization.is_identity(method, smoothing, subtract):
             self.norm_df = self.signals_df
             if self.project is not None:
                 self.project.clear_stage("analysis")
@@ -953,20 +964,25 @@ class VariabilityAnalysisWindow:
             return
 
         self._report("analysis", {"normalized_signals": self.norm_df},
-                     params={"method": method, "smoothing_points": smoothing or 0, "lowest_points": points})
-        self.norm_description = normalization.NORMALIZATION_METHODS[method]
+                     params={"method": method, "smoothing_points": smoothing or 0, "lowest_points": points,
+                             "subtract_baseline": subtract})
+        descriptions = []
         if method == "lowest_points":
-            self.norm_description = f"divided by lowest-points baseline ({points} points)"
-        elif method == "subtract_lowest_points":
-            self.norm_description = f"lowest-points baseline subtracted ({points} points)"
+            descriptions.append(f"divided by lowest-points baseline ({points} points)")
+        elif method != "none":
+            descriptions.append(normalization.NORMALIZATION_METHODS[method])
+        if subtract:
+            descriptions.append(f"lowest-points baseline subtracted ({points} points)")
         if smoothing:
-            self.norm_description += f", smoothed ({smoothing} lowest points)"
+            descriptions.append(f"smoothed ({smoothing} lowest points)")
+        self.norm_description = ", ".join(descriptions)
         # Positions of the lowest points used, to mark them on the plot: on
-        # the raw signal for the lowest-points methods, on the normalized
-        # (not yet smoothed) signal for smoothing.
+        # the normalized (before subtraction/smoothing) signal when the
+        # baseline is subtracted or smoothed, on the raw signal when it only
+        # divides.
         lowest_method = method in normalization.LOWEST_POINTS_METHODS
-        if lowest_method or smoothing:
-            base = (self.signals_df if lowest_method
+        if lowest_method or smoothing or subtract:
+            base = (self.signals_df if lowest_method and not subtract
                     else normalization.normalize_signals(self.signals_df, method, None, points))
             for col in base.columns:
                 if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:

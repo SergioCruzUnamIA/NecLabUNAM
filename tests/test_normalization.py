@@ -110,11 +110,40 @@ def test_subtract_lowest_points_in_tables_and_gaps():
     out = norm.subtract_lowest_points(y, 6)
     assert np.isnan(out[[4, 60]]).all() and np.isfinite(np.delete(out, [4, 60])).all()
     df = pd.DataFrame({"cell_1": 80 + np.sin(t / 5), "cell_9": np.sin(t / 5)})
-    res = norm.normalize_signals(df, "subtract_lowest_points", lowest_points=4)
+    res = norm.normalize_signals(df, "none", lowest_points=4, subtract_baseline=True)
     for col in df.columns:
         _, px = norm.lowest_points_baseline(df[col], 4)
         np.testing.assert_allclose(res[col].to_numpy()[px], 0.0, atol=1e-12)
-    assert "subtract_lowest_points" in norm.LOWEST_POINTS_METHODS and not norm.is_identity("subtract_lowest_points")
+    assert norm.is_identity("none") and not norm.is_identity("none", subtract_baseline=True)
+    # the name used before it became an option still works (projects saved with it)
+    pd.testing.assert_frame_equal(norm.normalize_signals(df, norm.LEGACY_SUBTRACT_METHOD, lowest_points=4), res)
+    assert norm.LEGACY_SUBTRACT_METHOD not in norm.NORMALIZATION_METHODS
+
+
+def test_subtract_baseline_combines_with_every_method():
+    t = np.arange(240)
+    df = pd.DataFrame({"cell_1": 300 + 0.4 * t + 80 * (np.sin(t / 9) > 0.8),
+                       "cell_2": 150 + 30 * (np.cos(t / 13) > 0.85) - 0.1 * t})
+    for method in norm.NORMALIZATION_METHODS:
+        normalized = norm.normalize_signals(df, method, lowest_points=6)
+        both = norm.normalize_signals(df, method, lowest_points=6, subtract_baseline=True)
+        for col in df.columns:
+            # = the method's output with its own lowest-points baseline subtracted
+            baseline, px = norm.lowest_points_baseline(normalized[col], 6)
+            np.testing.assert_allclose(both[col], normalized[col] - baseline, atol=1e-9, err_msg=method)
+            np.testing.assert_allclose(both[col].to_numpy()[px], 0.0, atol=1e-9, err_msg=method)
+
+
+def test_subtract_baseline_takes_precedence_over_smoothing():
+    df = _signals()[["cell_1", "cell_2"]]
+    a = norm.normalize_signals(df, "delta_f_over_f0", smoothing_points=6, lowest_points=6, subtract_baseline=True)
+    b = norm.normalize_signals(df, "delta_f_over_f0", lowest_points=6, subtract_baseline=True)
+    pd.testing.assert_frame_equal(a, b)
+    # and differs from smoothing only by smoothing's added-back lowest level
+    s = norm.normalize_signals(df, "delta_f_over_f0", smoothing_points=6)
+    for col in df.columns:
+        offset = (s[col] - b[col]).to_numpy()
+        np.testing.assert_allclose(offset, offset[0], atol=1e-9)
 
 
 # ------------------------------------------------------------ tables

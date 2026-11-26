@@ -17,11 +17,13 @@ normalize_signals(df, method, smoothing_points=None)
         "lowest_points"    divide by the Convex Envelope baseline (the line
                            through the signal's genuine lowest points), so
                            the lowest points lie on a horizontal line at 1
-        "subtract_lowest_points"
-                           subtract that baseline instead, so the lowest
-                           points lie on a horizontal line at 0 (no division:
-                           works for signals near or below zero too)
-    then optional Convex Envelope smoothing (subtracting that baseline).
+    then, optionally, one of:
+        subtract_baseline  subtract the lowest-points baseline of the
+                           normalized signal, so its lowest points lie on a
+                           horizontal line at 0 (no division: works with
+                           any method and any signal level)
+        smoothing_points   Convex Envelope smoothing: subtract that baseline
+                           and add the signal's lowest level back
 
 divide_by_min_tables(tables, mode)
     Several tables at once (the Multiple Files sheets), dividing by a
@@ -41,12 +43,15 @@ NORMALIZATION_METHODS = {
     "delta_f_over_f0": "ΔF/F0 (baseline = 10th percentile)",
     "detrend_minmax": "Detrend + scale to 0–1",
     "lowest_points": "Divide by lowest-points baseline (lowest points → 1)",
-    "subtract_lowest_points": "Subtract lowest-points baseline (lowest points → 0)",
 }
 
 # Methods that use the lowest-points baseline themselves (the "Lowest points"
 # setting applies to them, and smoothing with that same baseline is redundant).
-LOWEST_POINTS_METHODS = ("lowest_points", "subtract_lowest_points")
+LOWEST_POINTS_METHODS = ("lowest_points",)
+
+# Method name used briefly for "subtract the baseline" before it became the
+# subtract_baseline option; read as method "none" + subtract_baseline=True.
+LEGACY_SUBTRACT_METHOD = "subtract_lowest_points"
 
 DEFAULT_LOWEST_POINTS = 6
 
@@ -312,18 +317,28 @@ def smooth_keeping_gaps(values, n_points):
 
 # ------------------------------------------------------------ tables
 
-def normalize_signals(df, method="none", smoothing_points=None, lowest_points=DEFAULT_LOWEST_POINTS):
-    """Normalize every column of a signals table on its own, then smooth it.
+def normalize_signals(df, method="none", smoothing_points=None, lowest_points=DEFAULT_LOWEST_POINTS,
+                      subtract_baseline=False):
+    """Normalize every column of a signals table on its own, then
+    optionally subtract its lowest-points baseline or smooth it.
 
     Args:
         df: signals table (frames x cells).
         method: a key of NORMALIZATION_METHODS.
         smoothing_points: Convex Envelope key points (None/0 = no smoothing).
-        lowest_points: number of lowest points for the lowest-points methods.
+            Ignored when subtract_baseline is on (it would remove the same
+            baseline a second time).
+        lowest_points: number of lowest points for the lowest-points
+            baseline (the "lowest_points" method and subtract_baseline).
+        subtract_baseline: after normalizing, subtract the lowest-points
+            baseline of the normalized signal, so its lowest points lie on
+            a horizontal line at 0 (in the method's units).
 
     Returns a new DataFrame with the same index and columns. Raises
     ValueError (naming the signal) if a signal can't be normalized.
     """
+    if method == LEGACY_SUBTRACT_METHOD:
+        method, subtract_baseline = "none", True
     if method not in NORMALIZATION_METHODS:
         raise ValueError(f"method must be one of {tuple(NORMALIZATION_METHODS)}, got {method!r}")
     out = {}
@@ -332,21 +347,22 @@ def normalize_signals(df, method="none", smoothing_points=None, lowest_points=DE
         try:
             if method == "lowest_points":
                 values = divide_by_lowest_points(values, int(lowest_points))
-            elif method == "subtract_lowest_points":
-                values = subtract_lowest_points(values, int(lowest_points))
             else:
                 values = _METHOD_FUNCTIONS[method](values)
         except ValueError as e:
             raise ValueError(f"{col}: {e}") from None
-        if smoothing_points:
+        if subtract_baseline:
+            values = subtract_lowest_points(values, int(lowest_points))
+        elif smoothing_points:
             values = smooth_keeping_gaps(values, int(smoothing_points))
         out[col] = values
     return pd.DataFrame(out, index=df.index)
 
 
-def is_identity(method, smoothing_points=None):
-    """True if normalize_signals(method, smoothing_points) returns the data unchanged."""
-    return method == "none" and not smoothing_points
+def is_identity(method, smoothing_points=None, subtract_baseline=False):
+    """True if normalize_signals(method, smoothing_points, subtract_baseline=...)
+    returns the data unchanged."""
+    return method == "none" and not smoothing_points and not subtract_baseline
 
 
 def min_divisors(tables, mode):
