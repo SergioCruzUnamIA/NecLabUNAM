@@ -158,6 +158,7 @@ NecLabUNAM/
 │   ├── signals.py              #   Per-cell signal extraction
 │   ├── normalization.py        #   Normalization + smoothing, shared by every view
 │   ├── events.py               #   Peak (event) detection: the 7 Peak Finder methods, shared by every view
+│   ├── analysis.py             #   Stage 6 for a set of signals: normalization + events (peaks cached per cell)
 │   └── correlation.py          #   Correlation + clustering (Ward on 1 − |r|), shared by every view
 ├── tests/                      # Tests for neclab_core (pytest)
 ├── variability_functions.py    # Cell detection window (UI)

@@ -3561,10 +3561,10 @@ class NecLabApp:
         "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
         "signals": "Needs cells (stage 4) and the recording (stage 0): extracted automatically for the "
                    "cells you select (Select All, click or drag), or open a signals file.",
-        "analysis": "Choose a normalization and/or a peak method in the correlation analysis window "
-                    "(signals from stage 5).",
-        "correlation": "Computed in the correlation analysis window from the (normalized) signals, "
-                       "or open a correlation matrix.",
+        "analysis": "Computed automatically from the signals (stage 5) of the cells you select, with the "
+                    "normalization and peak method last applied in the correlation analysis window.",
+        "correlation": "Computed automatically when 2 or more cells are selected, from the (normalized) "
+                       "signals, with the last correlation method chosen; or open a correlation matrix.",
     }
 
     def _build_sidebar(self, parent):
