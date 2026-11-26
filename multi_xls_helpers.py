@@ -9,6 +9,8 @@ import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+from neclab_core import formats
+
 
 _CSV_PSEUDO_SHEET = '(CSV)'
 _NPY_PSEUDO_SHEET = '(NPY)'
@@ -125,8 +127,28 @@ def _load_sheet_dataframe(filepath, sheet_name):
         df = pd.DataFrame(arr)
     else:
         df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
+    df = _drop_time_column(df)
     df = df.apply(pd.to_numeric, errors='coerce')
-    df.columns = [str(c) for c in df.columns]
+    df.columns = [str(c) for c in range(df.shape[1])]
+    return df
+
+
+def _drop_time_column(df):
+    """Remove the time axis from a raw (headerless) sheet, so it isn't
+    shown as a data column:
+    - signals files saved by NecLab (.csv/.xlsx) start with a header row
+      whose first cell is "frame" (or "time_s"): that header row and the
+      first column are dropped;
+    - a first column that is exactly 0, 1, 2, ... (the frame number in
+      NecLab .npy files, old and new) is dropped.
+    The remaining columns are renumbered by position by the caller."""
+    if df.shape[1] < 2 or df.shape[0] == 0:
+        return df
+    if formats.is_time_column_name(df.iat[0, 0]):
+        return df.iloc[1:, 1:].reset_index(drop=True)
+    first = pd.to_numeric(df.iloc[:, 0], errors='coerce')
+    if formats.is_frame_index(first.to_numpy()):
+        return df.iloc[:, 1:]
     return df
 
 

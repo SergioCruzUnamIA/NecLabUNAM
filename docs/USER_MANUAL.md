@@ -55,10 +55,12 @@ Disabled until an OME-TIFF image is loaded.
 
 | Item | Action |
 |---|---|
-| **Auto Contrast** | Applies automatic autocontrast to every frame of the stack. |
+| **Auto Contrast** | Turns display-only auto contrast on/off (a check mark shows when it's on). Each frame is rescaled only as it is shown; the analysis always uses the raw data. |
 | **Histogram** | Shows a histogram of per-pixel variance across the whole stack, in a separate window. |
 | **Binarize** | Opens a threshold dialog and binarizes the variance image. |
-| **Restore Original** | Reverts any adjustment and returns to the image exactly as loaded. |
+| **Restore Original** | Turns off every display adjustment (brightness, contrast, auto contrast, threshold) and shows the image exactly as loaded. |
+
+> **Display vs. analysis:** brightness, contrast, auto contrast and the threshold preview only change what is shown on screen. They never modify the loaded data, so the variability analysis and the exported signals are always computed from the raw image.
 
 ### Variability Analysis
 
@@ -91,11 +93,11 @@ Visible from startup. Made up of an image panel (left) and a controls panel (rig
 
 **IMAGE ADJUSTMENTS**
 - **Brightness** and **Contrast**: sliders from -100 to 100.
-- **Auto Contrast**: applies autocontrast automatically.
-- **Reset Adjustments**: returns brightness/contrast to their defaults.
+- **Auto Contrast: Off / On**: toggles display-only auto contrast (same as the Image menu item).
+- **Reset Adjustments**: returns brightness/contrast to their defaults and turns auto contrast off.
 
 **PROCESSING**
-- **Threshold**: "Apply" checkbox to enable binarization, plus a 0–255 threshold slider.
+- **Threshold**: "Apply" checkbox to enable a binarization preview, plus a 0–255 threshold slider. The threshold applies to the displayed (8-bit) image; images with more than 8 bits are mapped to 0–255 from the stack's minimum to its maximum for display.
 
 **INFORMATION**
 - Read-only panel showing the dimensions, frame count, and data type of the loaded image.
@@ -104,7 +106,7 @@ Visible from startup. Made up of an image panel (left) and a controls panel (rig
 
 1. `File → Open OME-TIFF` (or `Ctrl+O`) and select the file.
 2. Scroll through frames with the "Frame" control to inspect the stack.
-3. Adjust brightness/contrast, or use "Auto Contrast", to aid visual inspection.
+3. Adjust brightness/contrast, or turn on "Auto Contrast", to aid visual inspection (display only: the data used for analysis is not changed).
 4. Optionally apply a threshold from the Image menu or the Processing panel.
 5. Move to the **Variability Analysis** menu to start cell detection.
 
@@ -135,13 +137,18 @@ Choosing a method from the **Variability Analysis** menu opens a new 1400×800 w
 
 | Item | Action |
 |---|---|
-| **Process Cluster (Basic)** | Detects spatial clusters using the threshold alone. |
-| **Process Cluster (Advanced)** | Same as basic, but filters by Min Size / Max Size. |
-| **Decompose Large Clusters** | Splits oversized clusters into sub-clusters, respecting Min Size/Max Size. |
+| **Process Cluster (Basic)** | Binarizes the sharpened variability image with the threshold, finds connected regions, and keeps those between Min Size and Max Size. |
+| **Process Cluster (Advanced)** | Same as basic, but regions larger than Max Size are split around the local maxima (peaks) of the variability image instead of being discarded. |
+| **Decompose Large Clusters (KMeans)** | Same as basic, but regions larger than Max Size are split with KMeans (position + variability); parts smaller than Min Size are discarded. |
+| **Load Cells...** | Loads cells saved with **Export → Save Cells** (`.tif`/`.npy` label image), or a coordinates `.txt` file from older versions, onto the current image. The image must be the same size. |
+
+Each item runs a complete detection with the current Threshold / Min Size / Max Size and replaces the previous cells (and clears the selection).
+
+**Cell IDs:** every detected cell gets a permanent ID (1, 2, 3, ... in reading order of each cell's top-left pixel: top to bottom, then left to right). The same settings on the same image always give the same IDs, and these IDs are used everywhere: the plot labels, the selection list, the exported signals (`cell_<id>` columns) and the saved cells.
 
 ### 4.4 Selecting clusters
 
-- Click clusters in the plot to select them (they highlight in red).
+- Click cells in the plot to select them (they highlight in red, with their ID).
 - **Region Selection**: hold the right mouse button and drag over the plot to add/remove several clusters at once inside a rectangle; use the Add/Remove toggle to pick the mode.
 - **Selection** menu: `Select All`, `Clear Selection`.
 - The list of selected clusters appears in the side panel, each with a "Remove" button.
@@ -154,8 +161,13 @@ Choosing a method from the **Variability Analysis** menu opens a new 1400×800 w
 
 **Export** menu:
 - **Save Image**: exports the current analysis image.
-- **Save .npy**: exports the mean time series of the selected clusters as a `(frames, 1 + n_clusters)` array, where the first column is the frame index.
-- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Clusters" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen clusters' series.
+- **Save Signals (CSV / XLSX / NPY)...**: exports the signal of each selected cell (the mean of its pixels in every frame), in the NecLab signals format:
+  - `.csv` / `.xlsx`: a header row `frame, cell_<id>, cell_<id>, ...` and one row per frame.
+  - `.npy`: a `(frames, 1 + cells)` array whose first column is the frame number (0, 1, 2, ...), followed by the cells in ID order. A `.npy` can't store the cell IDs; use `.csv`/`.xlsx` to keep them.
+
+  These files can be opened directly with `File → Open Data Files`: the frame column is recognised and not shown as a data column.
+- **Save Cells (Label Image)...**: saves the cells as a label image (`.tif` or `.npy`: an image the size of one frame where each pixel holds the ID of its cell, 0 = background) plus a table with the same name and a `.csv` extension (`cell_id, n_pixels, centroid_row, centroid_col`). If cells are selected, it asks whether to save only those. Load it back later with **Clustering → Load Cells...**.
+- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (same format as Save Signals), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
 
 ---
 

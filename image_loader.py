@@ -1,19 +1,24 @@
 # image_loader.py
+"""File dialogs for loading images. The reading itself is in neclab_core.formats."""
 
 from tkinter.filedialog import askopenfilename
-from pyometiff import OMETIFFReader
 from PIL import Image
+
+from neclab_core import formats
+
 
 def load_ometiff_image():
     """
-    Opens a dialog to select an OME-TIFF file and returns the image and its metadata.
+    Opens a dialog to select an OME-TIFF file and returns (image, metadata, filename).
+    Returns (None, None, None) if the user cancels.
     """
-    filename = askopenfilename(title="Open OME-TIFF file", filetypes=[("OME-TIFF files", "*.tif"), ("All files", "*.*")])
+    filename = askopenfilename(title="Open OME-TIFF file",
+                               filetypes=[("OME-TIFF files", "*.tif *.tiff"), ("All files", "*.*")])
     if not filename:
         return None, None, None
-    reader = OMETIFFReader(fpath=filename)
-    img, metadata, xml_metadata = reader.read()
-    return img, metadata, xml_metadata
+    img, metadata = formats.load_ometiff(filename)
+    return img, metadata, filename
+
 
 def process_image_slice(img_array, slice_index, display_width, display_height):
     """

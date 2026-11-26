@@ -105,19 +105,80 @@ _C = {
 # for now, but isn't guaranteed to survive future numpy releases).
 _trapz = getattr(np, 'trapezoid', None) or np.trapz
 
+# ── Analysis package (neclab_core) ───────────────────────────────────────────
+# All analysis code lives in the neclab_core/ folder next to this file. The
+# in-app updater ("Help → Check for Updates") of versions released before that
+# folder existed only knew about the top-level .py files, so an install
+# updated from one of them gets this file but not the folder. In that case,
+# fetch the folder from the same place the updater uses before importing it.
+_REPO = "sergiocruzunamia/neclabunam"
+_CORE_FILES = [
+    "neclab_core/__init__.py",
+    "neclab_core/formats.py",
+    "neclab_core/display.py",
+    "neclab_core/variability.py",
+    "neclab_core/segmentation.py",
+    "neclab_core/signals.py",
+    "neclab_core/correlation.py",
+]
+
+
+def _download_repo_files(filenames, app_dir):
+    """Download `filenames` (paths relative to the repo root) from the main
+    branch into app_dir, creating folders as needed. Returns a list of
+    "<file>: <error>" strings for the files that failed."""
+    base_url = f"https://raw.githubusercontent.com/{_REPO}/main/"
+    errors = []
+    for filename in filenames:
+        dest = os.path.join(app_dir, *filename.split("/"))
+        try:
+            req = urllib.request.Request(base_url + filename, headers={"User-Agent": "NecLab-Updater/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                content = resp.read()
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(content)
+        except Exception as e:
+            errors.append(f"{filename}: {e}")
+    return errors
+
+
+def _ensure_core_package():
+    """Make sure neclab_core can be imported (see the comment above)."""
+    try:
+        import neclab_core  # noqa: F401
+        return
+    except ImportError:
+        if getattr(sys, "frozen", False):
+            raise
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    errors = _download_repo_files(_CORE_FILES, app_dir)
+    try:
+        import neclab_core  # noqa: F401
+    except ImportError:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "NecLab - Missing Files",
+            "The 'neclab_core' folder is missing and could not be downloaded.\n\n"
+            + ("\n".join(errors) + "\n\n" if errors else "")
+            + "Download the latest version of NecLab from GitHub, or run 'git pull'."
+        )
+        root.destroy()
+        sys.exit(1)
+
+
+_ensure_core_package()
+
+from neclab_core import correlation as core_correlation
+from neclab_core import display as core_display
+
 # Local modules
-from pyometiff import OMETIFFReader
 from variability_functions import show_variability_analysis, get_variability_methods
 from corr_dendo_functions import load_correlation_matrix
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
-
-# Try to import image processing modules if they exist
-try:
-    from image_loader import load_ometiff_image, process_image_slice
-    from image_processing import auto_contrast, threshold_image_pil
-    HAS_IMAGE_MODULES = True
-except ImportError:
-    HAS_IMAGE_MODULES = False
+from image_loader import load_ometiff_image
+from image_processing import mask_to_pil
 
 
 
@@ -167,9 +228,15 @@ class NecLabApp:
         self.root.geometry(f"{self.width}x{self.height}")
 
         # State variables - Images
-        self.img_original = None  # Original, unmodified image
-        self.img_array = None     # Working image (may have modifications)
-        self.img_display = None   # Image for display (with contrast, etc.)
+        # img_original is the raw stack as loaded. It is never modified: all
+        # display adjustments (brightness, contrast, auto contrast, threshold
+        # preview) are applied to a copy of the current frame only, so the
+        # variability analysis always runs on the raw data. img_array is kept
+        # as an alias for code that still uses that name.
+        self.img_original = None
+        self.img_array = None
+        self.img_display_range = (0.0, 255.0)  # raw value range mapped to 0-255 for display
+        self.auto_contrast_var = tk.BooleanVar(value=False)  # display-only auto contrast
 
         # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
@@ -327,9 +394,10 @@ class NecLabApp:
         # Image menu
         self.menu_imagen = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_imagen, label="Image")
-        self.menu_imagen.add_command(
+        self.menu_imagen.add_checkbutton(
             label="Auto Contrast",
-            command=self.apply_auto_contrast,
+            variable=self.auto_contrast_var,
+            command=self._update_image_display,
             state=DISABLED
         )
         self.menu_imagen.add_command(
@@ -509,10 +577,12 @@ class NecLabApp:
         self.contrast_slider.set(0)
         self.contrast_slider.pack(fill='x')
 
-        ctk.CTkButton(inner, text="Auto Contrast", height=30, corner_radius=6,
-                      fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
-                      font=ctk.CTkFont(size=11),
-                      command=self.apply_auto_contrast).pack(fill='x', pady=(6, 2))
+        self.auto_contrast_button = ctk.CTkButton(
+            inner, text="Auto Contrast: Off", height=30, corner_radius=6,
+            fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
+            font=ctk.CTkFont(size=11),
+            command=self.apply_auto_contrast)
+        self.auto_contrast_button.pack(fill='x', pady=(6, 2))
         ctk.CTkButton(inner, text="Reset Adjustments", height=30, corner_radius=6,
                       fg_color=_C['card'], hover_color=_C['border'],
                       text_color=_C['text'], border_width=1, border_color=_C['border'],
@@ -853,17 +923,12 @@ class NecLabApp:
             ).pack(fill=tk.BOTH, expand=True)
             return
 
-        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+        from scipy.cluster.hierarchy import dendrogram
 
         plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
-        clustering = AgglomerativeClustering(
-            distance_threshold=0, n_clusters=None
-        ).fit(plot_data.T)
         self.dendo_fig, ax = plt.subplots()
-        plt.sca(ax)
-        _plot_dendrogram_helper(
-            clustering, truncate_mode="none", count_sort='none', show_contracted='true'
-        )
+        dendrogram(core_correlation.agglomerative_linkage(plot_data.T), ax=ax,
+                   truncate_mode="none", count_sort='none', show_contracted='true')
         ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
         self.dendo_fig.tight_layout()
 
@@ -893,7 +958,6 @@ class NecLabApp:
         """Save dendrogram clustering data (labels + linkage matrix) to a CSV or Excel file."""
         if not self.multi_xls_common_columns:
             return
-        from corr_dendo_functions import AgglomerativeClustering
         from tkinter.filedialog import asksaveasfilename
         import pandas as pd
 
@@ -910,9 +974,7 @@ class NecLabApp:
         if not filename:
             return
 
-        clustering = AgglomerativeClustering(
-            distance_threshold=0, n_clusters=None
-        ).fit(plot_data.T)
+        clustering = core_correlation.agglomerative_model(plot_data.T)
 
         df_labels = pd.DataFrame({
             'Sample_Index': list(range(len(clustering.labels_))),
@@ -2893,7 +2955,7 @@ class NecLabApp:
             ).pack(fill=tk.BOTH, expand=True)
             return
         df = pd.DataFrame({label: v[:min_len] for label, v in cols.items()})
-        corr = df.corr(method=method)
+        corr = core_correlation.correlation_matrix(df, method)
         self._multi_xls_corr_df = corr
         if self.multi_xls_menu_grafica is not None:
             self.multi_xls_menu_grafica.entryconfigure("Save Correlation Data...", state='normal')
@@ -3163,60 +3225,41 @@ class NecLabApp:
         self.image_label.configure(image=image_tk)
         self.image_label.image = image_tk  # Keep a reference
 
-    def _apply_brightness_contrast(self, image_array):
-        """Apply brightness and contrast to the image."""
-        brightness = self.brightness_slider.get()
-        contrast = self.contrast_slider.get()
-
-        # Convert to float for the operations
-        img = image_array.astype(np.float32)
-
-        # Apply brightness
-        img = img + brightness
-
-        # Apply contrast
-        if contrast != 0:
-            factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
-            img = factor * (img - 128) + 128
-
-        # Clamp values
-        img = np.clip(img, 0, 255).astype(np.uint8)
-
-        return img
+    def _display_frame(self, slice_idx):
+        """8-bit copy of one raw frame with the display adjustments applied
+        (auto contrast, brightness, contrast). The raw stack is untouched."""
+        frame = core_display.to_display_uint8(self.img_original[slice_idx], self.img_display_range)
+        if self.auto_contrast_var.get():
+            frame = core_display.auto_contrast(frame)
+        return core_display.apply_brightness_contrast(
+            frame, self.brightness_slider.get(), self.contrast_slider.get())
 
     def _update_image_display(self):
         """Update the displayed image according to the current state."""
-        if self.img_array is None:
+        if self.img_original is None:
             return
 
         slice_idx = self.slice_slider.get()
-        current_slice = self.img_array[slice_idx, :, :].copy()
+        current_slice = self._display_frame(slice_idx)
 
-        # Apply brightness and contrast
-        current_slice = self._apply_brightness_contrast(current_slice)
-
-        # Apply threshold if enabled
         if self.threshold_enabled.get():
-            threshold_val = self.threshold_slider.get()
-            if HAS_IMAGE_MODULES:
-                pil_img = threshold_image_pil(current_slice, threshold=threshold_val)
-            else:
-                pil_img = self._apply_binarize(current_slice, threshold_val)
+            mask = core_display.threshold_mask(current_slice, self.threshold_slider.get())
+            pil_img = mask_to_pil(mask)
         else:
-            pil_img = Image.fromarray(current_slice)
-            if pil_img.mode != 'RGB':
-                pil_img = pil_img.convert('RGB')
+            pil_img = Image.fromarray(current_slice).convert('RGB')
 
         self._display_pil_image(pil_img)
 
-        # Update frame info
-        total_frames = self.img_array.shape[0]
+        total_frames = self.img_original.shape[0]
         self.frame_info_label.config(text=f"Frame: {slice_idx + 1} / {total_frames}")
+        self.auto_contrast_button.configure(
+            text=f"Auto Contrast: {'On' if self.auto_contrast_var.get() else 'Off'}")
 
     def _reset_adjustments(self):
-        """Reset the brightness and contrast adjustments."""
+        """Reset every display adjustment (brightness, contrast, auto contrast)."""
         self.brightness_slider.set(0)
         self.contrast_slider.set(0)
+        self.auto_contrast_var.set(False)
         self._update_image_display()
 
     # ==================== CALLBACKS ====================
@@ -3238,28 +3281,27 @@ class NecLabApp:
 
     def open_ometiff_file(self):
         """Open an OME-TIFF file."""
-        if HAS_IMAGE_MODULES:
-            img, metadata, xml_metadata = load_ometiff_image()
-        else:
-            filename = filedialog.askopenfilename(
-                title="Open OME-TIFF",
-                filetypes=[("OME-TIFF files", "*.ome.tiff *.ome.tif"), ("All files", "*.*")]
-            )
-            if not filename:
-                return
-
-            try:
-                reader = OMETIFFReader(fpath=filename)
-                img, metadata, xml_metadata = reader.read()
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
-                return
+        try:
+            img, metadata, filename = load_ometiff_image()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
+            return
 
         if img is None:
             return
 
+        img = np.asarray(img)
+        if img.ndim != 3:
+            messagebox.showerror(
+                "Unsupported Image",
+                f"Expected a stack with shape (frames, height, width), got {img.shape}.\n\n"
+                "Files with several channels or Z-planes aren't supported yet."
+            )
+            return
+
         self.img_original = img
-        self.img_array = img.copy()
+        self.img_array = img  # same array: the raw data is never modified
+        self.img_display_range = core_display.display_range(img)
 
         # Update the layer slider
         num_slices = self.img_array.shape[0]
@@ -3289,31 +3331,20 @@ class NecLabApp:
     # ==================== MENU COMMANDS - IMAGE ====================
 
     def restore_original(self):
-        """Restore the original image."""
+        """Show the image exactly as loaded (turns off every display adjustment)."""
         if self.img_original is None:
             messagebox.showwarning("Warning", "No original image loaded")
             return
-        self.img_array = self.img_original.copy()
+        self.threshold_enabled.set(False)
         self._reset_adjustments()
 
     def apply_auto_contrast(self):
-        """Apply auto contrast to the image."""
-        if self.img_array is None:
+        """Toggle auto contrast. It is display-only: each frame is rescaled
+        as it is shown, and the analysis keeps using the raw data."""
+        if self.img_original is None:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-
-        if HAS_IMAGE_MODULES:
-            # Use the processing module if available
-            self.img_array = auto_contrast(self.img_array)
-        else:
-            # Fallback: apply auto contrast frame by frame
-            for i in range(self.img_array.shape[0]):
-                im_pil = Image.fromarray(self.img_array[i, :, :])
-                if im_pil.mode != 'RGB':
-                    im_pil = im_pil.convert('RGB')
-                im2 = ImageOps.autocontrast(im_pil, cutoff=2, ignore=2).convert('L')
-                self.img_array[i, :, :] = np.array(im2)
-
+        self.auto_contrast_var.set(not self.auto_contrast_var.get())
         self._update_image_display()
 
     def show_histogram(self):
@@ -3380,29 +3411,19 @@ class NecLabApp:
         ).pack(side=tk.LEFT, padx=5)
 
     def _apply_binarize(self, var_im, threshold):
-        """Apply binarization to the image based on the threshold."""
-        if len(var_im.shape) == 2:
-            # It's a 2D (variance) image
-            binary = (var_im > threshold).astype(np.uint8) * 255
-        else:
-            # It's a regular image
-            binary = (var_im > threshold).astype(np.uint8) * 255
-
-        pil_img = Image.fromarray(binary)
-        if pil_img.mode != 'RGB':
-            pil_img = pil_img.convert('RGB')
-        return pil_img
+        """Binary (black/white) PIL image of the pixels above the threshold."""
+        return mask_to_pil(core_display.threshold_mask(var_im, threshold))
 
     def show_variability_menu(self, method_index):
-        """Show the full variability analysis."""
-        if self.img_array is None or len(self.img_array) == 0:
+        """Show the full variability analysis (always on the raw data)."""
+        if self.img_original is None or len(self.img_original) == 0:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-        show_variability_analysis(self.img_array, method_index, self.root)
+        show_variability_analysis(self.img_original, method_index, self.root)
 
     # ==================== HELP / AUTO-UPDATER ====================
 
-    _REPO = "sergiocruzunamia/neclabunam"
+    _REPO = _REPO
     _UPDATABLE_FILES = [
         "interface3.py",
         "peak_functions.py",
@@ -3412,7 +3433,7 @@ class NecLabApp:
         "image_loader.py",
         "image_processing.py",
         "multi_xls_helpers.py",
-    ]
+    ] + _CORE_FILES
 
     def _get_local_sha(self):
         version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
@@ -3444,10 +3465,10 @@ class NecLabApp:
                 data = json.loads(resp.read().decode())
             remote_sha = data["sha"]
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror(
-                "Update Check Failed",
-                f"Could not reach GitHub:\n{e}"
-            ))
+            # Format now: Python deletes `e` when the except block ends,
+            # before the lambda runs on the Tk thread.
+            msg = f"Could not reach GitHub:\n{e}"
+            self.root.after(0, lambda: messagebox.showerror("Update Check Failed", msg))
             return
 
         local_sha = self._get_local_sha()
@@ -3471,20 +3492,8 @@ class NecLabApp:
                          args=(remote_sha,), daemon=True).start()
 
     def _download_and_restart(self, remote_sha):
-        base_url = f"https://raw.githubusercontent.com/{self._REPO}/main/"
         app_dir = os.path.dirname(os.path.abspath(__file__))
-        errors = []
-        for filename in self._UPDATABLE_FILES:
-            url = base_url + filename
-            dest = os.path.join(app_dir, filename)
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "NecLab-Updater/1.0"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    content = resp.read()
-                with open(dest, "wb") as f:
-                    f.write(content)
-            except Exception as e:
-                errors.append(f"{filename}: {e}")
+        errors = _download_repo_files(self._UPDATABLE_FILES, app_dir)
 
         if errors:
             msg = "Some files could not be downloaded:\n" + "\n".join(errors)

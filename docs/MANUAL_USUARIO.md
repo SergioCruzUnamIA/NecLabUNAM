@@ -55,10 +55,12 @@ Deshabilitado hasta cargar una imagen OME-TIFF.
 
 | Opción | Acción |
 |---|---|
-| **Auto Contrast** (Auto Contraste) | Aplica autocontraste automático a cada frame de la pila. |
+| **Auto Contrast** (Auto Contraste) | Activa/desactiva el autocontraste solo de visualización (aparece una marca cuando está activo). Cada frame se reescala únicamente al mostrarse; el análisis siempre usa los datos originales. |
 | **Histogram** | Muestra un histograma de la varianza por píxel a lo largo de toda la pila, en una ventana aparte. |
 | **Binarize** | Abre un diálogo de umbral (threshold) y binariza la imagen de varianza. |
-| **Restore Original** (Restaurar Original) | Revierte cualquier ajuste y vuelve a la imagen original tal como se cargó. |
+| **Restore Original** (Restaurar Original) | Desactiva todos los ajustes de visualización (brillo, contraste, autocontraste, threshold) y muestra la imagen tal como se cargó. |
+
+> **Visualización vs. análisis:** brillo, contraste, autocontraste y la vista previa del threshold solo cambian lo que se ve en pantalla. Nunca modifican los datos cargados, así que el análisis de variabilidad y las señales exportadas siempre se calculan a partir de la imagen original.
 
 ### Variability Analysis (Análisis de Variabilidad)
 
@@ -91,11 +93,11 @@ Pestaña visible desde el inicio. Se compone de un panel de imagen (izquierda) y
 
 **IMAGE ADJUSTMENTS (Ajustes de Imagen)**
 - **Brightness** (Brillo) y **Contrast** (Contraste): controles deslizantes de -100 a 100.
-- **Auto Contrast**: aplica autocontraste automáticamente.
-- **Reset Adjustments** (Resetear Ajustes): regresa brillo/contraste a sus valores por defecto.
+- **Auto Contrast: Off / On**: activa/desactiva el autocontraste solo de visualización (igual que la opción del menú Image).
+- **Reset Adjustments** (Resetear Ajustes): regresa brillo/contraste a sus valores por defecto y desactiva el autocontraste.
 
 **PROCESSING (Procesamiento)**
-- **Threshold**: casilla "Apply" (Aplicar) para activar la binarización y un control deslizante de 0 a 255 para el valor del umbral.
+- **Threshold**: casilla "Apply" (Aplicar) para activar una vista previa de la binarización y un control deslizante de 0 a 255 para el valor del umbral. El umbral se aplica a la imagen mostrada (8 bits); las imágenes de más de 8 bits se muestran escaladas a 0–255 desde el mínimo hasta el máximo de la pila.
 
 **INFORMATION (Información)**
 - Panel de solo lectura con las dimensiones, número de frames y tipo de dato de la imagen cargada.
@@ -104,7 +106,7 @@ Pestaña visible desde el inicio. Se compone de un panel de imagen (izquierda) y
 
 1. `File → Open OME-TIFF` (o `Ctrl+O`) y seleccione el archivo.
 2. Recorra los frames con el control "Frame" para inspeccionar la pila.
-3. Ajuste brillo/contraste, o use "Auto Contrast", para facilitar la inspección visual.
+3. Ajuste brillo/contraste, o active "Auto Contrast", para facilitar la inspección visual (solo visualización: los datos usados para el análisis no cambian).
 4. Opcionalmente aplique un threshold desde el menú Image o el panel de Processing.
 5. Pase al menú **Variability Analysis** para iniciar la detección de células.
 
@@ -135,13 +137,18 @@ Al elegir un método en el menú **Variability Analysis**, se abre una ventana n
 
 | Opción | Acción |
 |---|---|
-| **Process Cluster (Basic)** (Procesar Cluster — Básico) | Detecta clusters espaciales usando solo el threshold. |
-| **Process Cluster (Advanced)** (Procesar Cluster — Avanzado) | Igual que el básico, pero filtra por Min Size / Max Size. |
-| **Decompose Large Clusters** (Descomponer Clusters Grandes) | Divide clusters que excedan Max Size en sub-clusters, respetando Min Size/Max Size. |
+| **Process Cluster (Basic)** (Procesar Cluster — Básico) | Binariza la imagen de variabilidad (con realce) usando el threshold, encuentra las regiones conectadas y conserva las que miden entre Min Size y Max Size. |
+| **Process Cluster (Advanced)** (Procesar Cluster — Avanzado) | Igual que el básico, pero las regiones mayores que Max Size se dividen alrededor de los máximos locales (picos) de la imagen de variabilidad en lugar de descartarse. |
+| **Decompose Large Clusters (KMeans)** (Descomponer Clusters Grandes) | Igual que el básico, pero las regiones mayores que Max Size se dividen con KMeans (posición + variabilidad); las partes menores que Min Size se descartan. |
+| **Load Cells...** (Cargar Células) | Carga células guardadas con **Export → Save Cells** (imagen de etiquetas `.tif`/`.npy`), o un archivo de coordenadas `.txt` de versiones anteriores, sobre la imagen actual. La imagen debe ser del mismo tamaño. |
+
+Cada opción ejecuta una detección completa con los valores actuales de Threshold / Min Size / Max Size y reemplaza las células anteriores (y limpia la selección).
+
+**IDs de célula:** cada célula detectada recibe un ID permanente (1, 2, 3, ... en orden de lectura del píxel superior izquierdo de cada célula: de arriba hacia abajo y de izquierda a derecha). Los mismos parámetros sobre la misma imagen siempre dan los mismos IDs, y estos IDs se usan en todas partes: etiquetas del gráfico, lista de selección, señales exportadas (columnas `cell_<id>`) y células guardadas.
 
 ### 4.4 Selección de clusters
 
-- Haga clic sobre los clusters en el gráfico para seleccionarlos (se resaltan en rojo).
+- Haga clic sobre las células en el gráfico para seleccionarlas (se resaltan en rojo, con su ID).
 - **Region Selection** (Selección por Región): mantenga el botón derecho y arrastre sobre el gráfico para seleccionar/quitar varios clusters a la vez dentro de un rectángulo; use el conmutador Add/Remove (Añadir/Quitar) para elegir el modo.
 - Menú **Selection** (Selección): `Select All` (Seleccionar Todos), `Clear Selection` (Limpiar Selección).
 - La lista de clusters seleccionados aparece en el panel lateral, con un botón "Remove" (Remover) por cada uno.
@@ -154,8 +161,13 @@ Menú **Visualization → 3D View** (Visualización → Vista 3D): abre una supe
 
 Menú **Export** (Exportar):
 - **Save Image** (Guardar Imagen): exporta la imagen del análisis actual.
-- **Save .npy** (Guardar .npy): exporta las series temporales promedio de los clusters seleccionados como un arreglo `(frames, 1 + n_clusters)`, donde la primera columna es el índice de frame.
-- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Clusters" (Análisis de Correlaciones — Clusters Seleccionados), con botones para calcular correlación Pearson, Kendall o Spearman entre las series de los clusters elegidos.
+- **Save Signals (CSV / XLSX / NPY)...** (Guardar Señales): exporta la señal de cada célula seleccionada (el promedio de sus píxeles en cada frame), en el formato de señales de NecLab:
+  - `.csv` / `.xlsx`: una fila de encabezado `frame, cell_<id>, cell_<id>, ...` y una fila por frame.
+  - `.npy`: un arreglo `(frames, 1 + células)` cuya primera columna es el número de frame (0, 1, 2, ...), seguida de las células en orden de ID. Un `.npy` no puede guardar los IDs; use `.csv`/`.xlsx` para conservarlos.
+
+  Estos archivos se pueden abrir directamente con `File → Open Data Files`: la columna de frame se reconoce y no se muestra como columna de datos.
+- **Save Cells (Label Image)...** (Guardar Células): guarda las células como una imagen de etiquetas (`.tif` o `.npy`: una imagen del tamaño de un frame donde cada píxel contiene el ID de su célula, 0 = fondo) más una tabla con el mismo nombre y extensión `.csv` (`cell_id, n_pixels, centroid_row, centroid_col`). Si hay células seleccionadas, pregunta si guardar solo esas. Se vuelven a cargar con **Clustering → Load Cells...**.
+- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (mismo formato que Save Signals), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
 
 ---
 

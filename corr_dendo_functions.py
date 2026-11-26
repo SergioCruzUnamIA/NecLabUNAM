@@ -3,12 +3,13 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import scipy.cluster.hierarchy as sch
 import numpy as np
-from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import dendrogram
 import tkinter as tk
 from tkinter import ttk
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
+
+from neclab_core import correlation as core_correlation
 
 def get_main_plot_frame(main_window):
     """
@@ -34,49 +35,26 @@ def get_main_plot_frame(main_window):
 
 def correlation_pearson(data):
     plt.close('all')
-    df = pd.DataFrame(data)
-    corr1 = df.corr(method='pearson')
-    return corr1
+    return core_correlation.correlation_matrix(data, 'pearson')
 
 def correlation_kendall(data):
     plt.close('all')
-    df = pd.DataFrame(data)
-    corr1 = df.corr(method='kendall')
-    return corr1
+    return core_correlation.correlation_matrix(data, 'kendall')
 
 def correlation_spearman(data):
     plt.close('all')
-    df = pd.DataFrame(data)
-    corr1 = df.corr(method='spearman')
-    return corr1
+    return core_correlation.correlation_matrix(data, 'spearman')
 
 def _plot_dendrogram_helper(model, **kwargs):
     """
-    Helper function to create and plot a dendrogram from an AgglomerativeClustering model.
-    
+    Plot a dendrogram (on the current axes) from a fitted
+    AgglomerativeClustering model.
+
     Args:
         model: Fitted AgglomerativeClustering model
         **kwargs: Additional arguments passed to scipy.cluster.hierarchy.dendrogram
     """
-    # Create linkage matrix and then plot the dendrogram
-    # create the counts of samples under each node
-    counts = np.zeros(model.children_.shape[0])
-    n_samples = len(model.labels_)
-    for i, merge in enumerate(model.children_):
-        current_count = 0
-        for child_idx in merge:
-            if child_idx < n_samples:
-                current_count += 1  # leaf node
-            else:
-                current_count += counts[child_idx - n_samples]
-        counts[i] = current_count
-
-    linkage_matrix = np.column_stack(
-        [model.children_, model.distances_, counts]
-    ).astype(float)
-
-    # Plot the corresponding dendrogram
-    dendrogram(linkage_matrix, **kwargs)
+    dendrogram(core_correlation.linkage_from_model(model), **kwargs)
 
 def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None, target_frame=None):
     '''Plot a graphical correlation matrix for a dataframe.
@@ -111,7 +89,7 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
     ax_dendro = plt.subplot2grid((2, 1), (0, 0), rowspan=1)
     
     # Compute dendrogram from correlation matrix
-    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data_for_dendro)
+    clustering = core_correlation.agglomerative_model(data_for_dendro)
     _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
     ax_dendro.set_title('Dendrogram')
     
@@ -204,7 +182,7 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             fig_dendro = plt.figure(figsize=(size, size))
             ax_dendro_temp = fig_dendro.add_subplot(111)
             plt.sca(ax_dendro_temp)
-            clustering_temp = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data_for_dendro)
+            clustering_temp = core_correlation.agglomerative_model(data_for_dendro)
             _plot_dendrogram_helper(clustering_temp, truncate_mode="none", count_sort='none', show_contracted='true')
             ax_dendro_temp.set_title('Dendrogram')
             fig_dendro.savefig(filename)
@@ -305,7 +283,7 @@ def plot_dendogram(data, root, canvas):
     # Close all matplotlib figures
     plt.close('all')
 
-    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data.transpose())
+    clustering = core_correlation.agglomerative_model(data.transpose())
     clustering.labels_.shape
     # plot the top three levels of the dendrogram
     _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
