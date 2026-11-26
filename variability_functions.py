@@ -202,15 +202,39 @@ class VariabilityAnalysisWindow:
         return sorted(self.cell_pix)
 
     def _set_cells(self, labels, info, mask=None):
-        """Replace the current cells (clears the selection)."""
+        """Replace the current cells (clears the selection and the results
+        of a previous correlation analysis, which were for the old cells)."""
         self.labels = labels
         self.mask = mask
         self.cell_pix = segmentation.cell_pixels(labels)
         self.detection_info = info
         self.selected_clusters = []
         self.cluster_colors = self._generate_cluster_colors(self.cell_id_list)
+        self._reset_correlation_results()
         self.update_display()
         self.update_selection_list()
+
+    def _reset_correlation_results(self):
+        """Close the correlation window and forget its results: they belong
+        to the previous cells (from PR #52)."""
+        self._close_correlation_window()
+        self.signals_df = None
+        self.norm_df = None
+        self.norm_description = "raw"
+        self.current_corr_matrix = None
+        self.current_method = None
+
+    def _close_correlation_window(self):
+        corr_window = getattr(self, 'corr_window', None)
+        if corr_window is not None:
+            try:
+                corr_window.destroy()
+            except tk.TclError:
+                pass
+        self.corr_window = None
+        if getattr(self, 'current_corr_fig', None) is not None:
+            plt.close(self.current_corr_fig)
+        self.current_corr_fig = None
 
     def _generate_cluster_colors(self, ids):
         """Random color per cell ID, excluding red (reserved for selection)."""
@@ -835,8 +859,11 @@ class VariabilityAnalysisWindow:
         self.show_correlation_analysis()
 
     def show_correlation_analysis(self):
-        """Window with the selected cells' signals and their correlation."""
+        """Window with the selected cells' signals and their correlation.
+        Only one at a time: opening it again replaces the previous one."""
+        self._close_correlation_window()
         corr_window = tk.Toplevel(self.window)
+        self.corr_window = corr_window
         corr_window.title("Correlation Analysis - Selected Cells")
         corr_window.geometry("1200x800")
 
