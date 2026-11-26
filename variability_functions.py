@@ -27,7 +27,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
-from neclab_core import correlation, normalization, segmentation, signals, stages, variability
+from neclab_core import correlation, events, normalization, segmentation, signals, stages, variability
 from neclab_core.validation import ValidationError
 from neclab_core.project import OUT_OF_DATE
 
@@ -143,6 +143,9 @@ class VariabilityAnalysisWindow:
         self.norm_df = None         # the same, normalized (stage 6; = signals_df when "none")
         self.norm_description = "raw"
         self.lowest_points_used = {}  # {column: frame indices of the lowest points used}
+        self.events_df = None       # peaks of the normalized signals (stage 6 events), or None
+        self.peak_method = events.NO_PEAKS
+        self.peak_params = {}       # {method: params} last used for each peak method
         self.current_fig = None
 
         self.create_window()
@@ -228,6 +231,7 @@ class VariabilityAnalysisWindow:
         self.signals_df = None
         self.norm_df = None
         self.norm_description = "raw"
+        self.events_df = None
         self.current_corr_matrix = None
         self.current_method = None
 
@@ -948,6 +952,8 @@ class VariabilityAnalysisWindow:
                   command=self.export_time_series).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Export Normalized",
                   command=self.export_normalized).pack(side=tk.LEFT, padx=5)
+        tk.Button(corr_button_frame, text="Export Events",
+                  command=self.export_events).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Export Correlation",
                   command=self.export_correlation).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Export Cells",
@@ -969,6 +975,10 @@ class VariabilityAnalysisWindow:
             smooth = smoothing_points > 0
             subtract = subtract or bool(analysis.params.get("subtract_baseline"))
             points = int(analysis.params.get("lowest_points") or smoothing_points or points)
+        saved_peaks = analysis.params.get("peak_method") if analysis is not None else None
+        if saved_peaks in events.PEAK_METHODS:
+            self.peak_method = saved_peaks
+            self.peak_params[saved_peaks] = dict(analysis.params.get("peak_params") or {})
         self._norm_keys = list(normalization.NORMALIZATION_METHODS)
         self._norm_labels = list(normalization.NORMALIZATION_METHODS.values())
         tk.Label(norm_frame, text="Normalization:").pack(side=tk.LEFT, padx=(0, 5))
@@ -991,6 +1001,24 @@ class VariabilityAnalysisWindow:
         tk.Button(norm_frame, text="Apply", command=self.apply_normalization).pack(side=tk.LEFT, padx=5)
         tk.Label(norm_frame, text=f"Dendrogram: {correlation.LINKAGE_DESCRIPTION}",
                  fg='gray').pack(side=tk.RIGHT, padx=5)
+
+        # Event (peak) detection (stage 6) on the normalized signals
+        peak_frame = tk.Frame(control_frame)
+        peak_frame.pack(fill=tk.X, pady=5)
+        tk.Label(peak_frame, text="Peaks:").pack(side=tk.LEFT, padx=(0, 5))
+        self.peak_method_var = tk.StringVar(value=self.peak_method)
+        peak_box = ttk.Combobox(peak_frame, textvariable=self.peak_method_var,
+                                values=[events.NO_PEAKS] + list(events.PEAK_METHODS),
+                                state='readonly', width=24)
+        peak_box.pack(side=tk.LEFT, padx=(0, 10))
+        peak_box.bind('<<ComboboxSelected>>', lambda e: self._on_peak_method_change(ask=True))
+        tk.Button(peak_frame, text="Parameters...",
+                  command=lambda: self._on_peak_method_change(ask=True)).pack(side=tk.LEFT, padx=5)
+        self.peak_show_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(peak_frame, text="Show peaks", variable=self.peak_show_var,
+                       command=self._redraw_correlation).pack(side=tk.LEFT, padx=(10, 10))
+        self.peak_info_label = tk.Label(peak_frame, text="", fg='gray')
+        self.peak_info_label.pack(side=tk.LEFT, padx=5)
 
         self.corr_viz_frame = tk.Frame(main_frame)
         self.corr_viz_frame.pack(fill=tk.BOTH, expand=True)
@@ -1041,16 +1069,16 @@ class VariabilityAnalysisWindow:
                 self.norm_smooth_var.set(False)
                 self.norm_subtract_var.set(False)
                 method, smoothing, subtract = "none", None, False
-        if normalization.is_identity(method, smoothing, subtract):
+        identity = normalization.is_identity(method, smoothing, subtract)
+        if identity:
             self.norm_df = self.signals_df
-            if self.project is not None:
-                self.project.clear_stage("analysis")
+        self._detect_events()
+        self._report_analysis(identity, {"method": method, "smoothing_points": smoothing or 0,
+                                         "lowest_points": points, "subtract_baseline": subtract})
+        if identity:
             self.norm_description = "raw"
             return
 
-        self._report("analysis", {"normalized_signals": self.norm_df},
-                     params={"method": method, "smoothing_points": smoothing or 0, "lowest_points": points,
-                             "subtract_baseline": subtract})
         descriptions = []
         if method == "lowest_points":
             descriptions.append(f"divided by lowest-points baseline ({points} points)")
@@ -1072,6 +1100,78 @@ class VariabilityAnalysisWindow:
             for col in base.columns:
                 if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:
                     self.lowest_points_used[col] = normalization.lowest_points_baseline(base[col], points)[1]
+
+    # ---- events (stage 6)
+
+    def _peak_settings(self):
+        method = self.peak_method_var.get() if hasattr(self, 'peak_method_var') else self.peak_method
+        if method not in events.PEAK_METHODS:
+            return events.NO_PEAKS, {}
+        return method, {**events.default_params(method), **self.peak_params.get(method, {})}
+
+    def _on_peak_method_change(self, ask=False):
+        """A peak method was chosen (or Parameters... clicked): ask for its
+        parameters, then detect the events and recompute the correlation."""
+        method = self.peak_method_var.get()
+        if method in events.PEAK_METHODS and (ask or method not in self.peak_params):
+            from peak_functions import show_parameter_dialog
+            title, specs = events.PEAK_METHODS[method]
+            current = {**events.default_params(method), **self.peak_params.get(method, {})}
+            specs = [{**spec, 'default': current[spec['key']]} for spec in specs]
+            new_params = show_parameter_dialog(self.corr_window, title, specs)
+            if new_params:
+                self.peak_params[method] = new_params
+            elif method not in self.peak_params:   # cancelled before ever choosing parameters
+                self.peak_method_var.set(self.peak_method)
+                return
+        self.apply_normalization()
+
+    def _detect_events(self):
+        """Peaks of the normalized signals with the current peak method."""
+        method, params = self._peak_settings()
+        self.peak_method = method
+        self.events_df = None
+        if method != events.NO_PEAKS and self.norm_df is not None and not self.norm_df.empty:
+            try:
+                self.events_df = events.detect_events(self.norm_df, method, params)
+            except Exception as e:
+                messagebox.showwarning("Can't Detect Peaks", f"{method} failed:\n{e}",
+                                       parent=getattr(self, 'corr_window', None) or self.window)
+        label = getattr(self, 'peak_info_label', None)
+        if label is not None:
+            if self.events_df is None:
+                label.config(text="")
+            else:
+                n_cells = self.events_df["cell_id"].nunique() if len(self.events_df) else 0
+                label.config(text=f"{len(self.events_df)} peaks in {n_cells} of "
+                                  f"{self.norm_df.shape[1]} cells")
+
+    def _report_analysis(self, identity, norm_params):
+        """Record stage 6: the normalized signals (unless they are the raw
+        ones) and the events (if a peak method is chosen); cleared when
+        there is neither."""
+        if self.project is None:
+            return
+        items, params = {}, dict(norm_params)
+        if not identity:
+            items["normalized_signals"] = self.norm_df
+        if self.events_df is not None:
+            items["events"] = self.events_df
+            params["peak_method"] = self.peak_method
+            params["peak_params"] = self._peak_settings()[1]
+            params["peaks_on"] = "raw signals" if identity else "normalized signals"
+        if items:
+            self._report("analysis", items, params=params)
+        else:
+            self.project.clear_stage("analysis")
+
+    def export_events(self):
+        """Save the detected peaks (stage 6 events format)."""
+        if self.events_df is None:
+            messagebox.showwarning("No Events", "Choose a peak method (Peaks) first.",
+                                   parent=getattr(self, 'corr_window', None) or self.window)
+            return
+        self._save("events", self.events_df, "Export Events", initialfile="events.csv")
 
     def _redraw_correlation(self):
         """Redraw the current view (e.g. after toggling 'Show lowest points')."""
@@ -1098,6 +1198,10 @@ class VariabilityAnalysisWindow:
         show_points = bool(getattr(self, 'norm_show_points_var', None) and self.norm_show_points_var.get())
         points_used = getattr(self, 'lowest_points_used', {}) if show_points else {}
         points_labelled = False
+        show_peaks = self.events_df is not None and bool(
+            getattr(self, 'peak_show_var', None) is None or self.peak_show_var.get())
+        peaks = events.events_by_column(self.events_df, self.norm_df.columns) if show_peaks else {}
+        peaks_labelled = False
         for col, label in zip(self.norm_df.columns, self.cluster_labels):
             values = self.norm_df[col].to_numpy()
             line, = ax.plot(values, label=label, alpha=0.8)
@@ -1106,7 +1210,15 @@ class VariabilityAnalysisWindow:
                 ax.scatter(px, values[px], s=28, color=line.get_color(), edgecolors='black', linewidths=0.6,
                            zorder=4, label=None if points_labelled else 'Lowest points used')
                 points_labelled = True
-        ax.set_title(f'Time Series of Selected Cells ({self.norm_description})')
+            pk = peaks.get(col)
+            if pk is not None and len(pk):
+                ax.scatter(pk, values[pk], s=45, marker='^', color=line.get_color(), edgecolors='crimson',
+                           linewidths=1.0, zorder=5, label=None if peaks_labelled else 'Peaks')
+                peaks_labelled = True
+        title = f'Time Series of Selected Cells ({self.norm_description})'
+        if self.events_df is not None:
+            title += f' - {len(self.events_df)} peaks ({self.peak_method})'
+        ax.set_title(title)
         ax.set_xlabel('Frame')
         ax.set_ylabel('Average Intensity' if self.norm_description == "raw" else 'Normalized value')
         ax.grid(True, alpha=0.3)
@@ -1242,13 +1354,22 @@ class VariabilityAnalysisWindow:
             f.write(f"Cells: {self.detection_info}\n")
             f.write(f"Selected cells: {len(self.selected_clusters)}\n")
             f.write(f"Signals: {self.norm_description}\n")
+            if self.events_df is not None:
+                method, params = self._peak_settings()
+                f.write(f"Peaks: {method} ({', '.join(f'{k}={v}' for k, v in params.items())}), "
+                        f"{len(self.events_df)} in total\n")
             f.write(f"Correlation method: {self.current_method}\n")
             f.write(f"Clustering: {correlation.LINKAGE_DESCRIPTION}\n\n")
 
             f.write("CELL DETAILS:\n")
             f.write("-" * 25 + "\n")
+            counts = (self.events_df["cell_id"].value_counts() if self.events_df is not None
+                      and len(self.events_df) else {})
             for cid in self._selected_sorted():
-                f.write(f"Cell {cid}: {len(self.cell_pix[cid])} pixels\n")
+                line = f"Cell {cid}: {len(self.cell_pix[cid])} pixels"
+                if self.events_df is not None:
+                    line += f", {int(counts.get(cid, 0))} peaks"
+                f.write(line + "\n")
 
             f.write(f"\nCORRELATION MATRIX ({self.current_method}):\n")
             f.write("-" * 35 + "\n")
