@@ -1,7 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import scipy.cluster.hierarchy as sch
 import numpy as np
 from scipy.cluster.hierarchy import dendrogram
 import tkinter as tk
@@ -47,16 +46,14 @@ def correlation_spearman(data):
     plt.close('all')
     return core_correlation.correlation_matrix(data, 'spearman')
 
-def _plot_dendrogram_helper(model, **kwargs):
-    """
-    Plot a dendrogram (on the current axes) from a fitted
-    AgglomerativeClustering model.
+def _plot_dendrogram_helper(corr, ax=None):
+    """Draw the dendrogram of a correlation matrix with the clustering
+    shared by every view (neclab_core.correlation.cluster_linkage)."""
+    labels = [str(c) for c in corr.columns] if hasattr(corr, "columns") else None
+    dendrogram(core_correlation.cluster_linkage(corr), labels=labels, ax=ax, leaf_rotation=90)
+    if ax is not None:
+        ax.set_ylabel("Distance")
 
-    Args:
-        model: Fitted AgglomerativeClustering model
-        **kwargs: Additional arguments passed to scipy.cluster.hierarchy.dendrogram
-    """
-    dendrogram(core_correlation.linkage_from_model(model), **kwargs)
 
 def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None, target_frame=None):
     '''Plot a graphical correlation matrix for a dataframe.
@@ -81,19 +78,20 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
     else:
         corr_func = df.corr()  # compute correlation matrix from data
     
-    # For dendrogram, use correlation matrix values for clustering
-    data_for_dendro = corr_func.values
-    
     # Create figure with two subplots: dendrogram on top, correlation below (50/50 split)
     fig = plt.figure(figsize=(size, size * 2))
     
     # Dendrogram subplot (top, 50%)
     ax_dendro = plt.subplot2grid((2, 1), (0, 0), rowspan=1)
     
-    # Compute dendrogram from correlation matrix
-    clustering = core_correlation.agglomerative_model(data_for_dendro)
-    _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    ax_dendro.set_title('Dendrogram')
+    # Dendrogram of the correlation matrix (shared clustering)
+    try:
+        _plot_dendrogram_helper(corr_func, ax=ax_dendro)
+        ax_dendro.set_title(f'Dendrogram ({core_correlation.LINKAGE_DESCRIPTION})')
+    except ValueError as e:
+        ax_dendro.text(0.5, 0.5, f"Can't build the dendrogram:\n{e}", ha='center', va='center',
+                       transform=ax_dendro.transAxes, wrap=True)
+        ax_dendro.set_title('Dendrogram')
     
     # Correlation matrix subplot (bottom, 50%)
     ax_corr = plt.subplot2grid((2, 1), (1, 0), rowspan=1)
@@ -184,9 +182,8 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             fig_dendro = plt.figure(figsize=(size, size))
             ax_dendro_temp = fig_dendro.add_subplot(111)
             plt.sca(ax_dendro_temp)
-            clustering_temp = core_correlation.agglomerative_model(data_for_dendro)
-            _plot_dendrogram_helper(clustering_temp, truncate_mode="none", count_sort='none', show_contracted='true')
-            ax_dendro_temp.set_title('Dendrogram')
+            _plot_dendrogram_helper(corr_func, ax=ax_dendro_temp)
+            ax_dendro_temp.set_title(f'Dendrogram ({core_correlation.LINKAGE_DESCRIPTION})')
             fig_dendro.savefig(filename)
             plt.close(fig_dendro)
     
@@ -245,157 +242,6 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
     save_all_button.pack(side=tk.LEFT, padx=5)
 
     return canvas, fig
-
-def plot_correlation(data, corr, root, canvas, corr_method=None):
-    # Clean up by clearing the plot frame (don't rely on stale canvas reference)
-    plot_frame = get_main_plot_frame(root)
-    for widget in list(plot_frame.winfo_children()):
-        widget.destroy()
-    plt.close('all')
-
-    # Also remove any existing button frames from root
-    for widget in list(root.winfo_children()):
-        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
-            widget.destroy()
-
-    df = pd.DataFrame(data)
-    X = corr.values
-    d = sch.distance.pdist(X)   # vector of ('55' choose 2) pairwise distances
-    L = sch.linkage(d, method='complete')
-    ind = sch.fcluster(L, 50, criterion='maxclust')
-    columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
-    df = df.reindex(columns, axis=1)
-    size = 5
-    canvas, _ = _plot_correlation_helper(df, size, root, canvas, corr_method=corr_method)
-    return canvas
-
-def plot_dendogram(data, root, canvas):
-    # Remove any existing buttons
-    for widget in list(root.winfo_children()):
-        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
-            widget.destroy()
-    
-    # Get the main plot frame
-    plot_frame = get_main_plot_frame(root)
-    
-    # Clear ALL widgets from the plot frame
-    for widget in list(plot_frame.winfo_children()):
-        widget.destroy()
-    
-    # Close all matplotlib figures
-    plt.close('all')
-
-    clustering = core_correlation.agglomerative_model(data.transpose())
-    clustering.labels_.shape
-    # plot the top three levels of the dendrogram
-    _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    fig = plt.gcf()
-    
-    # Create canvas in the plot frame using pack
-    canvas = FigureCanvasTkAgg(fig, master=plot_frame)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    
-    # Get default filename from visualization_helpers if available
-    def get_default_dendogram_name(extension):
-        try:
-            from visualization_helpers import loaded_filename
-            if loaded_filename:
-                import os
-                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
-                return f"{base_name}_dendrogram{extension}"
-        except:
-            pass
-        return f"dendrogram{extension}"
-    
-    # Add save buttons for dendrogram
-    def _save_dendrogram_image():
-        default_name = get_default_dendogram_name('.png')
-        filename = asksaveasfilename(
-            initialfile=default_name,
-            defaultextension=".png",
-            filetypes=[
-                ("PNG Image", "*.png"),
-                ("PDF Document", "*.pdf"),
-                ("TIFF Image", "*.tiff"),
-                ("SVG Vector", "*.svg"),
-                ("EPS Vector", "*.eps"),
-                ("All Files", "*.*")
-            ]
-        )
-        if filename:
-            fig.savefig(filename)
-    
-    def _save_dendrogram_csv():
-        """Save dendrogram clustering data to a CSV or Excel file"""
-        default_name = get_default_dendogram_name('.csv')
-        filename = asksaveasfilename(
-            initialfile=default_name,
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
-            title="Save Dendrogram Data"
-        )
-
-        if filename:
-            # Create DataFrame with clustering information
-            # Include cluster labels and linkage information
-            df_data = {
-                'Sample_Index': list(range(len(clustering.labels_))),
-                'Cluster_Label': clustering.labels_
-            }
-
-            df = pd.DataFrame(df_data)
-
-            # Add linkage matrix information as separate section
-            linkage_data = []
-            for i, (child1, child2) in enumerate(clustering.children_):
-                linkage_data.append({
-                    'Merge_Step': i,
-                    'Child_1': int(child1),
-                    'Child_2': int(child2),
-                    'Distance': clustering.distances_[i]
-                })
-
-            df_linkage = pd.DataFrame(linkage_data)
-
-            if filename.lower().endswith(('.xlsx', '.xls')):
-                with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='Cluster_Labels', index=False)
-                    df_linkage.to_excel(writer, sheet_name='Linkage_Matrix', index=False)
-            else:
-                # Save both dataframes to CSV
-                with open(filename, 'w', newline='') as f:
-                    f.write("# Cluster Labels\n")
-                    df.to_csv(f, index=False)
-                    f.write("\n# Linkage Matrix\n")
-                    df_linkage.to_csv(f, index=False)
-
-            messagebox.showinfo("Success", f"Dendrogram data saved to {filename}")
-    
-    # Create button frame for dendrogram inside the plot frame using pack
-    button_frame = tk.Frame(plot_frame)
-    button_frame.peak_button_frame = True  # Mark for cleanup
-    button_frame.pack(fill=tk.X, padx=5, pady=5)
-    
-    # Create save buttons
-    save_img_button = tk.Button(
-        button_frame,
-        text="Save Image",
-        command=_save_dendrogram_image
-    )
-    save_img_button.pack(side=tk.LEFT, padx=5)
-    
-    save_csv_button = tk.Button(
-        button_frame,
-        text="Save CSV",
-        command=_save_dendrogram_csv
-    )
-    save_csv_button.pack(side=tk.LEFT, padx=5)
-    
-    # Configure button frame
-    root.grid_rowconfigure(1, weight=0)  # Don't expand button row
-    
-    return canvas
 
 def plot_time_series(norm_data, column_names=None, notebook=None):
     if notebook is not None:

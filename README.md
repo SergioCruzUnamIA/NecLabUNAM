@@ -156,7 +156,8 @@ NecLabUNAM/
 │   ├── variability.py          #   The 7 variability maps + sharpening
 │   ├── segmentation.py         #   Cell detection -> label image with permanent IDs
 │   ├── signals.py              #   Per-cell signal extraction
-│   └── correlation.py          #   Correlation matrices and hierarchical clustering
+│   ├── normalization.py        #   Normalization + smoothing, shared by every view
+│   └── correlation.py          #   Correlation + clustering (Ward on 1 − |r|), shared by every view
 ├── tests/                      # Tests for neclab_core (pytest)
 ├── variability_functions.py    # Cell detection window (UI)
 ├── peak_functions.py           # Peak detection (7 methods) and smoothing
@@ -184,7 +185,7 @@ NecLabUNAM/
 All calculations live in `neclab_core/`, which never imports tkinter or opens a window: its functions take arrays, tables or file paths and return arrays or tables. The tabs and windows only call these functions and draw the results, so the same code can be used from a notebook or a script:
 
 ```python
-from neclab_core import formats, variability, segmentation, signals, correlation
+from neclab_core import formats, variability, segmentation, signals, normalization, correlation
 
 stack, metadata = formats.load_ometiff("recording.ome.tif")          # (frames, height, width)
 var_im, threshold, name = variability.calculate_variability(stack, method=1)
@@ -193,7 +194,9 @@ labels, mask = segmentation.detect_cells(var_im, variability.sharpen(var_im),
 traces = signals.extract_signals(stack, labels)                       # frames x cell_<id>
 formats.write_signals(traces, "signals.csv")
 formats.save_cells(labels, "cells.tif")                               # + cells.csv
-corr = correlation.correlation_matrix(traces, "pearson")
+dff = normalization.normalize_signals(traces, "delta_f_over_f0")      # stage 6 (ΔF/F0)
+corr = correlation.correlation_matrix(dff, "pearson")
+tree = correlation.cluster_linkage(corr)                              # Ward on 1 − |r|, as in the app
 ```
 
 Cells are represented by a **label image** (0 = background, n = cell with ID n). IDs are permanent: they are numbered in reading order, saved with the cells, and used as the `cell_<id>` column names of every signals file.

@@ -183,7 +183,9 @@ Menú **Export** (Exportar):
 
   Estos archivos se pueden abrir directamente con `File → Open Data Files`: la columna de frame se reconoce y no se muestra como columna de datos.
 - **Save Cells (Label Image)...** (Guardar Células): guarda las células como una imagen de etiquetas (`.tif` o `.npy`: una imagen del tamaño de un frame donde cada píxel contiene el ID de su célula, 0 = fondo) más una tabla con el mismo nombre y extensión `.csv` (`cell_id, n_pixels, centroid_row, centroid_col`). Si hay células seleccionadas, pregunta si guardar solo esas. Se vuelven a cargar con **Data → Load Cells...**.
-- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (mismo formato que Save Signals), **Export Correlation** (la matriz actual, que se puede volver a abrir como etapa 7), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
+- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (las señales crudas, mismo formato que Save Signals), **Export Normalized** (las señales tal como se muestran, etapa 6), **Export Correlation** (la matriz actual, que se puede volver a abrir como etapa 7), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
+  - **Normalization** + **Smoothing points** (0 = sin suavizado) + **Apply**: cómo se normalizan las señales antes de calcular la correlación (ver [sección 12](#métodos-de-normalización-ventana-de-análisis-de-correlación)). Por defecto es *None*, las intensidades medias crudas. La gráfica, la correlación y el dendrograma usan las señales normalizadas, que se registran como etapa 6 del proyecto (y el ajuste se restaura al reabrir el proyecto).
+  - El dendrograma usa el enlace de Ward sobre la distancia 1 − |r|, como todos los demás dendrogramas de NecLab.
 
 Las señales y el análisis de correlación necesitan la grabación; sin ella lo indican y remiten a **Data → Attach Recording...**.
 
@@ -311,6 +313,9 @@ Se crea la primera vez que usa `File → Open Multiple Files (.xls)`. Permite ca
     | By Sheet (Por Hoja) | divide entre el mínimo de toda la hoja |
     | By Column Across All Sheets (Por Columna en Todas las Hojas) | divide entre el mínimo de esa columna combinando todas las hojas cargadas |
     | Global | divide entre el mínimo de todo el conjunto de datos cargado |
+    | None (Ninguna — datos ya normalizados) | usa los valores tal como se cargaron, p. ej. para señales guardadas con **Export Normalized** (etapa 6) |
+
+    Una columna (u hoja) cuyo mínimo es 0 no se divide, en lugar de producir valores infinitos. La gráfica de líneas, el mapa de calor y `Save Smoothed Data` usan el mismo código de normalización que el resto de NecLab.
 - **Visualization** (Visualización)
   - `Axis Limits (Top Plot)...` (Límites de Ejes — Gráfica Superior): fija manualmente los límites X/Y de la gráfica de líneas (botón "Auto" para revertir).
   - `Color Limits (Heatmap)...` (Límites de Color — Heatmap): fija manualmente el rango de color del mapa de calor, mostrando el rango actualmente en uso (botón "Auto" para revertir).
@@ -339,8 +344,8 @@ Ambos paneles se redibujan para llenar su espacio al cambiar el tamaño de la ve
 Se crea la primera vez que hay datos cargados (vía `File → Open Data`) y se usa `Visualization → Dendrogram`.
 
 - Panel lateral: lista "DATA COLUMNS" (igual que en Data Visualization), lista "SELECTION", botones "Add to Selection"/"Remove from Selection", y botones "Save Dendrogram Image" / "Save Dendrogram CSV".
-- Área de gráfica: panel superior con la señal cruda de la columna elegida; panel inferior con el dendrograma de las columnas en la lista de Selection (mínimo 2), calculado con `AgglomerativeClustering` (`distance_threshold=0, n_clusters=None`) sobre la selección transpuesta, y dibujado con `scipy.cluster.hierarchy.dendrogram`.
-- "Save Dendrogram CSV" exporta las etiquetas de cluster junto con la matriz de enlace (linkage: pasos de fusión, hijos, distancias).
+- Área de gráfica: panel superior con la señal de la columna elegida; panel inferior con el dendrograma de las columnas en la lista de Selection (mínimo 2). El dendrograma agrupa la **correlación** entre las señales seleccionadas (tipo de correlación de la pestaña Multiple Files), con el agrupamiento común a todas las vistas: enlace de Ward sobre la distancia 1 − |r| (ver [sección 12](#métodos-de-correlación)).
+- "Save Dendrogram CSV" exporta las señales (`Sample_Index, Signal, Dendrogram_Position`) y la matriz de enlace (`Merge_Step, Child_1, Child_2, Distance, Size`; los hijos menores que el número de señales son señales, el resto son fusiones anteriores).
 
 ---
 
@@ -359,7 +364,7 @@ Se crea al usar `Visualization → Time Series` (requiere datos cargados vía `F
 
 `File → Load Correlation Matrix` permite cargar una matriz de correlación ya calculada externamente (CSV o XLSX). Debe ser una matriz cuadrada; si contiene valores fuera del rango [-1, 1] se muestra una advertencia.
 
-Se renderiza directamente en el área principal de la pestaña "Data Visualization" como un dendrograma (arriba) más un mapa de calor de correlación (abajo), con sus propios botones: "Save Dendrogram", "Save Correlation Matrix" (CSV), "Save Correlation Matrix Image", "Save All".
+Se renderiza directamente en el área principal de la pestaña "Data Visualization" como un dendrograma (arriba) más un mapa de calor de correlación (abajo), con sus propios botones: "Save Dendrogram", "Save Correlation Matrix" (CSV), "Save Correlation Matrix Image", "Save All". El dendrograma usa el mismo agrupamiento que todas las demás vistas (enlace de Ward sobre 1 − |r|).
 
 ---
 
@@ -407,7 +412,20 @@ Ver tabla en la [sección 4.1](#41-métodos-de-variabilidad-disponibles).
 
 ### Métodos de correlación
 
-`pearson` (lineal), `kendall` (rangos, tau), `spearman` (rangos, rho) — disponibles en Data Visualization, Multiple Files (implícitamente vía dendrograma) y en las correlaciones de clusters del Variability Analysis.
+`pearson` (lineal), `kendall` (rangos, tau), `spearman` (rangos, rho) — disponibles en Multiple Files (y su pestaña Dendrogram) y en el análisis de correlación de la ventana de detección de células.
+
+**Agrupamiento (dendrogramas).** Todos los dendrogramas de NecLab (ventana de análisis de correlación, pestaña Dendrogram, matriz de correlación cargada) agrupan las señales de la misma forma: la distancia entre dos señales es 1 − |r| (0 cuando están perfectamente correlacionadas *o* anticorrelacionadas, 1 cuando no están relacionadas), y los grupos se unen con el enlace de Ward. Note que, por lo tanto, las señales anticorrelacionadas quedan agrupadas juntas.
+
+### Métodos de normalización (ventana de análisis de correlación)
+
+| Método | Qué hace |
+|---|---|
+| None (valores crudos) | Intensidad media de cada célula, tal como se extrajo |
+| Divide by minimum (Dividir entre el mínimo) | Cada señal dividida entre su propio mínimo |
+| ΔF/F0 | (F − F0) / F0, con F0 = el percentil 10 de la señal |
+| Detrend + scale to 0–1 (Quitar tendencia + escalar a 0–1) | Quita una tendencia lineal (ElasticNet) y escala a 0–1 |
+
+Cada uno se puede combinar con el suavizado de envolvente convexa (ver Detección de picos arriba). Los modos de dividir entre el mínimo de la pestaña Multiple Files usan el mismo código.
 
 ---
 

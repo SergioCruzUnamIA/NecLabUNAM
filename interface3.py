@@ -123,6 +123,7 @@ _CORE_FILES = [
     "neclab_core/segmentation.py",
     "neclab_core/signals.py",
     "neclab_core/correlation.py",
+    "neclab_core/normalization.py",
 ]
 
 
@@ -175,6 +176,7 @@ _ensure_core_package()
 
 from neclab_core import correlation as core_correlation
 from neclab_core import display as core_display
+from neclab_core import normalization as core_normalization
 from neclab_core import stages as core_stages
 from neclab_core import project as core_project
 from neclab_core.project import Project
@@ -966,11 +968,17 @@ class NecLabApp:
 
         from scipy.cluster.hierarchy import dendrogram
 
-        plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
+        try:
+            link, labels, method = self._dendo_linkage(self.dendo_selection_indices)
+        except ValueError as e:
+            tk.Label(self.dendo_bottom_frame, text=f"Can't build the dendrogram:\n{e}",
+                     font=('Arial', 12), bg=_C['panel'], fg=_C['sub']).pack(fill=tk.BOTH, expand=True)
+            return
         self.dendo_fig, ax = plt.subplots()
-        dendrogram(core_correlation.agglomerative_linkage(plot_data.T), ax=ax,
-                   truncate_mode="none", count_sort='none', show_contracted='true')
-        ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
+        dendrogram(link, ax=ax, labels=labels, leaf_rotation=90)
+        ax.set_title(f'Dendrogram ({len(labels)} signals, {method.capitalize()} correlation, '
+                     f'{core_correlation.LINKAGE_DESCRIPTION})')
+        ax.set_ylabel('Distance')
         self.dendo_fig.tight_layout()
 
         canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_bottom_frame)
@@ -978,6 +986,20 @@ class NecLabApp:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
 
+
+    def _dendo_linkage(self, column_indices):
+        """Clustering of the given columns: correlation of their
+        concatenated cross-sheet series (method from the Multiple Files
+        correlation setting), clustered like every other view
+        (neclab_core.correlation.cluster_linkage). Returns (linkage,
+        labels, correlation method)."""
+        import pandas as pd
+        indices = list(column_indices)
+        labels = [self.dendo_column_listbox.get(i) for i in indices]
+        data = pd.DataFrame(self._dendo_build_matrix(indices), columns=labels)
+        method = self.multi_xls_corr_method_var.get()
+        corr = core_correlation.correlation_matrix(data, method)
+        return core_correlation.cluster_linkage(corr), labels, method
 
     def _dendo_save_image(self):
         """Save the current dendrogram figure to a file."""
@@ -1002,10 +1024,13 @@ class NecLabApp:
         from tkinter.filedialog import asksaveasfilename
         import pandas as pd
 
-        if len(self.dendo_selection_indices) >= 2:
-            plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
-        else:
-            plot_data = self._dendo_build_matrix(range(len(self.multi_xls_common_columns)))
+        indices = (self.dendo_selection_indices if len(self.dendo_selection_indices) >= 2
+                   else range(len(self.multi_xls_common_columns)))
+        try:
+            link, labels, _method = self._dendo_linkage(indices)
+        except ValueError as e:
+            messagebox.showerror("Can't Build Dendrogram", str(e))
+            return
 
         filename = asksaveasfilename(
             defaultextension=".csv",
@@ -1015,26 +1040,22 @@ class NecLabApp:
         if not filename:
             return
 
-        clustering = core_correlation.agglomerative_model(plot_data.T)
-
+        order = core_correlation.dendrogram_order(link)
+        position = {leaf: pos for pos, leaf in enumerate(order)}
         df_labels = pd.DataFrame({
-            'Sample_Index': list(range(len(clustering.labels_))),
-            'Cluster_Label': clustering.labels_
+            'Sample_Index': list(range(len(labels))),
+            'Signal': labels,
+            'Dendrogram_Position': [position[i] for i in range(len(labels))],
         })
-        linkage_rows = [
-            {'Merge_Step': i, 'Child_1': int(c1), 'Child_2': int(c2),
-             'Distance': clustering.distances_[i]}
-            for i, (c1, c2) in enumerate(clustering.children_)
-        ]
-        df_linkage = pd.DataFrame(linkage_rows)
+        df_linkage = core_correlation.linkage_table(link)
 
         if filename.lower().endswith(('.xlsx', '.xls')):
             with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
-                df_labels.to_excel(writer, sheet_name='Cluster_Labels', index=False)
+                df_labels.to_excel(writer, sheet_name='Signals', index=False)
                 df_linkage.to_excel(writer, sheet_name='Linkage_Matrix', index=False)
         else:
             with open(filename, 'w', newline='') as f:
-                f.write("# Cluster Labels\n")
+                f.write("# Signals\n")
                 df_labels.to_csv(f, index=False)
                 f.write("\n# Linkage Matrix\n")
                 df_linkage.to_csv(f, index=False)
@@ -1275,6 +1296,11 @@ class NecLabApp:
             norm_menu.add_radiobutton(
                 label="Global (minimum of all columns and sheets)",
                 variable=self.multi_xls_norm_mode_var, value='all_global',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_separator()
+            norm_menu.add_radiobutton(
+                label="None (data already normalized)",
+                variable=self.multi_xls_norm_mode_var, value='none',
                 command=self._on_multi_xls_norm_mode_toggle)
             m.add_cascade(label="Normalization", menu=norm_menu)
 
@@ -2158,38 +2184,39 @@ class NecLabApp:
         the line plot's right margin aligned with it."""
         return self.multi_xls_shared_scale_var.get() or self.multi_xls_heatmap_manual_range is not None
 
+    def _multi_xls_smoothing_points(self):
+        """Convex Envelope key points when 'Smoothing' is on, else None."""
+        if not self.multi_xls_smoothing_var.get():
+            return None
+        try:
+            return self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            return None
+
     def _smooth_multi_xls_signal(self, values):
         """Apply Convex Envelope smoothing to a single sheet's column values
         when the 'Smoothing' checkbox is on."""
-        if not self.multi_xls_smoothing_var.get():
+        n_points = self._multi_xls_smoothing_points()
+        if n_points is None:
             return values
-        try:
-            n_points = self.multi_xls_smoothing_points_var.get()
-        except tk.TclError:
-            return values
-        from peak_functions import _convex_envelope_detrend_signal
-        return _convex_envelope_detrend_signal(values, n_points=n_points)
+        return core_normalization.smooth_convex_envelope(values, n_points=n_points)
 
     def _smooth_multi_xls_matrix(self, m):
-        """Apply _smooth_multi_xls_signal to every data column of a
-        normalized sheet matrix (samples x columns), for the heatmap - so
-        it matches the top line plot when 'Smoothing' is on. NaNs (missing
-        samples) are interpolated before smoothing, since the Convex
-        Envelope algorithm needs a finite series, then restored afterward."""
-        if not self.multi_xls_smoothing_var.get():
+        """Smooth every data column of a normalized sheet matrix (samples x
+        columns) for the heatmap, so it matches the top line plot when
+        'Smoothing' is on. Missing samples stay missing."""
+        n_points = self._multi_xls_smoothing_points()
+        if n_points is None:
             return m
-        import pandas as pd
-        out = np.array(m, dtype=float, copy=True)
-        for c in range(m.shape[1]):
-            col = m[:, c]
-            nan_mask = ~np.isfinite(col)
-            if nan_mask.all():
-                continue
-            filled = pd.Series(col).interpolate(limit_direction='both').to_numpy() if nan_mask.any() else col
-            smoothed = self._smooth_multi_xls_signal(filled)
-            smoothed[nan_mask] = np.nan
-            out[:, c] = smoothed
-        return out
+        m = np.asarray(m, dtype=float)
+        return np.column_stack([core_normalization.smooth_keeping_gaps(m[:, c], n_points)
+                                for c in range(m.shape[1])]) if m.shape[1] else m
+
+    def _multi_xls_normalized_tables(self):
+        """Every loaded sheet divided by the minimum chosen in View →
+        Normalization (neclab_core.normalization.divide_by_min_tables)."""
+        return core_normalization.divide_by_min_tables(
+            [ds['df'] for ds in self.multi_xls_datasets], self.multi_xls_norm_mode_var.get())
 
     def _on_multi_xls_norm_mode_toggle(self):
         """Redraw both plots with the chosen normalization mode: by column
@@ -2220,8 +2247,6 @@ class NecLabApp:
         because a redraw triggered only by a panel resize doesn't change
         any of this data - this avoids reprocessing every sheet on every
         resize."""
-        import pandas as pd
-
         mode = self.multi_xls_norm_mode_var.get()
         smoothing_on = self.multi_xls_smoothing_var.get()
         try:
@@ -2232,48 +2257,13 @@ class NecLabApp:
         if self._multi_xls_series_cache_key == cache_key:
             return self._multi_xls_series_cache
 
-        column_global_min = None
-        if mode == 'column_global':
-            pooled = []
-            for ds in self.multi_xls_datasets:
-                if col_name in ds['df'].columns:
-                    v = ds['df'][col_name].to_numpy(dtype=float)
-                    pooled.append(v[np.isfinite(v)])
-            if pooled:
-                pooled = np.concatenate(pooled)
-                if pooled.size:
-                    column_global_min = pooled.min()
-
-        all_global_min = None
-        if mode == 'all_global':
-            pooled = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
-            finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
-            if finite.size:
-                all_global_min = finite.min()
-
         series = []
-        for ds in self.multi_xls_datasets:
-            if col_name not in ds['df'].columns:
+        for ds, table in zip(self.multi_xls_datasets, self._multi_xls_normalized_tables()):
+            if col_name not in table.columns:
                 continue
-            values = ds['df'][col_name].to_numpy(dtype=float)
-            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+            values = core_normalization.fill_missing(table[col_name])
             if len(values) == 0:
                 continue
-
-            if mode == 'sheet':
-                all_values = ds['df'].to_numpy(dtype=float)
-                finite = all_values[np.isfinite(all_values)]
-                divisor = finite.min() if finite.size else None
-            elif mode == 'column_global':
-                divisor = column_global_min
-            elif mode == 'all_global':
-                divisor = all_global_min
-            else:  # 'local'
-                finite = values[np.isfinite(values)]
-                divisor = finite.min() if finite.size else None
-
-            if divisor is not None and divisor != 0:
-                values = values / divisor
             values = self._smooth_multi_xls_signal(values)
             series.append((ds['label'], values))
 
@@ -2491,6 +2481,8 @@ class NecLabApp:
             ax.set_ylabel('Value / minimum of the column (all sheets)')
         elif norm_mode == 'all_global':
             ax.set_ylabel('Value / global minimum (all columns and sheets)')
+        elif norm_mode == 'none':
+            ax.set_ylabel('Value (not normalized)')
         else:
             ax.set_ylabel('Value / minimum of the column')
 
@@ -2594,41 +2586,10 @@ class NecLabApp:
         if finite_vals.size == 0:
             result = (None, None, None, None)
         else:
-            matrices = []
-            if mode == 'local':
-                # Each data column normalized against its own minimum,
-                # within that sheet only.
-                for m in raw_matrices:
-                    with np.errstate(invalid='ignore'):
-                        col_mins = np.where(np.isfinite(m), m, np.nan)
-                        col_mins = np.nanmin(col_mins, axis=0, keepdims=True)
-                    col_mins = np.where(np.isfinite(col_mins) & (col_mins != 0), col_mins, 1.0)
-                    matrices.append(self._smooth_multi_xls_matrix(m / col_mins).T)
-            elif mode == 'column_global':
-                # Each data column (by position) normalized against the
-                # minimum of that same column position, pooled across
-                # every loaded sheet.
-                n_cols = max((m.shape[1] for m in raw_matrices), default=0)
-                pooled_min = np.full(n_cols, np.nan)
-                for m in raw_matrices:
-                    for c in range(m.shape[1]):
-                        col = m[:, c]
-                        finite = col[np.isfinite(col)]
-                        if finite.size:
-                            v = finite.min()
-                            pooled_min[c] = v if np.isnan(pooled_min[c]) else min(pooled_min[c], v)
-                pooled_min = np.where(np.isfinite(pooled_min) & (pooled_min != 0), pooled_min, 1.0)
-                for m in raw_matrices:
-                    matrices.append(self._smooth_multi_xls_matrix(m / pooled_min[:m.shape[1]]).T)
-            elif mode == 'all_global':
-                all_min = finite_vals.min()
-                if all_min == 0:
-                    all_min = 1.0
-                matrices = [self._smooth_multi_xls_matrix(m / all_min).T for m in raw_matrices]
-            else:  # 'sheet' (default / previous behavior)
-                for m in raw_matrices:
-                    sheet_min = float(m[np.isfinite(m)].min())
-                    matrices.append(self._smooth_multi_xls_matrix(m / sheet_min).T)
+            # Same normalization as the line plot (neclab_core.normalization),
+            # each sheet shown in full: rows = data columns, columns = samples.
+            matrices = [self._smooth_multi_xls_matrix(t.to_numpy(dtype=float)).T
+                        for t in self._multi_xls_normalized_tables()]
 
             per_sheet_ranges = []
             for m in matrices:
@@ -2746,17 +2707,18 @@ class NecLabApp:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
         norm_mode_desc = {
-            'local': 'minimum of each column in each sheet',
-            'sheet': 'minimum of each sheet',
-            'column_global': 'minimum of each column (all sheets)',
-            'all_global': 'global minimum (all columns and sheets)',
-        }.get(self.multi_xls_norm_mode_var.get(), 'minimum of each sheet')
+            'local': 'value / minimum of each column in each sheet',
+            'sheet': 'value / minimum of each sheet',
+            'column_global': 'value / minimum of each column (all sheets)',
+            'all_global': 'value / global minimum (all columns and sheets)',
+            'none': 'value, not normalized',
+        }.get(self.multi_xls_norm_mode_var.get(), 'value / minimum of each sheet')
         if manual_range is not None:
-            ax.set_title(f'All sheets (value / {norm_mode_desc}, manual range)')
+            ax.set_title(f'All sheets ({norm_mode_desc}, manual range)')
         elif shared_scale:
-            ax.set_title(f'All sheets (value / {norm_mode_desc})')
+            ax.set_title(f'All sheets ({norm_mode_desc})')
         else:
-            ax.set_title(f'All sheets (value / {norm_mode_desc}, per-sheet individual scale)')
+            ax.set_title(f'All sheets ({norm_mode_desc}, per-sheet individual scale)')
         # Same shared left/right bounds as the top line plot (see
         # _multi_xls_axes_margins), so a sample's x-position lines up
         # vertically between the two. The colorbar (when shown) goes in its
@@ -2848,62 +2810,21 @@ class NecLabApp:
             gap_rows = 20
             n_steps = len(datasets) + 1  # +1 for the final write step
 
-            # Precompute the same divisors _compute_multi_xls_series uses,
-            # so the exported values match the plot exactly for every
-            # normalization mode - not just the column currently on screen.
-            column_global_min = {}
-            if norm_mode == 'column_global':
-                for col_name in common_columns:
-                    pooled = []
-                    for ds in datasets:
-                        if col_name in ds['df'].columns:
-                            v = ds['df'][col_name].to_numpy(dtype=float)
-                            pooled.append(v[np.isfinite(v)])
-                    if pooled:
-                        pooled = np.concatenate(pooled)
-                        if pooled.size:
-                            column_global_min[col_name] = pooled.min()
-
-            all_global_min = None
-            if norm_mode == 'all_global':
-                pooled = [ds['df'].to_numpy(dtype=float) for ds in datasets]
-                finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
-                if finite.size:
-                    all_global_min = finite.min()
+            # Same normalization as the plot (neclab_core.normalization), for
+            # every common column - not just the one currently on screen.
+            tables = core_normalization.divide_by_min_tables([ds['df'] for ds in datasets], norm_mode)
 
             blocks = []
-            for i, ds in enumerate(datasets):
+            for i, (ds, table) in enumerate(zip(datasets, tables)):
                 report_progress(i, n_steps, f"Processing {ds['label']}  ({i + 1}/{len(datasets)})")
-
-                sheet_min = None
-                if norm_mode == 'sheet':
-                    all_values = ds['df'].to_numpy(dtype=float)
-                    finite = all_values[np.isfinite(all_values)]
-                    sheet_min = finite.min() if finite.size else None
 
                 out_cols = {}
                 for col_name in common_columns:
-                    if col_name not in ds['df'].columns:
+                    if col_name not in table.columns:
                         continue
-                    values = ds['df'][col_name].to_numpy(dtype=float)
-                    values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
-
-                    if norm_mode == 'sheet':
-                        divisor = sheet_min
-                    elif norm_mode == 'column_global':
-                        divisor = column_global_min.get(col_name)
-                    elif norm_mode == 'all_global':
-                        divisor = all_global_min
-                    else:  # 'local'
-                        finite = values[np.isfinite(values)]
-                        divisor = finite.min() if finite.size else None
-
-                    if divisor is not None and divisor != 0:
-                        values = values / divisor
-
+                    values = core_normalization.fill_missing(table[col_name])
                     if smoothing_on:
-                        from peak_functions import _convex_envelope_detrend_signal
-                        values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
+                        values = core_normalization.smooth_convex_envelope(values, n_points=smoothing_points)
                     out_cols[col_name] = values
                 blocks.append(pd.DataFrame(out_cols))
 

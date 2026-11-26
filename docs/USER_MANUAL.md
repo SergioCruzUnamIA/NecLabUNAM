@@ -183,7 +183,9 @@ Each item runs a complete detection with the current Threshold / Min Size / Max 
 
   These files can be opened directly with `File → Open Data Files`: the frame column is recognised and not shown as a data column.
 - **Save Cells (Label Image)...**: saves the cells as a label image (`.tif` or `.npy`: an image the size of one frame where each pixel holds the ID of its cell, 0 = background) plus a table with the same name and a `.csv` extension (`cell_id, n_pixels, centroid_row, centroid_col`). If cells are selected, it asks whether to save only those. Load it back later with **Data → Load Cells...**.
-- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (same format as Save Signals), **Export Correlation** (the current matrix, which can be reopened as stage 7), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
+- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (the raw signals, same format as Save Signals), **Export Normalized** (the signals as shown, stage 6), **Export Correlation** (the current matrix, which can be reopened as stage 7), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
+  - **Normalization** + **Smoothing points** (0 = off) + **Apply**: how the signals are normalized before the correlation is computed (see [section 12](#normalization-methods-correlation-analysis-window)). The default is *None*, the raw mean intensities. The plot, the correlation and the dendrogram all use the normalized signals, which are recorded as stage 6 of the project (and the setting is restored when the project is reopened).
+  - The dendrogram uses Ward linkage on the distance 1 − |r|, like every other dendrogram in NecLab.
 
 Signals and the correlation analysis need the recording; without it they say so and point to **Data → Attach Recording...**.
 
@@ -311,6 +313,9 @@ Created the first time you use `File → Open Multiple Files (.xls)`. Lets you l
     | By Sheet (minimum of the entire sheet) | divides by the minimum across the whole sheet |
     | By Column Across All Sheets (shared minimum) | divides by that column's minimum pooled across every loaded sheet |
     | Global (minimum of all columns and sheets) | divides by the minimum of the entire loaded dataset |
+    | None (data already normalized) | values used as loaded, e.g. for signals saved with **Export Normalized** (stage 6) |
+
+    A column (or sheet) whose minimum is 0 isn't divided, instead of producing infinite values. The line plot, the heatmap and `Save Smoothed Data` all use the same normalization code as the rest of NecLab.
 - **Visualization**
   - `Axis Limits (Top Plot)...`: manually sets X/Y limits for the line plot ("Auto" button to revert).
   - `Color Limits (Heatmap)...`: manually sets the heatmap's color range, showing the range currently in use ("Auto" button to revert).
@@ -339,8 +344,8 @@ Both panels redraw to fill their space on window resize or when a split is relea
 Created the first time data is loaded (via `File → Open Data`) and `Visualization → Dendrogram` is used.
 
 - Side panel: "DATA COLUMNS" list (same as Data Visualization), "SELECTION" list, "Add to Selection"/"Remove from Selection" buttons, and "Save Dendrogram Image" / "Save Dendrogram CSV" buttons.
-- Plot area: top panel shows the raw signal of the chosen column; bottom panel shows the dendrogram of the columns in the Selection list (minimum 2), computed with `AgglomerativeClustering` (`distance_threshold=0, n_clusters=None`) on the transposed selection, drawn with `scipy.cluster.hierarchy.dendrogram`.
-- "Save Dendrogram CSV" exports the cluster labels together with the linkage matrix (merge steps, children, distances).
+- Plot area: top panel shows the signal of the chosen column; bottom panel shows the dendrogram of the columns in the Selection list (minimum 2). The dendrogram clusters the **correlation** between the selected signals (correlation type from the Multiple Files tab), with the clustering shared by every view: Ward linkage on the distance 1 − |r| (see [section 12](#correlation-methods)).
+- "Save Dendrogram CSV" exports the signals (`Sample_Index, Signal, Dendrogram_Position`) and the linkage matrix (`Merge_Step, Child_1, Child_2, Distance, Size`; children below the number of signals are signals, the rest are earlier merges).
 
 ---
 
@@ -359,7 +364,7 @@ Created via `Visualization → Time Series` (requires data loaded through `File 
 
 `File → Load Correlation Matrix` loads a correlation matrix computed externally (CSV or XLSX). It must be a square matrix; a warning is shown if any value falls outside the [-1, 1] range.
 
-It is rendered directly inside the "Data Visualization" tab's main plot area as a dendrogram (top) plus a correlation heatmap (bottom), with its own buttons: "Save Dendrogram", "Save Correlation Matrix" (CSV), "Save Correlation Matrix Image", "Save All".
+It is rendered directly inside the "Data Visualization" tab's main plot area as a dendrogram (top) plus a correlation heatmap (bottom), with its own buttons: "Save Dendrogram", "Save Correlation Matrix" (CSV), "Save Correlation Matrix Image", "Save All". The dendrogram uses the same clustering as every other view (Ward linkage on 1 − |r|).
 
 ---
 
@@ -407,7 +412,20 @@ See the table in [section 4.1](#41-available-variability-methods).
 
 ### Correlation methods
 
-`pearson` (linear), `kendall` (rank-based, tau), `spearman` (rank-based, rho) — available in Data Visualization, Multiple Files (implicitly via the dendrogram), and in the Variability Analysis cluster correlation window.
+`pearson` (linear), `kendall` (rank-based, tau), `spearman` (rank-based, rho) — available in Multiple Files (and its Dendrogram tab) and in the cell detection window's correlation analysis.
+
+**Clustering (dendrograms).** Every dendrogram in NecLab (correlation analysis window, Dendrogram tab, loaded correlation matrix) clusters the signals the same way: the distance between two signals is 1 − |r| (0 when they are perfectly correlated *or* anti-correlated, 1 when unrelated), and clusters are merged with Ward linkage. Note that anti-correlated signals are therefore grouped together.
+
+### Normalization methods (correlation analysis window)
+
+| Method | What it does |
+|---|---|
+| None (raw values) | Mean intensity of each cell, as extracted |
+| Divide by minimum | Each signal divided by its own minimum |
+| ΔF/F0 | (F − F0) / F0, with F0 = the signal's 10th percentile |
+| Detrend + scale to 0–1 | Removes a linear trend (ElasticNet), then scales to 0–1 |
+
+Each can be combined with convex-envelope smoothing (see Peak detection above). The Multiple Files tab's divide-by-minimum modes use the same code.
 
 ---
 

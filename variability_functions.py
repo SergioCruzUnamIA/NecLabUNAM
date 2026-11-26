@@ -26,7 +26,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
-from neclab_core import correlation, segmentation, signals, stages, variability
+from neclab_core import correlation, normalization, segmentation, signals, stages, variability
 from neclab_core.validation import ValidationError
 
 # Detection mode -> (label, split method passed to neclab_core.segmentation).
@@ -135,7 +135,9 @@ class VariabilityAnalysisWindow:
         self.rect_selector = None
         self.selection_mode = 'add'
         self.cluster_colors = {}
-        self.signals_df = None      # frames x selected cells ("cell_<id>" columns)
+        self.signals_df = None      # frames x selected cells ("cell_<id>" columns), stage 5
+        self.norm_df = None         # the same, normalized (stage 6; = signals_df when "none")
+        self.norm_description = "raw"
         self.current_fig = None
 
         self.create_window()
@@ -782,7 +784,9 @@ class VariabilityAnalysisWindow:
         return df
 
     def _report_correlation(self, corr_matrix, method):
-        self._report("correlation", {"correlation": corr_matrix}, params={"method": method.lower()})
+        self._report("correlation", {"correlation": corr_matrix},
+                     params={"method": method.lower(), "signals": self.norm_description,
+                             "clustering": correlation.LINKAGE_DESCRIPTION})
 
     def save_selected_signals(self):
         """Save the mean signal of each selected cell (shared NecLab signals format)."""
@@ -856,12 +860,36 @@ class VariabilityAnalysisWindow:
 
         tk.Button(corr_button_frame, text="Export Time Series",
                   command=self.export_time_series).pack(side=tk.LEFT, padx=5)
+        tk.Button(corr_button_frame, text="Export Normalized",
+                  command=self.export_normalized).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Export Correlation",
                   command=self.export_correlation).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Export Cells",
                   command=lambda: self.save_cells(only_selected=True)).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Generate Report",
                   command=self.generate_report).pack(side=tk.LEFT, padx=5)
+
+        # Normalization (stage 6) applied before computing correlations
+        norm_frame = tk.Frame(control_frame)
+        norm_frame.pack(fill=tk.X, pady=5)
+        method, points = "none", 0
+        analysis = self.project.get("analysis") if self.project is not None else None
+        if analysis is not None and analysis.params.get("method") in normalization.NORMALIZATION_METHODS:
+            method = analysis.params["method"]
+            points = int(analysis.params.get("smoothing_points") or 0)
+        self._norm_keys = list(normalization.NORMALIZATION_METHODS)
+        self._norm_labels = list(normalization.NORMALIZATION_METHODS.values())
+        tk.Label(norm_frame, text="Normalization:").pack(side=tk.LEFT, padx=(0, 5))
+        self.norm_method_var = tk.StringVar(value=normalization.NORMALIZATION_METHODS[method])
+        ttk.Combobox(norm_frame, textvariable=self.norm_method_var, values=self._norm_labels,
+                     state='readonly', width=34).pack(side=tk.LEFT, padx=(0, 15))
+        tk.Label(norm_frame, text="Smoothing points (0 = off):").pack(side=tk.LEFT, padx=(0, 5))
+        self.norm_smoothing_var = tk.IntVar(value=points)
+        ttk.Spinbox(norm_frame, from_=0, to=50, textvariable=self.norm_smoothing_var,
+                    width=6).pack(side=tk.LEFT, padx=(0, 10))
+        tk.Button(norm_frame, text="Apply", command=self.apply_normalization).pack(side=tk.LEFT, padx=5)
+        tk.Label(norm_frame, text=f"Dendrogram: {correlation.LINKAGE_DESCRIPTION}",
+                 fg='gray').pack(side=tk.RIGHT, padx=5)
 
         self.corr_viz_frame = tk.Frame(main_frame)
         self.corr_viz_frame.pack(fill=tk.BOTH, expand=True)
@@ -872,12 +900,52 @@ class VariabilityAnalysisWindow:
     def cluster_labels(self):
         return [f"Cell {signals.parse_cell_column(c)}" for c in self.signals_df.columns]
 
+    # ---- normalization (stage 6)
+
+    def _norm_settings(self):
+        """(method key, smoothing points or None) from the controls."""
+        label = self.norm_method_var.get() if hasattr(self, 'norm_method_var') else None
+        method = self._norm_keys[self._norm_labels.index(label)] if label in getattr(self, '_norm_labels', []) else "none"
+        try:
+            points = int(self.norm_smoothing_var.get()) if hasattr(self, 'norm_smoothing_var') else 0
+        except (tk.TclError, ValueError):
+            points = 0
+        return method, (points if points > 0 else None)
+
+    def _normalize(self):
+        """Normalize the selected cells' signals with the current settings
+        (neclab_core.normalization) and record stage 6. With no
+        normalization and no smoothing the raw signals are used as is and
+        stage 6 is cleared."""
+        method, points = self._norm_settings()
+        if normalization.is_identity(method, points):
+            self.norm_df = self.signals_df
+            if self.project is not None:
+                self.project.clear_stage("analysis")
+        else:
+            self.norm_df = normalization.normalize_signals(self.signals_df, method, points)
+            self._report("analysis", {"normalized_signals": self.norm_df},
+                         params={"method": method, "smoothing_points": points or 0})
+        self.norm_description = "raw" if normalization.is_identity(method, points) else (
+            normalization.NORMALIZATION_METHODS[method] + (f", smoothed ({points} points)" if points else ""))
+
+    def apply_normalization(self):
+        """Re-normalize and recompute the current correlation."""
+        if self.signals_df is None:
+            return
+        self._normalize()
+        method = (getattr(self, 'current_method', None) or 'pearson').lower()
+        if self.norm_df.shape[1] > 1:
+            self.calculate_correlation(method)
+        else:
+            self.show_initial_time_series(recompute_signals=False)
+
     def _plot_signals(self, ax):
-        for col, label in zip(self.signals_df.columns, self.cluster_labels):
-            ax.plot(self.signals_df[col].to_numpy(), label=label, alpha=0.8)
-        ax.set_title('Time Series of Selected Cells')
+        for col, label in zip(self.norm_df.columns, self.cluster_labels):
+            ax.plot(self.norm_df[col].to_numpy(), label=label, alpha=0.8)
+        ax.set_title(f'Time Series of Selected Cells ({self.norm_description})')
         ax.set_xlabel('Frame')
-        ax.set_ylabel('Average Intensity')
+        ax.set_ylabel('Average Intensity' if self.norm_description == "raw" else 'Normalized value')
         ax.grid(True, alpha=0.3)
 
     def _plot_corr_matrix(self, ax, corr_matrix, title):
@@ -905,16 +973,18 @@ class VariabilityAnalysisWindow:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.current_corr_fig = fig
 
-    def show_initial_time_series(self):
+    def show_initial_time_series(self, recompute_signals=True):
         """Signals of the selected cells + a preliminary Pearson matrix."""
-        self.signals_df = self._selected_signals()
+        if recompute_signals or self.signals_df is None:
+            self.signals_df = self._selected_signals()
+            self._normalize()
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
         self._plot_signals(ax1)
         ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
-        if self.signals_df.shape[1] > 1:
-            corr_matrix = correlation.correlation_matrix(self.signals_df, 'pearson')
+        if self.norm_df.shape[1] > 1:
+            corr_matrix = correlation.correlation_matrix(self.norm_df, 'pearson')
             self._plot_corr_matrix(ax2, corr_matrix, 'Preliminary Correlation Matrix (Pearson)')
             self.current_corr_matrix = corr_matrix
             self.current_method = 'Pearson'
@@ -930,7 +1000,7 @@ class VariabilityAnalysisWindow:
         if self.signals_df is None or self.signals_df.shape[1] < 2:
             messagebox.showwarning("Warning", "You need at least 2 selected cells")
             return
-        corr_matrix = correlation.correlation_matrix(self.signals_df, method)
+        corr_matrix = correlation.correlation_matrix(self.norm_df, method)
         self._report_correlation(corr_matrix, method)
         self.update_correlation_display(corr_matrix, method.capitalize())
 
@@ -954,13 +1024,13 @@ class VariabilityAnalysisWindow:
         ax3.grid(True, alpha=0.3)
 
         try:
-            dendrogram(correlation.abs_correlation_ward_linkage(corr_matrix),
-                       labels=self.cluster_labels, ax=ax4)
-            ax4.set_title('Cell Dendrogram')
+            dendrogram(correlation.cluster_linkage(corr_matrix), labels=self.cluster_labels, ax=ax4)
+            ax4.set_title(f'Cell Dendrogram ({correlation.LINKAGE_DESCRIPTION})')
             ax4.set_xlabel('Cells')
             ax4.set_ylabel('Distance')
-        except Exception:
-            ax4.text(0.5, 0.5, 'Error generating dendrogram', ha='center', va='center', transform=ax4.transAxes)
+        except ValueError as e:
+            ax4.text(0.5, 0.5, f"Can't build the dendrogram:\n{e}", ha='center', va='center',
+                     transform=ax4.transAxes, wrap=True)
             ax4.set_title('Dendrogram')
 
         self._show_corr_figure(fig)
@@ -973,6 +1043,14 @@ class VariabilityAnalysisWindow:
             messagebox.showwarning("Warning", "No data to export")
             return
         self._save("signals", self.signals_df, "Export Time Series", initialfile="cell_signals.csv")
+
+    def export_normalized(self):
+        """Save the normalized signals shown in the plot (stage 6 format)."""
+        if self.signals_df is None or self.signals_df.empty:
+            messagebox.showwarning("Warning", "No data to export")
+            return
+        self._save("normalized_signals", self.norm_df, "Export Normalized Signals",
+                   initialfile="cell_signals_norm.csv")
 
     def export_correlation(self):
         """Save the current correlation matrix (stage 7 format)."""
@@ -1001,7 +1079,9 @@ class VariabilityAnalysisWindow:
             f.write(f"Variability method: {self.method_name}\n")
             f.write(f"Cells: {self.detection_info}\n")
             f.write(f"Selected cells: {len(self.selected_clusters)}\n")
-            f.write(f"Correlation method: {self.current_method}\n\n")
+            f.write(f"Signals: {self.norm_description}\n")
+            f.write(f"Correlation method: {self.current_method}\n")
+            f.write(f"Clustering: {correlation.LINKAGE_DESCRIPTION}\n\n")
 
             f.write("CELL DETAILS:\n")
             f.write("-" * 25 + "\n")

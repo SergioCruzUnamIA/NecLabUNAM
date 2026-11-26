@@ -243,14 +243,12 @@ def test_correlation_matrix_matches_pandas():
         correlation.correlation_matrix(data, "cosine")
 
 
-def test_linkages():
+def test_linkage_shape():
     rng = np.random.RandomState(3)
-    data = rng.normal(size=(40, 5))
-    link = correlation.agglomerative_linkage(data.T)
+    corr = correlation.correlation_matrix(rng.normal(size=(40, 5)))
+    link = correlation.cluster_linkage(corr)
     assert link.shape == (4, 4)
     assert link[-1, 3] == 5
-    corr = correlation.correlation_matrix(data)
-    assert correlation.abs_correlation_ward_linkage(corr).shape == (4, 4)
 
 
 # ------------------------------------------------------------------- display
