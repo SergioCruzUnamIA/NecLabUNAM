@@ -666,6 +666,34 @@ class VariabilityAnalysisWindow:
         pixels = extract_pixels_from_binary(self.res_labels)
         self.res_clusters = list(neighboring_groups(pixels))
 
+    def _reset_selection(self):
+        """Clear the selected-cluster list and everything derived from it.
+
+        Called whenever the cluster list is rebuilt (Basic, Advanced,
+        Decompose): cluster indices then refer to different clusters, so the
+        old selection, colors, labels and correlation results are invalid.
+        """
+        self.selected_clusters = []
+        self.cluster_colors = []
+        self.scatter_objects = []
+        self._cluster_annotations = []
+
+        # Results of a previous correlation analysis
+        self.time_series_data = []
+        self.cluster_labels = []
+        for attr in ('current_corr_fig', 'current_corr_matrix', 'current_method'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+        # Close an open correlation window: it shows the old clusters
+        corr_window = getattr(self, 'corr_window', None)
+        if corr_window is not None:
+            try:
+                corr_window.destroy()
+            except Exception:
+                pass
+            self.corr_window = None
+
     def process_clusters_basic(self):
         """Binarize, find connected components, and filter by size."""
         min_size = self.min_size_var.get()
@@ -674,9 +702,7 @@ class VariabilityAnalysisWindow:
 
         self._apply_binarization()
         self._find_clusters()
-
-        self.selected_clusters = []
-        self.cluster_colors = []
+        self._reset_selection()
 
         self.final_clusters = [cl for cl in self.res_clusters if min_size <= len(cl) <= max_size]
 
@@ -695,6 +721,8 @@ class VariabilityAnalysisWindow:
         self._apply_binarization()
         self._find_clusters()
 
+        self._reset_selection()
+
         try:
             self.final_clusters, _ = process_clusters_advanced(
                 self.var_im, self.res_clusters, min_size, max_size
@@ -702,9 +730,14 @@ class VariabilityAnalysisWindow:
             self.info_label.config(
                 text=f"Advanced: {len(self.final_clusters)} clusters (th={th}, 3D peaks)"
             )
-            self.update_display()
         except Exception as e:
             messagebox.showwarning("Warning", f"Error in advanced processing: {e}\nUsing basic method as fallback")
+            self.final_clusters = [cl for cl in self.res_clusters if min_size <= len(cl) <= max_size]
+            self.info_label.config(
+                text=f"Basic (fallback): {len(self.final_clusters)} clusters (th={th}, size {min_size}–{max_size})"
+            )
+        self.update_display()
+        self.update_selection_list()
 
     def decompose_clusters(self):
         """Decompose large clusters using KMeans"""
@@ -718,18 +751,18 @@ class VariabilityAnalysisWindow:
         # Count large clusters before decomposing
         large_count = sum(1 for cl in self.res_clusters if len(cl) > max_size)
 
-        # Decompose
+        # Decompose and make the result the selectable cluster list, so that
+        # selection, export and correlation analysis use the KMeans sub-clusters
         self.res_clusters = decompose_large_clusters(
             self.res_clusters, self.var_im, min_size, max_size
         )
+        self.final_clusters = list(self.res_clusters)
 
-        # Clear selections and final clusters
-        self.selected_clusters = []
-        self.final_clusters = None
-        self.cluster_colors = []  # Regenerate colors
+        # Clear selections (indices refer to the new list) and regenerate colors
+        self._reset_selection()
 
         self.info_label.config(
-            text=f"Decomposed {large_count} large clusters → {len(self.res_clusters)} total clusters"
+            text=f"Decomposed {large_count} large clusters → {len(self.final_clusters)} total clusters"
         )
         self.update_display()
         self.update_selection_list()
@@ -944,7 +977,14 @@ class VariabilityAnalysisWindow:
     def show_correlation_analysis(self):
         """Show correlation analysis of selected clusters"""
         # Create analysis window
+        # Only one correlation window at a time
+        if getattr(self, 'corr_window', None) is not None:
+            try:
+                self.corr_window.destroy()
+            except Exception:
+                pass
         corr_window = tk.Toplevel(self.window)
+        self.corr_window = corr_window
         corr_window.title("Correlation Analysis - Selected Clusters")
         corr_window.geometry("1200x800")
 
