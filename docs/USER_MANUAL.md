@@ -166,6 +166,7 @@ Each item runs a complete detection with the current Threshold / Min Size / Max 
 - **Region Selection**: hold the right mouse button and drag over the plot to add/remove several clusters at once inside a rectangle; use the Add/Remove toggle to pick the mode.
 - **Selection** menu: `Select All`, `Clear Selection`.
 - The list of selected clusters appears in the side panel, each with a "Remove" button.
+- **Signals (stage 5) follow the selection.** When the recording is loaded, every change to the selection (Select All, a click, a rectangle, Remove or Clear) extracts the signals of the selected cells right away and records them as stage 5 of the project; the pipeline sidebar shows it as *done*. Changing the selection afterwards marks stages 6–7 *out of date*, and clearing the selection clears stage 5. Without the recording, attach it with **Data → Attach Recording...** and the signals of the cells already selected are extracted then.
 
 ### 4.6 3D visualization
 

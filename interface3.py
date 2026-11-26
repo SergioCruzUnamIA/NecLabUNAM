@@ -3582,8 +3582,8 @@ class NecLabApp:
         "features": "Needs the recording (stage 0): compute a variability map from it, or open a saved map.",
         "mask": "Made from a variability map (stage 2) in the cell detection window, or open a saved mask.",
         "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
-        "signals": "Needs cells (stage 4) and the recording (stage 0): select cells and open the correlation "
-                   "analysis, or open a signals file.",
+        "signals": "Needs cells (stage 4) and the recording (stage 0): extracted automatically for the "
+                   "cells you select (Select All, click or drag), or open a signals file.",
         "analysis": "Choose a normalization in the correlation analysis window (signals from stage 5).",
         "correlation": "Computed in the correlation analysis window from the (normalized) signals, "
                        "or open a correlation matrix.",

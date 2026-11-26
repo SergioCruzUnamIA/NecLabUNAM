@@ -19,6 +19,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import colorsys
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.widgets import RectangleSelector
@@ -28,6 +29,7 @@ from tkinter.filedialog import asksaveasfilename, askopenfilename
 
 from neclab_core import correlation, normalization, segmentation, signals, stages, variability
 from neclab_core.validation import ValidationError
+from neclab_core.project import OUT_OF_DATE
 
 # Detection mode -> (label, split method passed to neclab_core.segmentation).
 _DETECTION_MODES = {
@@ -136,6 +138,8 @@ class VariabilityAnalysisWindow:
         self.selection_mode = 'add'
         self.cluster_colors = {}
         self.signals_df = None      # frames x selected cells ("cell_<id>" columns), stage 5
+        self._signal_cache = {}     # {cell_id: signal} for the current cells + recording
+        self._auto_signals = False  # stage 5 follows the selection once the window is set up
         self.norm_df = None         # the same, normalized (stage 6; = signals_df when "none")
         self.norm_description = "raw"
         self.lowest_points_used = {}  # {column: frame indices of the lowest points used}
@@ -163,6 +167,8 @@ class VariabilityAnalysisWindow:
             elif source:
                 self.info_label.config(text=f"Loaded {source}")
             self.update_display()
+        self._auto_signals = True
+        self._update_signals_stage()   # restored selection: only if stage 5 doesn't already match
 
     # ------------------------------------------------------------ helpers
 
@@ -207,6 +213,7 @@ class VariabilityAnalysisWindow:
         self.labels = labels
         self.mask = mask
         self.cell_pix = segmentation.cell_pixels(labels)
+        self._signal_cache = {}
         self.detection_info = info
         self.selected_clusters = []
         self.cluster_colors = self._generate_cluster_colors(self.cell_id_list)
@@ -548,6 +555,7 @@ class VariabilityAnalysisWindow:
         if loaded is None:
             return
         self.img_array = loaded.data
+        self._signal_cache = {}
         if self.on_recording_attached is not None:
             self.on_recording_attached(loaded.data, loaded.path, loaded.metadata)
         elif self.project is not None:
@@ -567,6 +575,7 @@ class VariabilityAnalysisWindow:
         self._update_title()
         self.info_label.config(text=msg)
         self.update_display()
+        self._update_signals_stage()   # signals of the cells already selected
 
     def load_map(self):
         """Start from a saved variability map (stage 2)."""
@@ -764,6 +773,7 @@ class VariabilityAnalysisWindow:
 
     def update_selection_list(self):
         self._report_selection()
+        self._update_signals_stage()
         self.selected_listbox.delete(0, tk.END)
         for cid in self._selected_sorted():
             self.selected_listbox.insert(tk.END, f"Cell {cid} ({len(self.cell_pix[cid])} pts)")
@@ -801,12 +811,60 @@ class VariabilityAnalysisWindow:
             return
         self._save("mask", mask, "Save Mask")
 
-    def _selected_signals(self):
-        """Signals of the selected cells (frames x "cell_<id>"), recorded as stage 5."""
+    def _extract_selected(self):
+        """Signals of the selected cells (frames x "cell_<id>", in ID order).
+
+        Each cell's signal is computed once and cached until the cells or
+        the recording change, so adding one cell to the selection only
+        extracts that cell.
+        """
         ids = self._selected_sorted()
-        df = signals.extract_signals(self.img_array, self.labels, ids)
-        self._report("signals", {"signals": df}, params={"cells": ids, "measure": "mean of cell pixels"})
+        missing = [cid for cid in ids if cid not in self._signal_cache]
+        if missing:
+            new = signals.extract_signals(self.img_array, self.labels, missing)
+            for col in new.columns:
+                self._signal_cache[signals.parse_cell_column(col)] = new[col]
+        if ids:
+            df = pd.concat([self._signal_cache[cid] for cid in ids], axis=1)
+        else:
+            df = pd.DataFrame(index=pd.RangeIndex(self.img_array.shape[0], name="frame"))
+        df.index = pd.RangeIndex(self.img_array.shape[0], name="frame")
         return df
+
+    def _report_signals(self, df, ids):
+        self._report("signals", {"signals": df}, params={"cells": ids, "measure": "mean of cell pixels"})
+
+    def _selected_signals(self):
+        """Signals of the selected cells, recorded as stage 5."""
+        ids = self._selected_sorted()
+        df = self._extract_selected()
+        self._report_signals(df, ids)
+        return df
+
+    def _update_signals_stage(self):
+        """Stage 5 follows the selection: whenever the selected cells change,
+        their signals are extracted and recorded (if the recording is
+        loaded). With no cells selected, stage 5 is cleared. If stage 5
+        already holds exactly these cells (e.g. a project was just
+        reopened), it is left as is, so its later stages stay up to date."""
+        if (not self._auto_signals or self.project is None
+                or self.labels is None or self.img_array is None):
+            return
+        ids = self._selected_sorted()
+        rec = self.project.get("signals")
+        if not ids:
+            if rec is not None and rec.origin == "computed":
+                self.project.clear_stage("signals")
+            return
+        if (rec is not None and rec.available and list(rec.params.get("cells") or []) == ids
+                and self.project.status("signals") != OUT_OF_DATE):
+            return
+        try:
+            df = self._extract_selected()
+        except Exception as e:      # e.g. recording and cells don't match
+            self.info_label.config(text=f"Could not extract signals: {e}")
+            return
+        self._report_signals(df, ids)
 
     def _report_correlation(self, corr_matrix, method):
         self._report("correlation", {"correlation": corr_matrix},
