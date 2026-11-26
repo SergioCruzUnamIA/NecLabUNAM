@@ -53,6 +53,43 @@ def test_fill_missing():
     np.testing.assert_allclose(norm.fill_missing([np.nan, 1.0, np.nan, 3.0, np.nan]), [1, 1, 2, 3, 3])
 
 
+def test_divide_by_lowest_points_puts_them_on_a_horizontal_line():
+    t = np.arange(300)
+    y = 100 + 0.2 * t + 40 * (np.sin(t / 9) > 0.85) + np.sin(t / 3)     # drifting baseline + events
+    for n in (2, 6, 10):
+        out = norm.divide_by_lowest_points(y, n)
+        baseline, px = norm.lowest_points_baseline(y, n)
+        np.testing.assert_allclose(out[px], 1.0)                          # lowest points -> 1
+        np.testing.assert_allclose(out, y / baseline)
+        assert out.min() > 0.9                                             # nothing far below the line
+
+
+def test_divide_by_lowest_points_matches_the_smoothing_baseline():
+    t = np.arange(200)
+    y = 50 + 0.1 * t + 20 * (np.cos(t / 7) > 0.9)
+    baseline, px = norm.lowest_points_baseline(y, 6)
+    smoothed = norm.smooth_convex_envelope(y, 6)                           # subtraction
+    np.testing.assert_allclose(smoothed, y - baseline + y[px].min())
+    np.testing.assert_allclose(norm.divide_by_lowest_points(y, 6), y / baseline)
+
+
+def test_divide_by_lowest_points_keeps_gaps_and_rejects_near_zero_baselines():
+    t = np.arange(120)
+    y = 80 + 10 * (np.sin(t / 5) > 0.9)
+    y = y.astype(float)
+    y[[4, 60]] = np.nan
+    out = norm.divide_by_lowest_points(y, 6)
+    assert np.isnan(out[[4, 60]]).all() and np.isfinite(np.delete(out, [4, 60])).all()
+    with pytest.raises(ValueError, match="blow up"):
+        norm.divide_by_lowest_points(np.sin(t / 5), 6)                    # baseline below zero
+    df = pd.DataFrame({"cell_1": 80 + np.sin(t / 5), "cell_9": np.sin(t / 5)})
+    with pytest.raises(ValueError, match="cell_9"):
+        norm.normalize_signals(df, "lowest_points")
+    ok = norm.normalize_signals(df[["cell_1"]], "lowest_points", lowest_points=4)
+    _, px = norm.lowest_points_baseline(df["cell_1"], 4)
+    np.testing.assert_allclose(ok["cell_1"].to_numpy()[px], 1.0)
+
+
 # ------------------------------------------------------------ tables
 
 def test_normalize_signals_methods():

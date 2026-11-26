@@ -3571,6 +3571,10 @@ class NecLabApp:
         "analysis": "Normalization", "correlation": "Correlation",
     }
 
+    # Settings kept in the project but not printed in the sidebar details
+    # (e.g. the list of every cell's ID, which can run to hundreds of numbers).
+    _SIDEBAR_HIDDEN_PARAMS = {"signals": ("cells",)}
+
     # What each stage needs before it can be run (shown for stages not run yet).
     _STAGE_NEEDS = {
         "raw": "Open a recording (File → Open Recording), or open a saved project.",
@@ -3692,8 +3696,9 @@ class NecLabApp:
                 parts.append(f"Updated: {rec.updated_at.replace('T', ' ')}")
             if rec.problem:
                 parts.append(f"Problem: {rec.problem}")
-            if rec.params:
-                parts.append("Settings: " + ", ".join(f"{k}={v}" for k, v in rec.params.items()))
+            shown = {k: v for k, v in rec.params.items() if k not in self._SIDEBAR_HIDDEN_PARAMS.get(key, ())}
+            if shown:
+                parts.append("Settings: " + ", ".join(f"{k}={v}" for k, v in shown.items()))
             if status == core_project.OUT_OF_DATE:
                 parts.append("Something it was computed from has changed since: recompute it to update.")
         self._status_detail.config(text="\n".join(parts))

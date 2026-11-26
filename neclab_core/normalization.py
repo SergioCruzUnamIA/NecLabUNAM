@@ -14,7 +14,10 @@ normalize_signals(df, method, smoothing_points=None)
                            signal (10th by default): the usual ΔF/F0
         "detrend_minmax"   subtract a linear (ElasticNet) trend, then scale
                            to 0..1 (the original notebook normalization)
-    then optional Convex Envelope smoothing.
+        "lowest_points"    divide by the Convex Envelope baseline (the line
+                           through the signal's genuine lowest points), so
+                           the lowest points lie on a horizontal line at 1
+    then optional Convex Envelope smoothing (subtracting that baseline).
 
 divide_by_min_tables(tables, mode)
     Several tables at once (the Multiple Files sheets), dividing by a
@@ -33,7 +36,10 @@ NORMALIZATION_METHODS = {
     "divide_by_min": "Divide by minimum",
     "delta_f_over_f0": "ΔF/F0 (baseline = 10th percentile)",
     "detrend_minmax": "Detrend + scale to 0–1",
+    "lowest_points": "Divide by lowest-points baseline (lowest points → 1)",
 }
+
+DEFAULT_LOWEST_POINTS = 6
 
 MIN_MODES = {
     "local": "minimum of that column in each sheet",
@@ -234,6 +240,39 @@ def smooth_convex_envelope(data_sel, n_points=6):
     return y - baseline + py.min()
 
 
+def lowest_points_baseline(values, n_points=DEFAULT_LOWEST_POINTS):
+    """The Convex Envelope baseline (piecewise-linear line through the
+    signal's genuine lowest points) and the points used: (baseline, px)."""
+    y = fill_missing(values)
+    px, py = convex_envelope_lowest_points(y, n_points=n_points)
+    return np.interp(np.arange(len(y)), px, py), np.asarray(px, dtype=int)
+
+
+def divide_by_lowest_points(values, n_points=DEFAULT_LOWEST_POINTS):
+    """Divide a signal by its lowest-points baseline, so the lowest points
+    lie on a horizontal line at 1 (the original NecLab Convex Envelope
+    normalization).
+
+    Raises ValueError when the baseline gets close to zero or below it
+    (e.g. data already normalized to 0..1): dividing would blow up. Use
+    the subtraction (smoothing) or ΔF/F0 for such signals.
+    """
+    values = np.asarray(values, dtype=float)
+    missing = ~np.isfinite(values)
+    if missing.all():
+        return values.copy()
+    baseline, _px = lowest_points_baseline(values, n_points)
+    scale = float(np.nanmax(np.abs(values)))
+    if baseline.min() <= max(1e-6 * scale, 1e-12):
+        raise ValueError(
+            f"its lowest-points baseline reaches {baseline.min():.3g}, so dividing by it would blow up "
+            "(this happens with signals near or below zero, e.g. already normalized). "
+            "Use smoothing (subtraction) or ΔF/F0 for these signals.")
+    out = fill_missing(values) / baseline
+    out[missing] = np.nan
+    return out
+
+
 def smooth_keeping_gaps(values, n_points):
     """Convex Envelope smoothing of a series with missing values: NaNs are
     filled for the computation and put back afterwards."""
@@ -248,21 +287,30 @@ def smooth_keeping_gaps(values, n_points):
 
 # ------------------------------------------------------------ tables
 
-def normalize_signals(df, method="none", smoothing_points=None):
+def normalize_signals(df, method="none", smoothing_points=None, lowest_points=DEFAULT_LOWEST_POINTS):
     """Normalize every column of a signals table on its own, then smooth it.
 
     Args:
         df: signals table (frames x cells).
         method: a key of NORMALIZATION_METHODS.
         smoothing_points: Convex Envelope key points (None/0 = no smoothing).
+        lowest_points: number of lowest points for the "lowest_points" method.
 
-    Returns a new DataFrame with the same index and columns.
+    Returns a new DataFrame with the same index and columns. Raises
+    ValueError (naming the signal) if a signal can't be normalized.
     """
-    if method not in _METHOD_FUNCTIONS:
+    if method not in NORMALIZATION_METHODS:
         raise ValueError(f"method must be one of {tuple(NORMALIZATION_METHODS)}, got {method!r}")
     out = {}
     for col in df.columns:
-        values = _METHOD_FUNCTIONS[method](df[col].to_numpy(dtype=float))
+        values = df[col].to_numpy(dtype=float)
+        try:
+            if method == "lowest_points":
+                values = divide_by_lowest_points(values, int(lowest_points))
+            else:
+                values = _METHOD_FUNCTIONS[method](values)
+        except ValueError as e:
+            raise ValueError(f"{col}: {e}") from None
         if smoothing_points:
             values = smooth_keeping_gaps(values, int(smoothing_points))
         out[col] = values

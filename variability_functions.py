@@ -138,6 +138,7 @@ class VariabilityAnalysisWindow:
         self.signals_df = None      # frames x selected cells ("cell_<id>" columns), stage 5
         self.norm_df = None         # the same, normalized (stage 6; = signals_df when "none")
         self.norm_description = "raw"
+        self.lowest_points_used = {}  # {column: frame indices of the lowest points used}
         self.current_fig = None
 
         self.create_window()
@@ -872,21 +873,29 @@ class VariabilityAnalysisWindow:
         # Normalization (stage 6) applied before computing correlations
         norm_frame = tk.Frame(control_frame)
         norm_frame.pack(fill=tk.X, pady=5)
-        method, points = "none", 0
+        method, points, smooth = "none", normalization.DEFAULT_LOWEST_POINTS, False
         analysis = self.project.get("analysis") if self.project is not None else None
         if analysis is not None and analysis.params.get("method") in normalization.NORMALIZATION_METHODS:
             method = analysis.params["method"]
-            points = int(analysis.params.get("smoothing_points") or 0)
+            smoothing_points = int(analysis.params.get("smoothing_points") or 0)
+            smooth = smoothing_points > 0
+            points = int(analysis.params.get("lowest_points") or smoothing_points or points)
         self._norm_keys = list(normalization.NORMALIZATION_METHODS)
         self._norm_labels = list(normalization.NORMALIZATION_METHODS.values())
         tk.Label(norm_frame, text="Normalization:").pack(side=tk.LEFT, padx=(0, 5))
         self.norm_method_var = tk.StringVar(value=normalization.NORMALIZATION_METHODS[method])
         ttk.Combobox(norm_frame, textvariable=self.norm_method_var, values=self._norm_labels,
-                     state='readonly', width=34).pack(side=tk.LEFT, padx=(0, 15))
-        tk.Label(norm_frame, text="Smoothing points (0 = off):").pack(side=tk.LEFT, padx=(0, 5))
-        self.norm_smoothing_var = tk.IntVar(value=points)
-        ttk.Spinbox(norm_frame, from_=0, to=50, textvariable=self.norm_smoothing_var,
-                    width=6).pack(side=tk.LEFT, padx=(0, 10))
+                     state='readonly', width=44).pack(side=tk.LEFT, padx=(0, 15))
+        tk.Label(norm_frame, text="Lowest points:").pack(side=tk.LEFT, padx=(0, 5))
+        self.norm_points_var = tk.IntVar(value=points)
+        ttk.Spinbox(norm_frame, from_=2, to=50, textvariable=self.norm_points_var,
+                    width=5).pack(side=tk.LEFT, padx=(0, 10))
+        self.norm_smooth_var = tk.BooleanVar(value=smooth)
+        tk.Checkbutton(norm_frame, text="Smoothing (subtract lowest-points baseline)",
+                       variable=self.norm_smooth_var).pack(side=tk.LEFT, padx=(0, 10))
+        self.norm_show_points_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(norm_frame, text="Show lowest points", variable=self.norm_show_points_var,
+                       command=self._redraw_correlation).pack(side=tk.LEFT, padx=(0, 10))
         tk.Button(norm_frame, text="Apply", command=self.apply_normalization).pack(side=tk.LEFT, padx=5)
         tk.Label(norm_frame, text=f"Dendrogram: {correlation.LINKAGE_DESCRIPTION}",
                  fg='gray').pack(side=tk.RIGHT, padx=5)
@@ -903,31 +912,71 @@ class VariabilityAnalysisWindow:
     # ---- normalization (stage 6)
 
     def _norm_settings(self):
-        """(method key, smoothing points or None) from the controls."""
+        """(method key, smoothing points or None, lowest points) from the
+        controls. Smoothing is ignored with the "lowest_points" method: the
+        signal is already divided by that same baseline."""
         label = self.norm_method_var.get() if hasattr(self, 'norm_method_var') else None
         method = self._norm_keys[self._norm_labels.index(label)] if label in getattr(self, '_norm_labels', []) else "none"
         try:
-            points = int(self.norm_smoothing_var.get()) if hasattr(self, 'norm_smoothing_var') else 0
+            points = int(self.norm_points_var.get()) if hasattr(self, 'norm_points_var') else 0
         except (tk.TclError, ValueError):
             points = 0
-        return method, (points if points > 0 else None)
+        if points < 2:
+            points = normalization.DEFAULT_LOWEST_POINTS
+        smooth = bool(self.norm_smooth_var.get()) if hasattr(self, 'norm_smooth_var') else False
+        smoothing = points if smooth and method != "lowest_points" else None
+        return method, smoothing, points
 
     def _normalize(self):
         """Normalize the selected cells' signals with the current settings
         (neclab_core.normalization) and record stage 6. With no
         normalization and no smoothing the raw signals are used as is and
-        stage 6 is cleared."""
-        method, points = self._norm_settings()
-        if normalization.is_identity(method, points):
+        stage 6 is cleared. If a signal can't be normalized (e.g. its
+        lowest-points baseline reaches zero), say so and use raw values."""
+        method, smoothing, points = self._norm_settings()
+        self.lowest_points_used = {}
+        if not normalization.is_identity(method, smoothing):
+            try:
+                self.norm_df = normalization.normalize_signals(self.signals_df, method, smoothing, points)
+            except ValueError as e:
+                messagebox.showwarning("Can't Normalize", f"{e}\n\nShowing the raw signals instead.",
+                                       parent=self.window)
+                self.norm_method_var.set(normalization.NORMALIZATION_METHODS["none"])
+                self.norm_smooth_var.set(False)
+                method, smoothing = "none", None
+        if normalization.is_identity(method, smoothing):
             self.norm_df = self.signals_df
             if self.project is not None:
                 self.project.clear_stage("analysis")
+            self.norm_description = "raw"
+            return
+
+        self._report("analysis", {"normalized_signals": self.norm_df},
+                     params={"method": method, "smoothing_points": smoothing or 0, "lowest_points": points})
+        self.norm_description = normalization.NORMALIZATION_METHODS[method]
+        if method == "lowest_points":
+            self.norm_description = f"divided by lowest-points baseline ({points} points)"
+        if smoothing:
+            self.norm_description += f", smoothed ({smoothing} lowest points)"
+        # Positions of the lowest points used, to mark them on the plot: on
+        # the raw signal for "lowest_points", on the normalized (not yet
+        # smoothed) signal for smoothing.
+        if method == "lowest_points" or smoothing:
+            base = (self.signals_df if method == "lowest_points"
+                    else normalization.normalize_signals(self.signals_df, method, None, points))
+            for col in base.columns:
+                if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:
+                    self.lowest_points_used[col] = normalization.lowest_points_baseline(base[col], points)[1]
+
+    def _redraw_correlation(self):
+        """Redraw the current view (e.g. after toggling 'Show lowest points')."""
+        if self.signals_df is None:
+            return
+        method = getattr(self, 'current_method', None)
+        if getattr(self, 'current_corr_matrix', None) is not None and method and self.norm_df.shape[1] > 1:
+            self.update_correlation_display(self.current_corr_matrix, method)
         else:
-            self.norm_df = normalization.normalize_signals(self.signals_df, method, points)
-            self._report("analysis", {"normalized_signals": self.norm_df},
-                         params={"method": method, "smoothing_points": points or 0})
-        self.norm_description = "raw" if normalization.is_identity(method, points) else (
-            normalization.NORMALIZATION_METHODS[method] + (f", smoothed ({points} points)" if points else ""))
+            self.show_initial_time_series(recompute_signals=False)
 
     def apply_normalization(self):
         """Re-normalize and recompute the current correlation."""
@@ -941,8 +990,17 @@ class VariabilityAnalysisWindow:
             self.show_initial_time_series(recompute_signals=False)
 
     def _plot_signals(self, ax):
+        show_points = bool(getattr(self, 'norm_show_points_var', None) and self.norm_show_points_var.get())
+        points_used = getattr(self, 'lowest_points_used', {}) if show_points else {}
+        points_labelled = False
         for col, label in zip(self.norm_df.columns, self.cluster_labels):
-            ax.plot(self.norm_df[col].to_numpy(), label=label, alpha=0.8)
+            values = self.norm_df[col].to_numpy()
+            line, = ax.plot(values, label=label, alpha=0.8)
+            px = points_used.get(col)
+            if px is not None and len(px):
+                ax.scatter(px, values[px], s=28, color=line.get_color(), edgecolors='black', linewidths=0.6,
+                           zorder=4, label=None if points_labelled else 'Lowest points used')
+                points_labelled = True
         ax.set_title(f'Time Series of Selected Cells ({self.norm_description})')
         ax.set_xlabel('Frame')
         ax.set_ylabel('Average Intensity' if self.norm_description == "raw" else 'Normalized value')
@@ -1011,7 +1069,6 @@ class VariabilityAnalysisWindow:
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
 
         self._plot_signals(ax1)
-        ax1.set_ylabel('Intensity')
         ax1.legend()
 
         self._plot_corr_matrix(ax2, corr_matrix, f'Correlation Matrix ({method_name})')
