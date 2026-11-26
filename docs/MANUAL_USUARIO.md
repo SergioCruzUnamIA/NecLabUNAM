@@ -44,7 +44,7 @@ Ambos flujos comparten la misma ventana principal, que tiene una barra de menús
 | Opción | Acción |
 |---|---|
 | **New Project** / **Open Project...** / **Save Project** (`Ctrl+S`) / **Save Project As...** (Nuevo / Abrir / Guardar / Guardar Proyecto Como) | Empieza, abre o guarda un proyecto: todo el análisis de una grabación, cada etapa con sus parámetros, guardado en una carpeta `.neclab`. Ver [sección 4.9](#49-proyectos). |
-| **Pipeline Status...** (Estado del Pipeline) | Muestra el estado de cada etapa (not run, done, loaded, out of date, missing), de dónde vino y cuándo, y guarda o carga una sola etapa. Ver [sección 4.9](#49-proyectos). |
+| **Show Pipeline Sidebar** (Mostrar Barra Lateral del Pipeline) | Muestra u oculta la barra lateral del pipeline a la izquierda: el estado de cada etapa (not run, done, loaded, out of date, missing), sus detalles, un botón para abrirla o ejecutarla, y guardar o cargar una sola etapa. Ver [sección 4.10](#410-la-barra-lateral-del-pipeline). |
 | **Open Recording (OME-TIFF / TIFF / NPY)...** (Abrir Grabación, `Ctrl+O`) | Carga una grabación (una pila de imágenes de frames × alto × ancho) desde un OME-TIFF, un TIFF normal o un archivo NumPy `.npy`, cambia a la pestaña "Image Processing" y habilita los menús Image y Variability Analysis. Los archivos que no son una grabación (p. ej. una sola imagen 2D) se rechazan con una explicación. |
 | **Open Pipeline Stage** (Abrir Etapa del Pipeline) | Empieza el análisis en una etapa posterior a partir de un archivo guardado antes (o hecho con otro programa). Ver [sección 4.8](#48-comenzar-desde-una-etapa-guardada). |
 | **Open Data (.npy / .csv / .xlsx)** (Abrir Datos) | Carga un archivo de datos numéricos en la pestaña "Data Visualization". Si es CSV, se muestra un diálogo para elegir la columna inicial (ROI); si es `.npy`, las columnas se nombran automáticamente "Column 1", "Column 2", etc. |
@@ -229,7 +229,15 @@ Contenido de una carpeta de proyecto (solo las etapas que tienen datos):
 
 Los archivos tienen los mismos formatos que el menú Export, así que se pueden abrir en Excel, ImageJ o Python, o con **File → Open Pipeline Stage**.
 
-**Pipeline Status** (menú File) lista las 8 etapas con su estado:
+> La pestaña Multiple Files (comparar las señales de varias grabaciones) no forma parte de un proyecto; sus archivos se abren y guardan desde esa pestaña como antes.
+
+### 4.10 La barra lateral del pipeline
+
+El panel a la izquierda de la ventana principal muestra el proyecto actual y sus 8 etapas, y es la forma más rápida de avanzar por el análisis. Ocúltelo con su botón **Hide** y vuelva a mostrarlo con **File → Show Pipeline Sidebar**; arrastre su borde derecho para cambiar su ancho.
+
+![Barra lateral del pipeline](images/pipeline_sidebar.png)
+
+Arriba se muestra el nombre del proyecto (`*` = cambios sin guardar) y dónde está guardado. El estado de cada etapa se muestra en color:
 
 | Estado | Significado |
 |---|---|
@@ -237,14 +245,27 @@ Los archivos tienen los mismos formatos que el menú Export, así que se pueden 
 | done | Calculada en NecLab y al día |
 | loaded | Cargada desde un archivo y al día |
 | out of date | Algo a partir de lo que se calculó cambió después (p. ej. volvió a detectar células tras extraer señales, o abrió otra grabación): vuelva a calcularla |
-| missing | Sus datos no se pudieron cargar (p. ej. no se encontró la grabación); el motivo aparece debajo de la lista |
+| missing | Sus datos no se pudieron cargar (p. ej. no se encontró la grabación); el motivo aparece en los detalles |
 
-Seleccione una etapa para ver sus parámetros y luego:
+Haga clic en una etapa para ver sus detalles: qué contiene, de dónde vino, cuándo se actualizó, los parámetros usados y, si aún no se ha ejecutado, qué necesita. El botón azul de abajo hace lo siguiente que corresponde para esa etapa (doble clic en la etapa hace lo mismo):
+
+| Etapa | Botón |
+|---|---|
+| 0 · Recording | **Open Recording...**, **Show Recording** (pestaña Image Processing), o **Locate Recording...** si falta |
+| 1 · Preprocessing | Aún no disponible |
+| 2 · Variability map | **Compute Variability Map...** (pregunta qué medida) si hay grabación; si no, **Open Variability Map...** |
+| 2–4 (con datos) | **Open / Show Cell Detection Window** |
+| 3 · Candidate mask, 4 · Cells | **Open Candidate Mask... / Open Cells...** cuando aún no hay nada |
+| 5–7 con células y grabación | **Open Signals & Correlation**: el análisis de correlación de las células seleccionadas (pregunta si usar todas si no hay ninguna seleccionada) |
+| 5–6 solo con datos | **View in Multiple Files** (la etapa 6 se abre con Normalization = None) |
+| 7 solo con datos | **View Correlation Matrix** (matriz + dendrograma) |
+| 5–7 sin nada aún | **Open Signals Files... / Open Correlation Matrix...** |
+
+Los botones de abajo:
 - **Save Stage...** guarda solo esa etapa en una carpeta nueva (sus archivos más un `stage.json` con sus parámetros).
 - **Load Stage...** carga una etapa guardada así, o una etapa de la carpeta de otro proyecto, en el proyecto actual. Se revisa contra lo cargado (p. ej. las células deben ser del mismo tamaño que la grabación) y reemplaza esa etapa.
 - **Clear Stage** quita la etapa del proyecto.
-
-> La pestaña Multiple Files (comparar las señales de varias grabaciones) no forma parte de un proyecto; sus archivos se abren y guardan desde esa pestaña como antes.
+- **Save Project** es lo mismo que File → Save Project.
 
 ---
 

@@ -254,8 +254,9 @@ class NecLabApp:
         self.project = Project()
         self.project.add_listener(self._on_project_changed)
         self.detection_windows = []     # open cell detection windows (they report to the project)
-        self.status_window = None       # Pipeline Status window, if open
+        self.status_window = None       # the pipeline sidebar (parent for its dialogs)
         self._status_tree = None
+        self.sidebar_visible_var = tk.BooleanVar(value=True)
 
         # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
@@ -396,7 +397,8 @@ class NecLabApp:
         self.menu_archivo.add_command(label="Open Project...", command=self.open_project)
         self.menu_archivo.add_command(label="Save Project", accelerator="Ctrl+S", command=self.save_project)
         self.menu_archivo.add_command(label="Save Project As...", command=self.save_project_as)
-        self.menu_archivo.add_command(label="Pipeline Status...", command=self.show_pipeline_status)
+        self.menu_archivo.add_checkbutton(label="Show Pipeline Sidebar", variable=self.sidebar_visible_var,
+                                          command=self._toggle_sidebar)
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
             label="Open Recording (OME-TIFF / TIFF / NPY)...",
@@ -516,8 +518,15 @@ class NecLabApp:
                   foreground=[('selected', _C['acc'])],
                   expand=[('selected', [0, 0, 0, 0])])
 
-        self.notebook = ttk.Notebook(self.root, style='L1.TNotebook')
-        self.notebook.pack(fill='both', expand=True)
+        # Pipeline sidebar (left) | tabs (right), with a draggable divider
+        self.body = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=5,
+                                   bg=_C['border'], bd=0, sashrelief='flat')
+        self.body.pack(fill='both', expand=True)
+        self.sidebar = tk.Frame(self.body, bg=_C['panel'])
+        self.notebook = ttk.Notebook(self.body, style='L1.TNotebook')
+        self.body.add(self.sidebar, minsize=230, width=275)
+        self.body.add(self.notebook, minsize=400, stretch='always')
+        self._build_sidebar(self.sidebar)
 
         # Tab 1: Image Processing
         self.image_tab = tk.Frame(self.notebook, bg=_C['bg'])
@@ -3300,6 +3309,7 @@ class NecLabApp:
         win = open_detection_window(self.root, project=self.project,
                                     on_recording_attached=self._on_recording_attached, **kwargs)
         self.detection_windows.append(win)
+        self._refresh_status_window()
         return win
 
     def _on_recording_attached(self, stack, path, metadata):
@@ -3543,7 +3553,10 @@ class NecLabApp:
         self._update_title()
         return win
 
-    # ---- Pipeline Status window
+    # ---- Pipeline sidebar
+    # A permanent panel on the left of the main window: the 8 stages with
+    # their live status, the selected stage's details, and its actions (open
+    # its view / run it, save or load just that stage, clear it).
 
     _STATUS_COLORS = {
         core_project.DONE: "#15803d", core_project.LOADED: "#1d4ed8",
@@ -3551,67 +3564,113 @@ class NecLabApp:
         core_project.NOT_RUN: "#94a3b8",
     }
 
-    def show_pipeline_status(self):
-        """Window listing every stage with its status, plus per-stage save/load."""
-        if self.status_window is not None and self.status_window.winfo_exists():
-            self.status_window.lift()
-            self._refresh_status_window()
-            return self.status_window
-        win = tk.Toplevel(self.root)
-        win.title("Pipeline Status")
-        win.geometry("820x380")
-        self.status_window = win
+    # Names short enough for the sidebar list (the full title is in the details).
+    _STAGE_SHORT_NAMES = {
+        "raw": "Recording", "preprocess": "Preprocessing", "features": "Variability map",
+        "mask": "Candidate mask", "cells": "Cells", "signals": "Signals",
+        "analysis": "Normalization", "correlation": "Correlation",
+    }
 
-        self._status_heading = tk.Label(win, anchor='w', font=('Arial', 11, 'bold'))
-        self._status_heading.pack(fill='x', padx=10, pady=(10, 4))
+    # What each stage needs before it can be run (shown for stages not run yet).
+    _STAGE_NEEDS = {
+        "raw": "Open a recording (File → Open Recording), or open a saved project.",
+        "preprocess": "No preprocessing filters are available yet; analysis uses the raw recording.",
+        "features": "Needs the recording (stage 0): compute a variability map from it, or open a saved map.",
+        "mask": "Made from a variability map (stage 2) in the cell detection window, or open a saved mask.",
+        "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
+        "signals": "Needs cells (stage 4) and the recording (stage 0): select cells and open the correlation "
+                   "analysis, or open a signals file.",
+        "analysis": "Choose a normalization in the correlation analysis window (signals from stage 5).",
+        "correlation": "Computed in the correlation analysis window from the (normalized) signals, "
+                       "or open a correlation matrix.",
+    }
 
-        columns = ("stage", "status", "source", "updated")
-        tree = ttk.Treeview(win, columns=columns, show="headings", height=8, selectmode="browse")
-        for col, text, width in (("stage", "Stage", 230), ("status", "Status", 100),
-                                 ("source", "Source", 280), ("updated", "Updated", 150)):
-            tree.heading(col, text=text)
-            tree.column(col, width=width, anchor='w')
+    def _build_sidebar(self, parent):
+        """Create the pipeline sidebar inside `parent`."""
+        self.status_window = parent
+        header = tk.Frame(parent, bg=_C['panel'])
+        header.pack(fill='x', padx=10, pady=(10, 0))
+        tk.Label(header, text="PIPELINE", font=('Arial', 9, 'bold'), bg=_C['panel'],
+                 fg=_C['sub']).pack(side='left')
+        tk.Button(header, text="Hide", relief='flat', bg=_C['panel'], fg=_C['sub'], bd=0,
+                  command=lambda: self._set_sidebar_visible(False)).pack(side='right')
+        self._status_heading = tk.Label(parent, anchor='w', justify='left', font=('Arial', 10, 'bold'),
+                                        bg=_C['panel'], fg=_C['text'], wraplength=250)
+        self._status_heading.pack(fill='x', padx=10, pady=(2, 6))
+
+        tree = ttk.Treeview(parent, columns=("stage", "status"), show="headings", height=8,
+                            selectmode="browse")
+        tree.heading("stage", text="Stage")
+        tree.heading("status", text="Status")
+        tree.column("stage", width=165, anchor='w')
+        tree.column("status", width=85, anchor='w')
         for status, color in self._STATUS_COLORS.items():
             tree.tag_configure(status, foreground=color)
-        tree.pack(fill='both', expand=True, padx=10)
+        tree.pack(fill='x', padx=10)
+        tree.bind("<<TreeviewSelect>>", lambda e: self._show_status_detail())
+        tree.bind("<Double-1>", lambda e: self._run_stage_action())
         self._status_tree = tree
 
-        self._status_detail = tk.Label(win, anchor='w', justify='left', fg=_C['sub'], wraplength=780)
-        self._status_detail.pack(fill='x', padx=10, pady=4)
-        tree.bind("<<TreeviewSelect>>", lambda e: self._show_status_detail())
+        self._status_detail = tk.Label(parent, anchor='nw', justify='left', bg=_C['panel'], fg=_C['text'],
+                                       wraplength=250, font=('Arial', 9))
+        self._status_detail.pack(fill='x', padx=10, pady=8)
 
-        buttons = tk.Frame(win)
-        buttons.pack(fill='x', padx=10, pady=(0, 10))
-        tk.Button(buttons, text="Save Stage...", command=self._status_save_stage).pack(side='left', padx=2)
-        tk.Button(buttons, text="Load Stage...", command=self._status_load_stage).pack(side='left', padx=2)
-        tk.Button(buttons, text="Clear Stage", command=self._status_clear_stage).pack(side='left', padx=2)
-        tk.Button(buttons, text="Close", command=win.destroy).pack(side='right', padx=2)
-        tk.Button(buttons, text="Save Project", command=self.save_project).pack(side='right', padx=2)
+        self._stage_action_button = ctk.CTkButton(
+            parent, text="", height=30, corner_radius=6, fg_color=_C['acc'], hover_color=_C['acc2'],
+            text_color='white', font=ctk.CTkFont(size=11), command=self._run_stage_action)
+        self._stage_action_button.pack(fill='x', padx=10, pady=(0, 6))
+
+        grid = tk.Frame(parent, bg=_C['panel'])
+        grid.pack(fill='x', padx=10, pady=(0, 10))
+        grid.columnconfigure((0, 1), weight=1, uniform="sidebar_buttons")
+        for i, (text, cmd) in enumerate((("Save Stage...", self._status_save_stage),
+                                         ("Load Stage...", self._status_load_stage),
+                                         ("Clear Stage", self._status_clear_stage),
+                                         ("Save Project", self.save_project))):
+            tk.Button(grid, text=text, command=cmd).grid(row=i // 2, column=i % 2, sticky='ew', padx=1, pady=1)
 
         self._refresh_status_window()
-        return win
+        tree.selection_set("raw")
+
+    def _set_sidebar_visible(self, visible):
+        """Show or hide the pipeline sidebar (File → Show Pipeline Sidebar)."""
+        self.sidebar_visible_var.set(visible)
+        shown = str(self.sidebar) in [str(p) for p in self.body.panes()]
+        if visible and not shown:
+            self.body.add(self.sidebar, before=self.notebook, minsize=230, width=275)
+        elif not visible and shown:
+            self.body.forget(self.sidebar)
+
+    def _toggle_sidebar(self):
+        self._set_sidebar_visible(self.sidebar_visible_var.get())
+
+    def show_pipeline_status(self):
+        """Show the pipeline sidebar (and return it)."""
+        self._set_sidebar_visible(True)
+        self._refresh_status_window()
+        return self.sidebar
 
     def _refresh_status_window(self):
-        if self.status_window is None or not self.status_window.winfo_exists() or self._status_tree is None:
-            return
         tree = self._status_tree
+        if tree is None or not tree.winfo_exists():
+            return
         selected = tree.selection()
         tree.delete(*tree.get_children())
         for row in self.project.summary():
             tree.insert("", "end", iid=row["key"], tags=(row["status"],),
-                        values=(f"{row['number']} · {row['title']}", row["status"], row["source"], row["updated"]))
+                        values=(f"{row['number']} · {self._STAGE_SHORT_NAMES[row['key']]}", row["status"]))
         if selected and tree.exists(selected[0]):
             tree.selection_set(selected[0])
+        mark = " *" if self._project_has_unsaved_changes() else ""
         where = self.project.path or "not saved yet"
-        mark = " (unsaved changes)" if self._project_has_unsaved_changes() else ""
-        self._status_heading.config(text=f"Project: {self.project.name}{mark}  —  {where}")
+        self._status_heading.config(text=f"{self.project.name}{mark}\n{where}")
         self._show_status_detail()
 
     def _status_selected_key(self, warn=True):
         sel = self._status_tree.selection() if self._status_tree is not None else ()
         if not sel:
             if warn:
-                messagebox.showinfo("Pipeline Status", "Select a stage first.", parent=self.status_window)
+                messagebox.showinfo("Pipeline", "Select a stage first.", parent=self.status_window)
             return None
         return sel[0]
 
@@ -3619,21 +3678,144 @@ class NecLabApp:
         key = self._status_selected_key(warn=False)
         if key is None:
             self._status_detail.config(text="Select a stage to see its details.")
+            self._stage_action_button.configure(text="", state='disabled')
             return
         rec = self.project.get(key)
         stage = core_stages.stage(key)
+        status = self.project.status(key)
+        parts = [f"{stage.number} · {stage.title} — {status}", stage.description]
         if rec is None:
-            text = f"{stage.description} Not run yet."
+            parts.append(self._STAGE_NEEDS[key])
         else:
-            parts = [stage.description]
+            parts.append(f"Source: {rec.describe_source()}")
+            if rec.updated_at:
+                parts.append(f"Updated: {rec.updated_at.replace('T', ' ')}")
             if rec.problem:
                 parts.append(f"Problem: {rec.problem}")
             if rec.params:
                 parts.append("Settings: " + ", ".join(f"{k}={v}" for k, v in rec.params.items()))
-            if self.project.status(key) == core_project.OUT_OF_DATE:
+            if status == core_project.OUT_OF_DATE:
                 parts.append("Something it was computed from has changed since: recompute it to update.")
-            text = "  ".join(parts)
-        self._status_detail.config(text=text)
+        self._status_detail.config(text="\n".join(parts))
+        label, action = self._stage_action(key)
+        self._stage_action_button.configure(text=label, state='normal' if action else 'disabled')
+
+    # ---- what each stage's action button does
+
+    def _active_detection_window(self):
+        for win in reversed(self.detection_windows):
+            try:
+                if win.window.winfo_exists():
+                    return win
+            except tk.TclError:
+                pass
+        return None
+
+    def _stage_action(self, key):
+        """(button label, callable or None) for a stage: open its view,
+        run it, or load it, depending on what is available."""
+        p = self.project
+        win = self._active_detection_window()
+        if key == "raw":
+            if p.status("raw") == core_project.MISSING:
+                return "Locate Recording...", self._locate_and_restore_recording
+            if self.img_original is not None:
+                return "Show Recording", lambda: self.notebook.select(self.image_tab)
+            return "Open Recording...", self.open_ometiff_file
+        if key == "preprocess":
+            return "No preprocessing filters yet", None
+        if key in ("features", "mask", "cells"):
+            if win is not None:
+                return "Show Cell Detection Window", lambda: self._lift_window(win.window)
+            if any(p.data(k) is not None for k in ("features", "mask", "cells")):
+                return "Open Cell Detection Window", self._restore_views_from_project
+            if key == "features" and self.img_original is not None:
+                return "Compute Variability Map...", self._ask_and_compute_map
+            item_key, label = {"features": ("maps", "Open Variability Map..."),
+                               "mask": ("mask", "Open Candidate Mask..."),
+                               "cells": ("cells", "Open Cells...")}[key]
+            return label, lambda: self.open_pipeline_stage(item_key)
+        # stages 5-7
+        if win is not None and win.labels is not None and win.img_array is not None:
+            return "Open Signals & Correlation", lambda: self._open_signal_analysis(win)
+        if p.data(key) is not None:
+            if key == "correlation":
+                return "View Correlation Matrix", self._view_project_correlation
+            return "View in Multiple Files", lambda: self._view_signals_in_multiple_files(key)
+        if key in ("signals", "analysis"):
+            return "Open Signals Files...", self.open_multiple_xls_files
+        return "Open Correlation Matrix...", self.load_correlation_matrix_wrapper
+
+    def _run_stage_action(self):
+        key = self._status_selected_key()
+        if key is None:
+            return
+        _label, action = self._stage_action(key)   # recomputed: windows may have opened/closed
+        if action is not None:
+            action()
+        self._refresh_status_window()
+
+    @staticmethod
+    def _lift_window(window):
+        window.deiconify()
+        window.lift()
+        window.focus_force()
+
+    def _locate_and_restore_recording(self):
+        warnings = self._locate_missing_recording()
+        show_warnings(self.root, warnings)
+        if self.project.status("raw") != core_project.MISSING:
+            self._restore_views_from_project()
+
+    def _ask_and_compute_map(self):
+        names = get_variability_methods()
+        choice = ask_choice(self.root, "Variability Map", "Which variability measure?", names)
+        if choice is not None:
+            self.show_variability_menu(names.index(choice))
+
+    def _open_signal_analysis(self, win):
+        """Stages 5-7 from the cell detection window: signals of the
+        selected cells, their normalization and correlation."""
+        if not win.selected_clusters:
+            if not messagebox.askyesno("No Cells Selected",
+                                       f"No cells are selected. Use all {len(win.cell_pix)} cells?"):
+                return
+            win.select_all_clusters()
+        self._lift_window(win.window)
+        win.use_selected_clusters()
+
+    def _view_signals_in_multiple_files(self, key):
+        """Show the project's signals (stage 5) or normalized signals (stage 6)
+        in the Multiple Files tab."""
+        df = self.project.data(key)
+        if df is None:
+            return
+        title = core_stages.stage(key).title
+        table = df.copy()
+        table.columns = [str(i) for i in range(table.shape[1])]   # Multiple Files matches columns by position
+        datasets = [{'file': self.project.path or self.project.name, 'sheet': title,
+                     'label': f"{self.project.name} - {title}", 'df': table,
+                     'column_names': list(table.columns)}]
+        if key == "analysis":
+            self.multi_xls_norm_mode_var.set('none')     # already normalized
+        self._on_multi_xls_load_complete(datasets)
+
+    def _view_project_correlation(self):
+        """Show the project's correlation matrix (stage 7) with its dendrogram."""
+        corr = self.project.data("correlation")
+        if corr is None:
+            return None
+        from corr_dendo_functions import _plot_correlation_helper
+        win = tk.Toplevel(self.root)
+        win.title(f"Correlation Matrix - {self.project.name}")
+        win.geometry("700x900")
+        frame = tk.Frame(win, bg=_C['panel'])
+        frame.pack(fill=tk.BOTH, expand=True)
+        method = self.project.get("correlation").params.get("method") or "loaded"
+        size = min(10, max(5, corr.shape[0] * 0.5))
+        _plot_correlation_helper(corr, size, self.root, None, is_precomputed_corr=True,
+                                 corr_method=str(method), target_frame=frame)
+        return win
 
     def _status_save_stage(self):
         key = self._status_selected_key()
@@ -3782,6 +3964,7 @@ class NecLabApp:
                                         on_recording_attached=self._on_recording_attached)
         if win is not None:
             self.detection_windows.append(win)
+            self._refresh_status_window()
 
     # ==================== HELP / AUTO-UPDATER ====================
 

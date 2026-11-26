@@ -230,7 +230,9 @@ p, warnings = Project.load("experiment.neclab")
 p.status("signals")           # "done", or "out of date" if the cells changed since
 ```
 
-In the app: **File → New / Open / Save Project** and **File → Pipeline Status**.
+In the app: **File → New / Open / Save Project**, and the **pipeline sidebar** on the left of the main window, which lists the 8 stages with their live status and, for the selected stage, its details, a button that opens or runs it, and Save / Load / Clear Stage.
+
+![Pipeline sidebar](docs/images/pipeline_sidebar.png)
 
 ### Running the tests
 

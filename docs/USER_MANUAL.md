@@ -44,7 +44,7 @@ Both workflows share the same main window, which has a menu bar at the top and a
 | Item | Action |
 |---|---|
 | **New Project** / **Open Project...** / **Save Project** (`Ctrl+S`) / **Save Project As...** | Start, open or save a project: the whole analysis of one recording, every stage with its settings, saved in a `.neclab` folder. See [section 4.9](#49-projects). |
-| **Pipeline Status...** | Shows each stage's status (not run, done, loaded, out of date, missing), where it came from and when, and saves or loads a single stage. See [section 4.9](#49-projects). |
+| **Show Pipeline Sidebar** | Shows or hides the pipeline sidebar on the left: each stage's status (not run, done, loaded, out of date, missing), its details, a button to open or run it, and saving or loading a single stage. See [section 4.10](#410-the-pipeline-sidebar). |
 | **Open Recording (OME-TIFF / TIFF / NPY)...** (`Ctrl+O`) | Loads a recording (an image stack of frames × height × width) from an OME-TIFF, a plain TIFF or a NumPy `.npy` file, switches to the "Image Processing" tab, and enables the Image and Variability Analysis menus. Files that aren't a recording (e.g. a single 2D image) are rejected with an explanation. |
 | **Open Pipeline Stage** | Starts the analysis at a later stage from a file saved earlier (or made by another program). See [section 4.8](#48-starting-from-a-saved-stage). |
 | **Open Data (.npy / .csv / .xlsx)** | Loads a numeric data file into the "Data Visualization" tab. For CSV files, a dialog lets you pick the initial column (ROI); for `.npy` files, columns are auto-named "Column 1", "Column 2", etc. |
@@ -229,7 +229,15 @@ Contents of a project folder (only the stages that have data):
 
 The files are the same formats as the Export menu, so they can be opened in Excel, ImageJ or Python, or with **File → Open Pipeline Stage**.
 
-**Pipeline Status** (File menu) lists the 8 stages with their status:
+> The Multiple Files tab (comparing several recordings' signals) isn't part of a project; its files are opened and saved from that tab as before.
+
+### 4.10 The pipeline sidebar
+
+The panel on the left of the main window shows the current project and its 8 stages, and is the quickest way to move through the analysis. Hide it with its **Hide** button and show it again with **File → Show Pipeline Sidebar**; drag its right edge to resize it.
+
+![Pipeline sidebar](images/pipeline_sidebar.png)
+
+The top shows the project's name (`*` = unsaved changes) and where it is saved. Each stage's status is shown in color:
 
 | Status | Meaning |
 |---|---|
@@ -237,14 +245,27 @@ The files are the same formats as the Export menu, so they can be opened in Exce
 | done | Computed in NecLab and up to date |
 | loaded | Loaded from a file and up to date |
 | out of date | Something it was computed from has changed since (e.g. you detected cells again after extracting signals, or opened a different recording): recompute it |
-| missing | Its data couldn't be loaded (e.g. the recording wasn't found); the reason is shown below the list |
+| missing | Its data couldn't be loaded (e.g. the recording wasn't found); the reason is shown in the details |
 
-Select a stage to see its settings, then:
+Click a stage to see its details: what it holds, where it came from, when it was updated, the settings used, and, for a stage not run yet, what it needs. The blue button below does the next sensible thing for that stage (double-clicking the stage does the same):
+
+| Stage | Button |
+|---|---|
+| 0 · Recording | **Open Recording...**, **Show Recording** (Image Processing tab), or **Locate Recording...** when it is missing |
+| 1 · Preprocessing | Not available yet |
+| 2 · Variability map | **Compute Variability Map...** (asks which measure) when there's a recording; otherwise **Open Variability Map...** |
+| 2–4 (with data) | **Open / Show Cell Detection Window** |
+| 3 · Candidate mask, 4 · Cells | **Open Candidate Mask... / Open Cells...** when there's nothing yet |
+| 5–7 with cells and the recording | **Open Signals & Correlation**: the correlation analysis of the selected cells (asks to use all cells if none are selected) |
+| 5–6 with data only | **View in Multiple Files** (stage 6 opens with Normalization = None) |
+| 7 with data only | **View Correlation Matrix** (matrix + dendrogram) |
+| 5–7 with nothing yet | **Open Signals Files... / Open Correlation Matrix...** |
+
+The buttons underneath:
 - **Save Stage...** saves just that stage to a new folder (its files plus a `stage.json` with its settings).
 - **Load Stage...** loads a stage saved that way, or one stage from another project folder, into the current project. It is checked against what is loaded (e.g. the cells must be the same size as the recording) and replaces that stage.
 - **Clear Stage** removes the stage from the project.
-
-> The Multiple Files tab (comparing several recordings' signals) isn't part of a project; its files are opened and saved from that tab as before.
+- **Save Project** is the same as File → Save Project.
 
 ---
 
