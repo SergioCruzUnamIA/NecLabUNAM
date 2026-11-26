@@ -43,7 +43,8 @@ Ambos flujos comparten la misma ventana principal, que tiene una barra de menús
 
 | Opción | Acción |
 |---|---|
-| **Open OME-TIFF** (Abrir OME-TIFF, `Ctrl+O`) | Carga una pila de imágenes OME-TIFF, cambia a la pestaña "Image Processing" y habilita los menús Image y Variability Analysis. |
+| **Open Recording (OME-TIFF / TIFF / NPY)...** (Abrir Grabación, `Ctrl+O`) | Carga una grabación (una pila de imágenes de frames × alto × ancho) desde un OME-TIFF, un TIFF normal o un archivo NumPy `.npy`, cambia a la pestaña "Image Processing" y habilita los menús Image y Variability Analysis. Los archivos que no son una grabación (p. ej. una sola imagen 2D) se rechazan con una explicación. |
+| **Open Pipeline Stage** (Abrir Etapa del Pipeline) | Empieza el análisis en una etapa posterior a partir de un archivo guardado antes (o hecho con otro programa). Ver [sección 4.8](#48-comenzar-desde-una-etapa-guardada). |
 | **Open Data (.npy / .csv / .xlsx)** (Abrir Datos) | Carga un archivo de datos numéricos en la pestaña "Data Visualization". Si es CSV, se muestra un diálogo para elegir la columna inicial (ROI); si es `.npy`, las columnas se nombran automáticamente "Column 1", "Column 2", etc. |
 | **Load Correlation Matrix** (Cargar Matriz de Correlación) | Carga una matriz de correlación ya calculada (CSV/XLSX, debe ser cuadrada) y la muestra como dendrograma + mapa de calor. Ver [sección 9](#9-cargar-una-matriz-de-correlación-precalculada). |
 | **Open Multiple Files (.xls / .csv)** (Abrir Múltiples Archivos) | Abre el flujo de "Multiple Files": selección de varios archivos Excel y de las hojas a cargar de cada uno. Ver [sección 6](#6-pestaña-multiple-files-datos-múltiples). |
@@ -130,44 +131,76 @@ Al elegir un método en el menú **Variability Analysis**, se abre una ventana n
 
 ### 4.2 Controles de la ventana de análisis
 
-- **Threshold** (1–1000): umbral de binarización de la imagen de variabilidad; empieza en el valor por defecto del método elegido.
+- **Threshold**: umbral de binarización de la imagen de variabilidad; empieza en el valor por defecto del método elegido (para un mapa cargado que no es uno de los 7 métodos, en el percentil 95 del mapa). No se usa mientras haya una máscara cargada.
 - **Min Size** / **Max Size** (1–500 / 1–1000): tamaño mínimo y máximo (en píxeles) de los clusters a conservar.
 
-### 4.3 Menú Clustering
+### 4.3 Menú Data (Datos)
+
+| Opción | Acción |
+|---|---|
+| **Attach Recording...** (Adjuntar Grabación) | Carga la grabación a la que pertenecen el mapa / la máscara / las células (sus frames deben ser del mismo tamaño). Es necesaria para las señales y el análisis de correlación. Si aún no hay mapa de variabilidad, ofrece calcular uno. |
+| **Load Variability Map...** (Cargar Mapa de Variabilidad) | Usa un mapa guardado (etapa 2) en lugar del calculado. |
+| **Load Mask...** (Cargar Máscara) | Usa una máscara de píxeles candidatos guardada (etapa 3): las opciones de Clustering parten de esa máscara en lugar de aplicar el threshold. |
+| **Load Cells...** (Cargar Células) | Usa células guardadas (etapa 4): una imagen de etiquetas guardada con **Export → Save Cells**, ROIs de ImageJ (`.roi`, o el `RoiSet.zip` que guarda el ROI Manager; la célula *n* es el *n*-ésimo ROI), o un archivo de coordenadas `.txt` de versiones anteriores. Los ROIs y los `.txt` necesitan el tamaño de la imagen, así que primero adjunte la grabación o cargue un mapa. |
+| **Stop Using Loaded Mask** (Dejar de Usar la Máscara Cargada) | Vuelve a aplicar el threshold al mapa de variabilidad. |
+
+Cada archivo se revisa al cargarlo (tamaño, contenido y que coincida con lo ya cargado); un archivo que no se puede usar se rechaza con un mensaje que explica por qué.
+
+### 4.4 Menú Clustering
 
 | Opción | Acción |
 |---|---|
 | **Process Cluster (Basic)** (Procesar Cluster — Básico) | Binariza la imagen de variabilidad (con realce) usando el threshold, encuentra las regiones conectadas y conserva las que miden entre Min Size y Max Size. |
 | **Process Cluster (Advanced)** (Procesar Cluster — Avanzado) | Igual que el básico, pero las regiones mayores que Max Size se dividen alrededor de los máximos locales (picos) de la imagen de variabilidad en lugar de descartarse. |
 | **Decompose Large Clusters (KMeans)** (Descomponer Clusters Grandes) | Igual que el básico, pero las regiones mayores que Max Size se dividen con KMeans (posición + variabilidad); las partes menores que Min Size se descartan. |
-| **Load Cells...** (Cargar Células) | Carga células guardadas con **Export → Save Cells** (imagen de etiquetas `.tif`/`.npy`), o un archivo de coordenadas `.txt` de versiones anteriores, sobre la imagen actual. La imagen debe ser del mismo tamaño. |
 
-Cada opción ejecuta una detección completa con los valores actuales de Threshold / Min Size / Max Size y reemplaza las células anteriores (y limpia la selección).
+Cada opción ejecuta una detección completa con los valores actuales de Threshold / Min Size / Max Size (o a partir de la máscara cargada) y reemplaza las células anteriores (y limpia la selección). Advanced y KMeans necesitan un mapa de variabilidad.
 
 **IDs de célula:** cada célula detectada recibe un ID permanente (1, 2, 3, ... en orden de lectura del píxel superior izquierdo de cada célula: de arriba hacia abajo y de izquierda a derecha). Los mismos parámetros sobre la misma imagen siempre dan los mismos IDs, y estos IDs se usan en todas partes: etiquetas del gráfico, lista de selección, señales exportadas (columnas `cell_<id>`) y células guardadas.
 
-### 4.4 Selección de clusters
+### 4.5 Selección de clusters
 
 - Haga clic sobre las células en el gráfico para seleccionarlas (se resaltan en rojo, con su ID).
 - **Region Selection** (Selección por Región): mantenga el botón derecho y arrastre sobre el gráfico para seleccionar/quitar varios clusters a la vez dentro de un rectángulo; use el conmutador Add/Remove (Añadir/Quitar) para elegir el modo.
 - Menú **Selection** (Selección): `Select All` (Seleccionar Todos), `Clear Selection` (Limpiar Selección).
 - La lista de clusters seleccionados aparece en el panel lateral, con un botón "Remove" (Remover) por cada uno.
 
-### 4.5 Visualización 3D
+### 4.6 Visualización 3D
 
 Menú **Visualization → 3D View** (Visualización → Vista 3D): abre una superficie 3D (matplotlib) de la imagen de variabilidad, que puede rotarse con el mouse.
 
-### 4.6 Exportar
+### 4.7 Exportar
 
 Menú **Export** (Exportar):
 - **Save Image** (Guardar Imagen): exporta la imagen del análisis actual.
+- **Save Variability Map...** (Guardar Mapa de Variabilidad): guarda el mapa (etapa 2) como `.npz` (conserva el nombre del método), `.npy` o `.tif` de 32 bits.
+- **Save Mask...** (Guardar Máscara): guarda la máscara de píxeles candidatos de la última detección (etapa 3) como `.tif` (0/255) o `.npy`.
 - **Save Signals (CSV / XLSX / NPY)...** (Guardar Señales): exporta la señal de cada célula seleccionada (el promedio de sus píxeles en cada frame), en el formato de señales de NecLab:
   - `.csv` / `.xlsx`: una fila de encabezado `frame, cell_<id>, cell_<id>, ...` y una fila por frame.
   - `.npy`: un arreglo `(frames, 1 + células)` cuya primera columna es el número de frame (0, 1, 2, ...), seguida de las células en orden de ID. Un `.npy` no puede guardar los IDs; use `.csv`/`.xlsx` para conservarlos.
 
   Estos archivos se pueden abrir directamente con `File → Open Data Files`: la columna de frame se reconoce y no se muestra como columna de datos.
-- **Save Cells (Label Image)...** (Guardar Células): guarda las células como una imagen de etiquetas (`.tif` o `.npy`: una imagen del tamaño de un frame donde cada píxel contiene el ID de su célula, 0 = fondo) más una tabla con el mismo nombre y extensión `.csv` (`cell_id, n_pixels, centroid_row, centroid_col`). Si hay células seleccionadas, pregunta si guardar solo esas. Se vuelven a cargar con **Clustering → Load Cells...**.
-- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (mismo formato que Save Signals), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
+- **Save Cells (Label Image)...** (Guardar Células): guarda las células como una imagen de etiquetas (`.tif` o `.npy`: una imagen del tamaño de un frame donde cada píxel contiene el ID de su célula, 0 = fondo) más una tabla con el mismo nombre y extensión `.csv` (`cell_id, n_pixels, centroid_row, centroid_col`). Si hay células seleccionadas, pregunta si guardar solo esas. Se vuelven a cargar con **Data → Load Cells...**.
+- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (mismo formato que Save Signals), **Export Correlation** (la matriz actual, que se puede volver a abrir como etapa 7), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
+
+Las señales y el análisis de correlación necesitan la grabación; sin ella lo indican y remiten a **Data → Attach Recording...**.
+
+### 4.8 Comenzar desde una etapa guardada
+
+El análisis es una cadena de etapas, y cada una puede empezar desde un archivo en lugar de recalcularse: guarde el resultado de una etapa una vez y después (o en otra computadora) ábralo y continúe desde ahí. **File → Open Pipeline Stage** lista las etapas que se pueden abrir:
+
+| Etapa | Qué contiene | Archivos | Se abre en |
+|---|---|---|---|
+| 0 · Grabación | La pila de imágenes | `.ome.tif`, `.tif`, `.npy` (`File → Open Recording`) | Pestaña Image Processing |
+| 2 · Mapa de variabilidad | Variabilidad por píxel | `.npz` (uno o más mapas con nombre), `.npy`, `.tif` | Ventana de análisis |
+| 3 · Máscara de candidatos | Píxeles que pueden pertenecer a células | `.tif`/`.npy` con solo dos valores (0/1 o 0/255) | Ventana de análisis |
+| 4 · Células | Imagen de etiquetas (IDs permanentes) | Imagen de etiquetas `.tif`/`.npy`, ImageJ `.roi`/`.zip`, `.txt` anterior | Ventana de análisis |
+| 5–6 · Señales | Una columna por célula, una fila por frame | `.csv`, `.xlsx`, `.npy` | Pestaña Multiple Files |
+| 7 · Matriz de correlación | Matriz cuadrada | `.csv`, `.xlsx` | Vista de correlación (sección 9) |
+
+- Si hay una grabación abierta y las imágenes del archivo son del mismo tamaño, la grabación se adjunta automáticamente. Si los tamaños no coinciden, se pregunta si continuar sin ella.
+- Lo que falte solo desactiva las funciones que lo necesitan: p. ej. al empezar desde una máscara sin grabación, la detección Basic funciona, Advanced/KMeans piden un mapa de variabilidad y las señales piden la grabación.
+- Se aceptan tablas de señales de otros programas: la fila de encabezado es opcional, y una primera columna llamada `frame`/`time`/`time_s` o con 0, 1, 2, … se trata como tiempo y no como célula. Las hojas con menos de 2 filas o sin números se rechazan indicando el motivo.
 
 ---
 

@@ -148,7 +148,9 @@ You can also load an already-computed correlation matrix with `File → Load Cor
 NecLabUNAM/
 ├── interface3.py               # Main graphical interface (entry point)
 ├── neclab_core/                # Analysis code with no user interface (see below)
-│   ├── formats.py              #   File formats: OME-TIFF, signals tables, cells
+│   ├── stages.py               #   Pipeline stages: what each reads/writes, load/save any stage
+│   ├── formats.py              #   File readers/writers for every stage
+│   ├── validation.py           #   Checks on loaded data, alone and against other stages
 │   ├── display.py              #   Display-only adjustments (never change the data)
 │   ├── variability.py          #   The 7 variability maps + sharpening
 │   ├── segmentation.py         #   Cell detection -> label image with permanent IDs
@@ -194,6 +196,20 @@ corr = correlation.correlation_matrix(traces, "pearson")
 ```
 
 Cells are represented by a **label image** (0 = background, n = cell with ID n). IDs are permanent: they are numbered in reading order, saved with the cells, and used as the `cell_<id>` column names of every signals file.
+
+**Starting at any stage.** Each stage's output can be saved and loaded back, so the analysis can start from a recording, a variability map, a mask, cells (including ImageJ ROIs), a signals table or a correlation matrix. `neclab_core.stages` is the single entry point; every load is validated, including against what is already loaded (frame size, frame count, cell IDs), and bad files raise `ValidationError` with a readable message:
+
+```python
+from neclab_core import stages
+
+ctx = stages.Context(stack=stack)                          # what is already loaded
+cells = stages.load_item("cells", "RoiSet.zip", ctx)       # ImageJ ROIs -> label image
+traces = signals.extract_signals(stack, cells.data)
+stages.save_item("signals", traces, "signals_raw.csv")
+corr = stages.load_item("correlation", "correlation.csv")  # .data, .warnings
+```
+
+In the app: **File → Open Pipeline Stage**, and the **Data** / **Export** menus of the cell detection window.
 
 ### Running the tests
 

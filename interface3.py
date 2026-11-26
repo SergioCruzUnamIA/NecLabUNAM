@@ -114,6 +114,8 @@ _trapz = getattr(np, 'trapezoid', None) or np.trapz
 _REPO = "sergiocruzunamia/neclabunam"
 _CORE_FILES = [
     "neclab_core/__init__.py",
+    "neclab_core/stages.py",
+    "neclab_core/validation.py",
     "neclab_core/formats.py",
     "neclab_core/display.py",
     "neclab_core/variability.py",
@@ -172,12 +174,15 @@ _ensure_core_package()
 
 from neclab_core import correlation as core_correlation
 from neclab_core import display as core_display
+from neclab_core import stages as core_stages
+from neclab_core.validation import ValidationError
 
 # Local modules
-from variability_functions import show_variability_analysis, get_variability_methods
+from variability_functions import (show_variability_analysis, get_variability_methods,
+                                   open_detection_window, ask_choice, show_warnings)
 from corr_dendo_functions import load_correlation_matrix
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
-from image_loader import load_ometiff_image
+from image_loader import ask_recording_path, load_recording
 from image_processing import mask_to_pil
 
 
@@ -370,10 +375,23 @@ class NecLabApp:
         self.menu_archivo = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_archivo, label="File")
         self.menu_archivo.add_command(
-            label="Open OME-TIFF",
+            label="Open Recording (OME-TIFF / TIFF / NPY)...",
             accelerator="Ctrl+O",
             command=self.open_ometiff_file
         )
+        # Enter the pipeline at a later stage by loading that stage's data.
+        self.menu_etapas = Menu(self.menu_archivo, tearoff=False)
+        self.menu_archivo.add_cascade(label="Open Pipeline Stage", menu=self.menu_etapas)
+        self.menu_etapas.add_command(label="2 · Variability Map (.npz / .npy / .tif)...",
+                                     command=lambda: self.open_pipeline_stage("maps"))
+        self.menu_etapas.add_command(label="3 · Candidate Mask (.tif / .npy)...",
+                                     command=lambda: self.open_pipeline_stage("mask"))
+        self.menu_etapas.add_command(label="4 · Cells (label image / ImageJ ROIs)...",
+                                     command=lambda: self.open_pipeline_stage("cells"))
+        self.menu_etapas.add_command(label="5–6 · Signals (.csv / .xlsx / .npy)...",
+                                     command=self.open_multiple_xls_files)
+        self.menu_etapas.add_command(label="7 · Correlation Matrix (.csv / .xlsx)...",
+                                     command=self.load_correlation_matrix_wrapper)
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
             label='Open Data Files (.npy / .xls / .csv)',
@@ -3279,24 +3297,61 @@ class NecLabApp:
 
     # ==================== MENU COMMANDS - FILE ====================
 
-    def open_ometiff_file(self):
-        """Open an OME-TIFF file."""
+    def open_pipeline_stage(self, item_key):
+        """File → Open Pipeline Stage: start at stage 2 (map), 3 (mask) or
+        4 (cells) from a saved file, in the cell detection window. The open
+        recording, if any, is attached when its frames are the same size."""
+        it = core_stages.item(item_key)
+        stage = core_stages.stage(it.stage)
+        filename = filedialog.askopenfilename(
+            title=f"Open Stage {stage.number} - {it.title}",
+            filetypes=core_stages.open_filetypes(item_key))
+        if not filename:
+            return
+
+        stack = self.img_original
         try:
-            img, metadata, filename = load_ometiff_image()
+            try:
+                loaded = core_stages.load_item(item_key, filename, core_stages.Context(stack=stack))
+            except ValidationError as e:
+                if stack is None or "same size" not in str(e):
+                    raise
+                if not messagebox.askyesno(
+                        "Different Image Size",
+                        f"{e}\n\nOpen it without the recording? "
+                        "(Signals need a recording of the same size.)"):
+                    return
+                stack = None
+                loaded = core_stages.load_item(item_key, filename, core_stages.Context())
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load File", f"{os.path.basename(filename)}:\n\n{e}")
+            return
+        show_warnings(self.root, loaded.warnings)
+
+        source = f"from {os.path.basename(filename)}"
+        if item_key == "maps":
+            name = ask_choice(self.root, "Choose Map", "The file has several maps. Which one?",
+                              list(loaded.data))
+            if name is None:
+                return None
+            return open_detection_window(self.root, stack=stack, var_im=loaded.data[name],
+                                         map_name=name, source=source)
+        if item_key == "mask":
+            return open_detection_window(self.root, stack=stack, mask=loaded.data, source=source)
+        return open_detection_window(self.root, stack=stack, labels=loaded.data, source=source)
+
+    def open_ometiff_file(self):
+        """Open a recording (OME-TIFF, TIFF or NumPy stack)."""
+        filename = ask_recording_path(self.root)
+        if not filename:
+            return
+        try:
+            img, metadata = load_recording(filename)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load Recording", f"{os.path.basename(filename)}:\n\n{e}")
+            return
         except Exception as e:
             messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
-            return
-
-        if img is None:
-            return
-
-        img = np.asarray(img)
-        if img.ndim != 3:
-            messagebox.showerror(
-                "Unsupported Image",
-                f"Expected a stack with shape (frames, height, width), got {img.shape}.\n\n"
-                "Files with several channels or Z-planes aren't supported yet."
-            )
             return
 
         self.img_original = img

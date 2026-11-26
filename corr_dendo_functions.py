@@ -10,6 +10,8 @@ from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
 
 from neclab_core import correlation as core_correlation
+from neclab_core import stages as core_stages
+from neclab_core.validation import ValidationError
 
 def get_main_plot_frame(main_window):
     """
@@ -666,50 +668,34 @@ def load_correlation_matrix(root, canvas, target_frame=None):
         # Open file dialog to select correlation matrix file
         filename = askopenfilename(
             title="Load Correlation Matrix",
-            filetypes=[
-                ("CSV files", "*.csv"),
-                ("Excel files", "*.xlsx"),
-                ("All files", "*.*")
-            ]
+            filetypes=core_stages.open_filetypes("correlation")
         )
-        
+
         if not filename:
             return  # User cancelled
-        
-        # Load the correlation matrix based on file extension
-        if filename.lower().endswith('.csv'):
-            corr_matrix = pd.read_csv(filename, index_col=0)
-        elif filename.lower().endswith(('.xlsx', '.xls')):
+
+        options = {}
+        if filename.lower().endswith(('.xlsx', '.xls')):
             sheet_names = pd.ExcelFile(filename).sheet_names
-            sheet_name = sheet_names[0]
+            options['sheet_name'] = sheet_names[0]
             if len(sheet_names) > 1:
                 from visualization_helpers import _show_sheet_selection_dialog
                 chosen = _show_sheet_selection_dialog(root, sheet_names)
                 if chosen is None:
                     return  # User cancelled sheet selection
-                sheet_name = chosen
-            corr_matrix = pd.read_excel(filename, sheet_name=sheet_name, index_col=0)
-        else:
-            # Try CSV as default
-            corr_matrix = pd.read_csv(filename, index_col=0)
-        
-        # Validate that it's a square matrix (correlation matrices should be square)
-        if corr_matrix.shape[0] != corr_matrix.shape[1]:
-            messagebox.showerror(
-                "Invalid Matrix", 
-                "The loaded matrix is not square. Correlation matrices must be square."
-            )
+                options['sheet_name'] = chosen
+
+        # Read + validate (square, numeric, same labels) via the stage-7 format
+        try:
+            loaded = core_stages.load_item("correlation", filename, **options)
+        except ValidationError as e:
+            messagebox.showerror("Invalid Matrix", str(e))
             return
-        
-        # Check if values are in valid correlation range [-1, 1]
-        if (corr_matrix.min().min() < -1.1) or (corr_matrix.max().max() > 1.1):
-            response = messagebox.askyesno(
-                "Warning", 
-                "The matrix contains values outside the typical correlation range [-1, 1]. Continue anyway?"
-            )
-            if not response:
-                return
-        
+        corr_matrix = loaded.data
+        if loaded.warnings and not messagebox.askyesno(
+                "Warning", "\n\n".join(loaded.warnings) + "\n\nContinue anyway?"):
+            return
+
         # Display the correlation matrix
         size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
         canvas, _ = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True,

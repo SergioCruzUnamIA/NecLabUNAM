@@ -6,8 +6,11 @@ file paths) and returns plain data. Nothing imports tkinter, opens a
 dialog or draws a plot, so the same code runs from the app, a notebook,
 a batch script or a test.
 
-Modules, in pipeline order:
-    formats       reading/writing files (OME-TIFF, signals tables, cells)
+Modules:
+    stages        the pipeline stages, what each one reads/writes, and
+                  load_item()/save_item() to enter or leave any stage
+    formats       file readers/writers for every stage
+    validation    checks on loaded data, alone and against other stages
     display       display-only adjustments (never change the analysis data)
     variability   per-pixel variability maps (the 7 methods) and sharpening
     segmentation  candidate-pixel mask -> cells, as a label image
@@ -20,7 +23,9 @@ permanent ID of the cell that pixel belongs to.
 """
 
 __all__ = [
+    "stages",
     "formats",
+    "validation",
     "display",
     "variability",
     "segmentation",

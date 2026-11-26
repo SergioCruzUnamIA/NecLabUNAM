@@ -311,6 +311,24 @@ def detect_cells(var_im, processed_im, threshold, min_size=20, max_size=200, spl
     if split not in SPLIT_METHODS:
         raise ValueError(f"split must be one of {SPLIT_METHODS}, got {split!r}")
     mask = binarize(processed_im, threshold)
+    return detect_cells_from_mask(mask, var_im, min_size, max_size, split), mask
+
+
+def detect_cells_from_mask(mask, var_im=None, min_size=20, max_size=200, split="none"):
+    """Cell detection starting from a candidate-pixel mask (e.g. one loaded
+    from a file): steps 2-3 of detect_cells.
+
+    "peaks" and "kmeans" need the variability map `var_im`; "none" doesn't.
+    Returns the label image.
+    """
+    if split not in SPLIT_METHODS:
+        raise ValueError(f"split must be one of {SPLIT_METHODS}, got {split!r}")
+    mask = np.asarray(mask, dtype=bool)
+    if split != "none":
+        if var_im is None:
+            raise ValueError(f"Splitting with {split!r} needs the variability map")
+        if np.asarray(var_im).shape != mask.shape:
+            raise ValueError("The variability map and the mask must be the same size")
     regions = label_image_to_pixel_lists(connected_components(mask))
 
     if split == "none":
@@ -320,4 +338,4 @@ def detect_cells(var_im, processed_im, threshold, min_size=20, max_size=200, spl
     else:
         cells = split_large_kmeans(regions, var_im, min_size, max_size)
 
-    return pixel_lists_to_label_image(cells, mask.shape), mask
+    return pixel_lists_to_label_image(cells, mask.shape)

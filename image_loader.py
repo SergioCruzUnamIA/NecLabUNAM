@@ -1,22 +1,34 @@
 # image_loader.py
-"""File dialogs for loading images. The reading itself is in neclab_core.formats."""
+"""File dialogs for loading recordings. Reading and validation are in
+neclab_core (formats / validation / stages)."""
 
 from tkinter.filedialog import askopenfilename
 from PIL import Image
 
-from neclab_core import formats
+from neclab_core import stages
+
+
+def ask_recording_path(parent=None, title="Open Recording"):
+    """Dialog for a recording file (.ome.tif, .tif, .npy). Returns a path or ''."""
+    return askopenfilename(parent=parent, title=title, filetypes=stages.open_filetypes("stack"))
+
+
+def load_recording(path):
+    """Read and validate a recording. Returns (stack, metadata).
+    Raises neclab_core.validation.ValidationError for unusable files."""
+    loaded = stages.load_item("stack", path)
+    return loaded.data, loaded.metadata
 
 
 def load_ometiff_image():
     """
-    Opens a dialog to select an OME-TIFF file and returns (image, metadata, filename).
+    Opens a dialog to select a recording and returns (image, metadata, filename).
     Returns (None, None, None) if the user cancels.
     """
-    filename = askopenfilename(title="Open OME-TIFF file",
-                               filetypes=[("OME-TIFF files", "*.tif *.tiff"), ("All files", "*.*")])
+    filename = ask_recording_path()
     if not filename:
         return None, None, None
-    img, metadata = formats.load_ometiff(filename)
+    img, metadata = load_recording(filename)
     return img, metadata, filename
 
 

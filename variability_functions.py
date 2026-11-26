@@ -1,11 +1,17 @@
 """
-Cell detection window ("Full Analysis - <method>").
+Cell detection window ("Full Analysis - <name>").
 
 This module is user interface only: every computation is delegated to
 neclab_core (variability maps, detection, signal extraction, correlation,
-file formats). Cells are kept as a label image whose values are the cells'
-permanent IDs, so the IDs shown here are the same ones written to every
-exported file.
+file formats, validation). Cells are kept as a label image whose values
+are the cells' permanent IDs, so the IDs shown here are the same ones
+written to every exported file.
+
+The window covers pipeline stages 2-4 (variability map, candidate mask,
+cells) and can start from any of them: from the recording (the map is
+computed), from a saved map, from a saved mask or from saved cells. What
+needs data that isn't loaded is switched off with a message saying what
+to load; e.g. signals need the recording (Data -> Attach Recording).
 """
 
 import os
@@ -20,47 +26,137 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
-from neclab_core import correlation, formats, segmentation, signals, variability
+from neclab_core import correlation, segmentation, signals, stages, variability
+from neclab_core.validation import ValidationError
 
-# Menu label -> split method passed to segmentation.detect_cells.
+# Detection mode -> (label, split method passed to neclab_core.segmentation).
 _DETECTION_MODES = {
     "basic": ("Basic", "none"),
     "advanced": ("Advanced (3D peaks)", "peaks"),
     "kmeans": ("KMeans split", "kmeans"),
 }
 
+_DEFAULT_THRESHOLDS = dict(variability.VARIABILITY_METHODS)
+
+
+def default_threshold_for(name, processed_image):
+    """Starting threshold for a map: the method's default when the map is
+    one of the 7 variability methods, else the map's 95th percentile."""
+    if name in _DEFAULT_THRESHOLDS:
+        return _DEFAULT_THRESHOLDS[name]
+    if processed_image is None:
+        return 100
+    finite = np.asarray(processed_image, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return max(1, int(round(float(np.percentile(finite, 95))))) if finite.size else 100
+
+
+def ask_choice(parent, title, prompt, options):
+    """Small modal list dialog; returns the chosen option or None."""
+    if len(options) == 1:
+        return options[0]
+    dialog = tk.Toplevel(parent)
+    dialog.title(title)
+    dialog.transient(parent)
+    dialog.grab_set()
+    tk.Label(dialog, text=prompt, anchor='w').pack(fill='x', padx=10, pady=(10, 4))
+    box = tk.Listbox(dialog, height=min(10, len(options)), width=40, exportselection=False)
+    for opt in options:
+        box.insert(tk.END, opt)
+    box.selection_set(0)
+    box.pack(fill='both', expand=True, padx=10)
+    result = {'value': None}
+
+    def ok(_event=None):
+        sel = box.curselection()
+        if sel:
+            result['value'] = options[sel[0]]
+        dialog.destroy()
+
+    box.bind('<Double-Button-1>', ok)
+    buttons = tk.Frame(dialog)
+    buttons.pack(pady=8)
+    tk.Button(buttons, text="OK", width=10, command=ok).pack(side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Cancel", width=10, command=dialog.destroy).pack(side=tk.LEFT, padx=4)
+    parent.wait_window(dialog)
+    return result['value']
+
+
+def show_warnings(parent, warnings, title="Loaded with warnings"):
+    if warnings:
+        messagebox.showwarning(title, "\n\n".join(warnings), parent=parent)
+
 
 class VariabilityAnalysisWindow:
     """
     Window for variability analysis, cell detection and cell selection.
+
+    Args:
+        img_array: the raw recording (frames, height, width), or None.
+        method: variability method index, used when img_array is given and
+            var_im isn't.
+        main_window: parent Tk window.
+        var_im, map_name: a variability map to start from (stage 2).
+        mask: a candidate-pixel mask to start from (stage 3).
+        labels: cells to start from (stage 4).
+        source: short description of where the starting data came from.
     """
-    def __init__(self, img_array, method, main_window):
+    def __init__(self, img_array, method, main_window, var_im=None, map_name=None,
+                 mask=None, labels=None, source=""):
         self.img_array = img_array
         self.method = method
         self.main_window = main_window
 
-        # Variability map and its sharpened version (thresholded for detection)
-        self.var_im, self.default_th, self.method_name = variability.calculate_variability(img_array, method)
-        self.processed_image = variability.sharpen(self.var_im)
+        if var_im is None and img_array is not None and method is not None:
+            var_im, _th, map_name = variability.calculate_variability(img_array, method)
+        self._set_map_data(var_im, map_name)
 
-        # Detection results
-        self.mask = None            # boolean candidate-pixel mask (last detection run)
+        self.loaded_mask = None if mask is None else np.asarray(mask, dtype=bool)
+        self.mask = None            # mask from the last threshold-based detection
         self.labels = None          # label image: 0 = background, n = cell with ID n
         self.cell_pix = {}          # {cell_id: (N, 2) array of (row, col)}
         self.detection_info = ""    # how the current cells were obtained
         self.selected_clusters = []  # selected cell IDs, in selection order
         self.scatter_objects = []
         self.rect_selector = None
-        self.selection_mode = 'add'  # 'add' or 'remove'
-        self.cluster_colors = {}    # {cell_id: rgb}
-
-        # Correlation analysis of the selected cells
+        self.selection_mode = 'add'
+        self.cluster_colors = {}
         self.signals_df = None      # frames x selected cells ("cell_<id>" columns)
+        self.current_fig = None
 
         self.create_window()
-        self.update_display()
+        if labels is not None:
+            n = len(segmentation.cell_ids(labels))
+            self._set_cells(np.asarray(labels, dtype=np.int32), f"Loaded {n} cells {source}".strip())
+            self.info_label.config(text=self.detection_info)
+        else:
+            if self.loaded_mask is not None:
+                self.info_label.config(text=f"Using loaded mask {source} (threshold not used)".strip())
+            elif source:
+                self.info_label.config(text=f"Loaded {source}")
+            self.update_display()
 
     # ------------------------------------------------------------ helpers
+
+    def _set_map_data(self, var_im, name):
+        self.var_im = None if var_im is None else np.asarray(var_im)
+        self.processed_image = None if var_im is None else variability.sharpen(self.var_im)
+        self.method_name = name or ("Variability map" if var_im is not None else "Loaded data")
+        self.default_th = default_threshold_for(self.method_name, self.processed_image)
+
+    @property
+    def frame_shape(self):
+        for image in (self.var_im, self.loaded_mask, self.labels):
+            if image is not None:
+                return tuple(np.asarray(image).shape)
+        if self.img_array is not None:
+            return tuple(np.asarray(self.img_array).shape[1:])
+        return None
+
+    def _context(self):
+        return stages.Context(stack=self.img_array,
+                              maps=None if self.var_im is None else {self.method_name: self.var_im},
+                              mask=self.loaded_mask, labels=self.labels)
 
     @property
     def cell_id_list(self):
@@ -82,8 +178,7 @@ class VariabilityAnalysisWindow:
         rng = np.random.RandomState(42)
         colors = {}
         for cid in ids:
-            # Hue far from red: avoid [0.0, 0.05] and [0.92, 1.0]
-            hue = rng.uniform(0.08, 0.88)
+            hue = rng.uniform(0.08, 0.88)   # avoid red: [0.0, 0.05] and [0.92, 1.0]
             sat = rng.uniform(0.5, 1.0)
             val = rng.uniform(0.6, 1.0)
             colors[cid] = colorsys.hsv_to_rgb(hue, sat, val)
@@ -92,30 +187,85 @@ class VariabilityAnalysisWindow:
     def _centroid_plot_xy(self, cid):
         """Centroid of a cell in plot coordinates (x = column, y = flipped row)."""
         pts = self.cell_pix[cid]
-        return np.mean(pts[:, 1]), self.var_im.shape[0] - np.mean(pts[:, 0])
+        return np.mean(pts[:, 1]), self.frame_shape[0] - np.mean(pts[:, 0])
 
     def _require_cells(self):
         if not self.cell_pix:
-            messagebox.showwarning("Warning", "First detect cells (Clustering menu) or load them")
+            messagebox.showwarning("Warning", "First detect cells (Clustering menu) or load them "
+                                   "(Data → Load Cells...)", parent=self.window)
+            return False
+        return True
+
+    def _require_stack(self, action="This"):
+        if self.img_array is None:
+            messagebox.showwarning(
+                "Recording Needed",
+                f"{action} needs the recording.\n\n"
+                "Use Data → Attach Recording... to load it (its frames must be the same size).",
+                parent=self.window)
+            return False
+        return True
+
+    def _require_map(self, action="This"):
+        if self.var_im is None:
+            messagebox.showwarning(
+                "Variability Map Needed",
+                f"{action} needs a variability map.\n\n"
+                "Use Data → Load Variability Map..., or Data → Attach Recording... to compute one.",
+                parent=self.window)
             return False
         return True
 
     def _selected_sorted(self):
         return sorted(self.selected_clusters)
 
+    def _ask_open(self, item_key, title):
+        return askopenfilename(parent=self.window, title=title,
+                               filetypes=stages.open_filetypes(item_key))
+
+    def _ask_save(self, item_key, title, initialfile=None):
+        it = stages.item(item_key)
+        default_ext = os.path.splitext(it.default_name)[1]
+        return asksaveasfilename(parent=self.window, title=title,
+                                 initialfile=initialfile or it.default_name,
+                                 defaultextension=default_ext,
+                                 filetypes=stages.save_filetypes(item_key))
+
+    def _load(self, item_key, title, context=None):
+        """Ask for a file and load/validate it. Returns stages.Loaded or None."""
+        filename = self._ask_open(item_key, title)
+        if not filename:
+            return None
+        try:
+            loaded = stages.load_item(item_key, filename, context or self._context())
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load File", f"{os.path.basename(filename)}:\n\n{e}", parent=self.window)
+            return None
+        show_warnings(self.window, loaded.warnings)
+        return loaded
+
+    def _save(self, item_key, data, title, initialfile=None):
+        filename = self._ask_save(item_key, title, initialfile)
+        if not filename:
+            return
+        try:
+            written = stages.save_item(item_key, data, filename)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Save", str(e), parent=self.window)
+            return
+        messagebox.showinfo("Saved", "Saved to:\n" + "\n".join(map(str, written)), parent=self.window)
+
     # ------------------------------------------------------------- layout
 
     def create_window(self):
-        """Create the main window"""
         self.window = tk.Toplevel(self.main_window)
-        self.window.title(f"Full Analysis - {self.method_name}")
         self.window.geometry("1400x800")
+        self._update_title()
         self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
         self.window.config(menu=self._create_menu_bar())
 
         main_frame = tk.Frame(self.window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
         self.create_controls(main_frame)
 
         content_frame = tk.Frame(main_frame)
@@ -127,12 +277,24 @@ class VariabilityAnalysisWindow:
         self.selection_frame = tk.Frame(content_frame, width=200, relief=tk.RAISED, borderwidth=1)
         self.selection_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         self.selection_frame.pack_propagate(False)
-
         self.create_selection_panel()
 
+    def _update_title(self):
+        suffix = "" if self.img_array is not None else " (no recording)"
+        self.window.title(f"Full Analysis - {self.method_name}{suffix}")
+
     def _create_menu_bar(self):
-        """Create the menu bar for the analysis window."""
         menu_bar = tk.Menu(self.window, tearoff=False)
+
+        menu_data = tk.Menu(menu_bar, tearoff=False)
+        menu_bar.add_cascade(label="Data", menu=menu_data)
+        menu_data.add_command(label="Attach Recording...", command=self.attach_recording)
+        menu_data.add_separator()
+        menu_data.add_command(label="Load Variability Map...", command=self.load_map)
+        menu_data.add_command(label="Load Mask...", command=self.load_mask)
+        menu_data.add_command(label="Load Cells...", command=self.load_cells)
+        menu_data.add_separator()
+        menu_data.add_command(label="Stop Using Loaded Mask", command=self.clear_loaded_mask)
 
         menu_clustering = tk.Menu(menu_bar, tearoff=False)
         menu_bar.add_cascade(label="Clustering", menu=menu_clustering)
@@ -140,8 +302,6 @@ class VariabilityAnalysisWindow:
         menu_clustering.add_command(label="Process Cluster (Advanced)", command=self.process_clusters_advanced)
         menu_clustering.add_separator()
         menu_clustering.add_command(label="Decompose Large Clusters (KMeans)", command=self.decompose_clusters)
-        menu_clustering.add_separator()
-        menu_clustering.add_command(label="Load Cells...", command=self.load_cells)
 
         menu_seleccion = tk.Menu(menu_bar, tearoff=False)
         menu_bar.add_cascade(label="Selection", menu=menu_seleccion)
@@ -155,21 +315,24 @@ class VariabilityAnalysisWindow:
         menu_exportar = tk.Menu(menu_bar, tearoff=False)
         menu_bar.add_cascade(label="Export", menu=menu_exportar)
         menu_exportar.add_command(label="Save Image", command=self.save_image)
-        menu_exportar.add_command(label="Save Signals (CSV / XLSX / NPY)...", command=self.save_selected_signals)
+        menu_exportar.add_separator()
+        menu_exportar.add_command(label="Save Variability Map...", command=self.save_map)
+        menu_exportar.add_command(label="Save Mask...", command=self.save_mask)
         menu_exportar.add_command(label="Save Cells (Label Image)...", command=self.save_cells)
+        menu_exportar.add_command(label="Save Signals (CSV / XLSX / NPY)...", command=self.save_selected_signals)
         menu_exportar.add_separator()
         menu_exportar.add_command(label="Use Selected (Correlations)", command=self.use_selected_clusters)
 
         return menu_bar
 
     def create_controls(self, parent):
-        """Create parameter bar (spinboxes) and info."""
         control_frame = tk.Frame(parent)
         control_frame.pack(fill=tk.X, pady=(0, 10))
 
         tk.Label(control_frame, text="Threshold:").pack(side=tk.LEFT, padx=(0, 5))
         self.threshold_var = tk.IntVar(value=self.default_th)
-        ttk.Spinbox(control_frame, from_=1, to=1000, textvariable=self.threshold_var, width=10).pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Spinbox(control_frame, from_=1, to=10 ** 9, textvariable=self.threshold_var,
+                    width=10).pack(side=tk.LEFT, padx=(0, 15))
 
         tk.Label(control_frame, text="Min Size:").pack(side=tk.LEFT, padx=(0, 5))
         self.min_size_var = tk.IntVar(value=20)
@@ -183,7 +346,6 @@ class VariabilityAnalysisWindow:
         self.info_label.pack(side=tk.LEFT, padx=10)
 
     def create_selection_panel(self):
-        """Create side selection panel"""
         tk.Label(self.selection_frame, text="Selected Cells",
                  font=("Arial", 12, "bold")).pack(pady=10)
 
@@ -215,44 +377,61 @@ class VariabilityAnalysisWindow:
                                        justify=tk.CENTER)
         self.selection_info.pack(pady=10)
 
+    @staticmethod
+    def _placeholder(ax, text, title):
+        ax.text(0.5, 0.5, text, ha='center', va='center', transform=ax.transAxes, color='gray')
+        ax.set_title(title)
+        ax.axis('off')
+
     def update_display(self):
         """Redraw the four panels."""
         for widget in self.viz_frame.winfo_children():
             widget.destroy()
-        if getattr(self, 'current_fig', None) is not None:
+        if self.current_fig is not None:
             plt.close(self.current_fig)
 
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 8))
 
         # 1. Variability map
-        im1 = ax1.imshow(self.var_im, cmap='viridis')
-        ax1.set_title(f'{self.method_name}')
-        ax1.axis('off')
-        plt.colorbar(im1, ax=ax1)
+        if self.var_im is not None:
+            im1 = ax1.imshow(self.var_im, cmap='viridis')
+            ax1.set_title(f'{self.method_name}')
+            ax1.axis('off')
+            plt.colorbar(im1, ax=ax1)
+        else:
+            self._placeholder(ax1, 'No variability map\n(Data → Load Variability Map\nor Attach Recording)',
+                              'Variability Map')
 
         # 2. Sharpened map (the one thresholded)
-        im2 = ax2.imshow(self.processed_image, cmap='viridis')
-        ax2.set_title('Processed Image (Sharpened)')
-        ax2.axis('off')
-        plt.colorbar(im2, ax=ax2)
+        if self.processed_image is not None:
+            im2 = ax2.imshow(self.processed_image, cmap='viridis')
+            ax2.set_title('Processed Image (Sharpened)')
+            ax2.axis('off')
+            plt.colorbar(im2, ax=ax2)
+        else:
+            self._placeholder(ax2, 'No variability map', 'Processed Image (Sharpened)')
 
         # 3. Candidate-pixel mask
-        if self.mask is not None:
+        if self.loaded_mask is not None:
+            ax3.imshow(self.loaded_mask, cmap='gray')
+            ax3.set_title('Loaded mask (threshold not used)')
+            ax3.axis('off')
+        elif self.mask is not None:
             ax3.imshow(self.mask, cmap='gray')
             ax3.set_title(f'Binarization (th={self.threshold_var.get()})')
+            ax3.axis('off')
         elif self.labels is not None:
             ax3.imshow(self.labels > 0, cmap='gray')
             ax3.set_title('Loaded cells (mask)')
+            ax3.axis('off')
         else:
-            ax3.text(0.5, 0.5, 'Apply binarization', ha='center', va='center', transform=ax3.transAxes)
-            ax3.set_title('Binarization')
-        ax3.axis('off')
+            self._placeholder(ax3, 'Apply binarization', 'Binarization')
 
         # 4. Cells (clickable)
         self.scatter_objects = []
         self._cluster_annotations = []
-        height = self.var_im.shape[0]
         if self.labels is not None:
+            height, width = self.frame_shape
             for cid in self.cell_id_list:
                 pts = self.cell_pix[cid]
                 selected = cid in self.selected_clusters
@@ -266,7 +445,7 @@ class VariabilityAnalysisWindow:
             ax4.set_title(f'Cells ({len(self.cell_pix)} found) - Click to select')
             ax4.set_xlabel('X')
             ax4.set_ylabel('Y')
-            ax4.set_xlim(0, self.var_im.shape[1])
+            ax4.set_xlim(0, width)
             ax4.set_ylim(0, height)
         else:
             ax4.text(0.5, 0.5, 'Process clusters', ha='center', va='center', transform=ax4.transAxes)
@@ -296,6 +475,87 @@ class VariabilityAnalysisWindow:
         if self.selected_clusters:
             self.update_cluster_colors()
 
+    # ------------------------------------------------- data (enter a stage)
+
+    def attach_recording(self):
+        """Load the recording these maps/masks/cells belong to (needed for signals)."""
+        ctx = self._context()
+        ctx.stack = None
+        loaded = self._load("stack", "Attach Recording", ctx)
+        if loaded is None:
+            return
+        self.img_array = loaded.data
+        msg = f"Recording attached: {loaded.data.shape[0]} frames"
+        if self.var_im is None:
+            names = variability.method_names()
+            choice = ask_choice(self.window, "Variability Map",
+                                "Compute a variability map from the recording?\n"
+                                "(Cancel to keep working without one.)", names)
+            if choice is not None:
+                var_im, _th, name = variability.calculate_variability(self.img_array, names.index(choice))
+                self._set_map_data(var_im, name)
+                self.threshold_var.set(self.default_th)
+                msg += f", {name} computed"
+        self._update_title()
+        self.info_label.config(text=msg)
+        self.update_display()
+
+    def load_map(self):
+        """Start from a saved variability map (stage 2)."""
+        ctx = self._context()
+        ctx.maps = None
+        loaded = self._load("maps", "Load Variability Map", ctx)
+        if loaded is None:
+            return
+        name = ask_choice(self.window, "Choose Map", "The file has several maps. Which one?", list(loaded.data))
+        if name is None:
+            return
+        self._set_map_data(loaded.data[name], name)
+        self.threshold_var.set(self.default_th)
+        self._update_title()
+        self.info_label.config(text=f"Loaded map '{name}' from {os.path.basename(loaded.path)}")
+        self.update_display()
+
+    def load_mask(self):
+        """Start from a saved candidate-pixel mask (stage 3)."""
+        ctx = self._context()
+        ctx.mask = None
+        loaded = self._load("mask", "Load Mask", ctx)
+        if loaded is None:
+            return
+        self.loaded_mask = loaded.data
+        self.info_label.config(
+            text=f"Using mask {os.path.basename(loaded.path)} (threshold not used) - run a Clustering method")
+        self.update_display()
+
+    def clear_loaded_mask(self):
+        if self.loaded_mask is None:
+            return
+        self.loaded_mask = None
+        self.info_label.config(text="Loaded mask cleared: detection uses the threshold again")
+        self.update_display()
+
+    def load_cells(self):
+        """Start from saved cells (stage 4): label image, ImageJ ROIs or legacy .txt."""
+        ctx = self._context()
+        ctx.labels = None
+        filename = self._ask_open("cells", "Load Cells")
+        if not filename:
+            return
+        try:
+            if filename.lower().endswith(('.roi', '.zip', '.txt')) and ctx.frame_shape is None:
+                raise ValidationError("ImageJ ROIs and coordinate files need the image size: "
+                                      "attach the recording or load a map first.")
+            loaded = stages.load_item("cells", filename, ctx)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load File", f"{os.path.basename(filename)}:\n\n{e}", parent=self.window)
+            return
+        show_warnings(self.window, loaded.warnings)
+        n = len(segmentation.cell_ids(loaded.data))
+        info = f"Loaded {n} cells from {os.path.basename(filename)}"
+        self._set_cells(loaded.data, info, mask=None)
+        self.info_label.config(text=info)
+
     # ---------------------------------------------------------- detection
 
     def _run_detection(self, mode):
@@ -305,16 +565,32 @@ class VariabilityAnalysisWindow:
             min_size = self.min_size_var.get()
             max_size = self.max_size_var.get()
         except tk.TclError:
-            messagebox.showerror("Error", "Threshold, Min Size and Max Size must be numbers")
+            messagebox.showerror("Error", "Threshold, Min Size and Max Size must be numbers", parent=self.window)
             return
+
+        if self.loaded_mask is None and self.processed_image is None:
+            messagebox.showwarning(
+                "Nothing to Detect From",
+                "Load a variability map or a mask (Data menu), or attach the recording.",
+                parent=self.window)
+            return
+        if split != "none" and not self._require_map(f"The {label} method"):
+            return
+
         try:
-            labels, mask = segmentation.detect_cells(
-                self.var_im, self.processed_image, th, min_size, max_size, split=split)
+            if self.loaded_mask is not None:
+                labels = segmentation.detect_cells_from_mask(
+                    self.loaded_mask, self.var_im, min_size, max_size, split=split)
+                mask, where = None, "loaded mask"
+            else:
+                labels, mask = segmentation.detect_cells(
+                    self.var_im, self.processed_image, th, min_size, max_size, split=split)
+                where = f"th={th}"
         except Exception as e:
-            messagebox.showerror("Error", f"Cell detection failed:\n{e}")
+            messagebox.showerror("Error", f"Cell detection failed:\n{e}", parent=self.window)
             return
         n = len(segmentation.cell_ids(labels))
-        info = f"{label}: {n} cells (th={th}, size {min_size}–{max_size})"
+        info = f"{label}: {n} cells ({where}, size {min_size}–{max_size})"
         self._set_cells(labels, info, mask=mask)
         self.info_label.config(text=info)
 
@@ -330,26 +606,6 @@ class VariabilityAnalysisWindow:
         """Like basic, but regions above Max Size are split with KMeans."""
         self._run_detection("kmeans")
 
-    def load_cells(self):
-        """Load cells saved with "Save Cells", or a legacy coordinates .txt."""
-        filename = askopenfilename(
-            parent=self.window,
-            title="Load Cells",
-            filetypes=[("Cells", "*.tif *.tiff *.npy *.txt"), ("Label image", "*.tif *.tiff *.npy"),
-                       ("Coordinates (legacy)", "*.txt"), ("All Files", "*.*")]
-        )
-        if not filename:
-            return
-        try:
-            labels = formats.load_cells(filename, shape=self.var_im.shape)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not load cells:\n{e}", parent=self.window)
-            return
-        n = len(segmentation.cell_ids(labels))
-        info = f"Loaded {n} cells from {os.path.basename(filename)}"
-        self._set_cells(labels, info, mask=None)
-        self.info_label.config(text=info)
-
     # ---------------------------------------------------------- selection
 
     def select_all_clusters(self):
@@ -363,7 +619,6 @@ class VariabilityAnalysisWindow:
         self.selection_mode = self.selection_mode_var.get()
 
     def _on_region_selected(self, eclick, erelease):
-        """Callback for rectangular region selection"""
         if self.labels is None:
             return
         x_min, x_max = sorted((eclick.xdata, erelease.xdata))
@@ -451,7 +706,22 @@ class VariabilityAnalysisWindow:
         self.update_cluster_colors()
         self.update_selection_list()
 
-    # ------------------------------------------------------------- export
+    # ------------------------------------------------- export (leave a stage)
+
+    def save_map(self):
+        if not self._require_map("Saving a variability map"):
+            return
+        safe = self.method_name.replace(" ", "_")
+        self._save("maps", {self.method_name: self.var_im}, "Save Variability Map",
+                   initialfile=f"{safe}.npz")
+
+    def save_mask(self):
+        mask = self.loaded_mask if self.loaded_mask is not None else self.mask
+        if mask is None:
+            messagebox.showwarning("No Mask", "Run a Clustering method first: the mask is made "
+                                   "from the threshold when cells are detected.", parent=self.window)
+            return
+        self._save("mask", mask, "Save Mask")
 
     def _selected_signals(self):
         """Signals of the selected cells (frames x "cell_<id>")."""
@@ -459,26 +729,12 @@ class VariabilityAnalysisWindow:
 
     def save_selected_signals(self):
         """Save the mean signal of each selected cell (shared NecLab signals format)."""
-        if not self._require_cells():
+        if not self._require_cells() or not self._require_stack("Extracting signals"):
             return
         if not self.selected_clusters:
-            messagebox.showwarning("Warning", "No cells selected")
+            messagebox.showwarning("Warning", "No cells selected", parent=self.window)
             return
-        filename = asksaveasfilename(
-            parent=self.window,
-            initialfile='cell_signals.csv',
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"),
-                       ("NumPy files", "*.npy"), ("All Files", "*.*")]
-        )
-        if not filename:
-            return
-        try:
-            formats.write_signals(self._selected_signals(), filename)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not save signals:\n{e}", parent=self.window)
-            return
-        messagebox.showinfo("Success", f"Signals saved to {filename}", parent=self.window)
+        self._save("signals", self._selected_signals(), "Save Signals", initialfile="cell_signals.csv")
 
     def save_cells(self, only_selected=None):
         """Save the cells as a label image (+ cell table .csv next to it).
@@ -500,21 +756,7 @@ class VariabilityAnalysisWindow:
                 only_selected = answer
         labels = (segmentation.subset_labels(self.labels, self.selected_clusters)
                   if only_selected else self.labels)
-        filename = asksaveasfilename(
-            parent=self.window,
-            initialfile='cells.tif',
-            defaultextension=".tif",
-            filetypes=[("Label image (TIFF)", "*.tif"), ("Label image (NumPy)", "*.npy"),
-                       ("All Files", "*.*")]
-        )
-        if not filename:
-            return
-        try:
-            img_path, table_path = formats.save_cells(labels, filename)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not save cells:\n{e}", parent=self.window)
-            return
-        messagebox.showinfo("Success", f"Cells saved to:\n{img_path}\n{table_path}", parent=self.window)
+        self._save("cells", labels, "Save Cells")
 
     def _on_window_close(self):
         plt.close('all')
@@ -524,7 +766,9 @@ class VariabilityAnalysisWindow:
 
     def use_selected_clusters(self):
         if not self.selected_clusters:
-            messagebox.showwarning("Warning", "No cells selected")
+            messagebox.showwarning("Warning", "No cells selected", parent=self.window)
+            return
+        if not self._require_stack("The correlation analysis"):
             return
         self.show_correlation_analysis()
 
@@ -555,6 +799,8 @@ class VariabilityAnalysisWindow:
 
         tk.Button(corr_button_frame, text="Export Time Series",
                   command=self.export_time_series).pack(side=tk.LEFT, padx=5)
+        tk.Button(corr_button_frame, text="Export Correlation",
+                  command=self.export_correlation).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Export Cells",
                   command=lambda: self.save_cells(only_selected=True)).pack(side=tk.LEFT, padx=5)
         tk.Button(corr_button_frame, text="Generate Report",
@@ -613,6 +859,8 @@ class VariabilityAnalysisWindow:
         if self.signals_df.shape[1] > 1:
             corr_matrix = correlation.correlation_matrix(self.signals_df, 'pearson')
             self._plot_corr_matrix(ax2, corr_matrix, 'Preliminary Correlation Matrix (Pearson)')
+            self.current_corr_matrix = corr_matrix
+            self.current_method = 'Pearson'
         else:
             ax2.text(0.5, 0.5, 'Select at least 2 cells\nfor correlation analysis',
                      ha='center', va='center', transform=ax2.transAxes)
@@ -665,24 +913,20 @@ class VariabilityAnalysisWindow:
         if self.signals_df is None or self.signals_df.empty:
             messagebox.showwarning("Warning", "No data to export")
             return
-        filename = asksaveasfilename(
-            initialfile='cell_signals.csv',
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"),
-                       ("NumPy files", "*.npy"), ("All Files", "*.*")]
-        )
-        if not filename:
+        self._save("signals", self.signals_df, "Export Time Series", initialfile="cell_signals.csv")
+
+    def export_correlation(self):
+        """Save the current correlation matrix (stage 7 format)."""
+        if getattr(self, 'current_corr_matrix', None) is None:
+            messagebox.showwarning("Warning", "Select at least 2 cells to compute a correlation")
             return
-        try:
-            formats.write_signals(self.signals_df, filename)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not save signals:\n{e}")
-            return
-        messagebox.showinfo("Success", f"Time series exported to {filename}")
+        method = getattr(self, 'current_method', 'pearson').lower()
+        self._save("correlation", self.current_corr_matrix, "Export Correlation",
+                   initialfile=f"correlation_{method}.csv")
 
     def generate_report(self):
         """Plain-text report of the detection settings, cells and correlations."""
-        if not hasattr(self, 'current_corr_matrix'):
+        if getattr(self, 'current_corr_matrix', None) is None:
             messagebox.showwarning("Warning", "First calculate a correlation")
             return
         filename = asksaveasfilename(
@@ -723,6 +967,8 @@ class VariabilityAnalysisWindow:
 
     def show_3d_surface(self):
         """3D view of the variability surface."""
+        if not self._require_map("The 3D view"):
+            return
         from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers the 3d projection)
 
         window_3d = tk.Toplevel(self.window)
@@ -767,7 +1013,7 @@ class VariabilityAnalysisWindow:
 
     def save_image(self):
         """Save the four-panel figure."""
-        if getattr(self, 'current_fig', None) is None:
+        if self.current_fig is None:
             return
         filename = asksaveasfilename(
             initialfile=f'{self.method_name.replace(" ", "_")}_analysis.png',
@@ -787,6 +1033,14 @@ def show_variability_analysis(img_array, method, main_window):
         messagebox.showwarning("Warning", "No image loaded")
         return None
     return VariabilityAnalysisWindow(img_array, method, main_window)
+
+
+def open_detection_window(main_window, stack=None, var_im=None, map_name=None,
+                          mask=None, labels=None, source=""):
+    """Open the analysis window at stage 2, 3 or 4 from loaded data.
+    `stack` is the recording when it is open and the same frame size."""
+    return VariabilityAnalysisWindow(stack, None, main_window, var_im=var_im, map_name=map_name,
+                                     mask=mask, labels=labels, source=source)
 
 
 def get_variability_methods():

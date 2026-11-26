@@ -9,7 +9,7 @@ import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from neclab_core import formats
+from neclab_core import formats, validation
 
 
 _CSV_PSEUDO_SHEET = '(CSV)'
@@ -205,6 +205,11 @@ def load_selected_sheets(selection, progress_callback=None, error_callback=None)
     for i, (filepath, sheet) in enumerate(selection, start=1):
         try:
             df = _load_sheet_dataframe(filepath, sheet)
+            # Same checks as any signals table entering the pipeline (stage
+            # 5/6), on the columns that hold numbers: empty or text columns
+            # are kept as before (columns are matched by position), but a
+            # sheet with no numeric data or a single row is rejected.
+            validation.check_signals(df.dropna(axis=1, how='all'), name=f"sheet '{sheet}'")
         except Exception as e:
             if error_callback:
                 error_callback(filepath, sheet, e)

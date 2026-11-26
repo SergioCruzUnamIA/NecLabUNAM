@@ -167,7 +167,8 @@ def test_signals_round_trip(tmp_path, ext):
     df = pd.DataFrame({"cell_2": [1.0, 2.0, 3.5], "cell_7": [0.5, 0.25, 0.0]})
     path = tmp_path / f"signals{ext}"
     formats.write_signals(df, path)
-    back = formats.read_signals(path)
+    back, warnings = formats.read_signals(path)
+    assert warnings == []
     np.testing.assert_allclose(back.to_numpy(), df.to_numpy())
     if ext != ".npy":
         assert formats.signal_cell_ids(back) == [2, 7]

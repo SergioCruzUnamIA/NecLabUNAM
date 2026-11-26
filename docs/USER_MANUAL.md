@@ -43,7 +43,8 @@ Both workflows share the same main window, which has a menu bar at the top and a
 
 | Item | Action |
 |---|---|
-| **Open OME-TIFF** (`Ctrl+O`) | Loads an OME-TIFF image stack, switches to the "Image Processing" tab, and enables the Image and Variability Analysis menus. |
+| **Open Recording (OME-TIFF / TIFF / NPY)...** (`Ctrl+O`) | Loads a recording (an image stack of frames × height × width) from an OME-TIFF, a plain TIFF or a NumPy `.npy` file, switches to the "Image Processing" tab, and enables the Image and Variability Analysis menus. Files that aren't a recording (e.g. a single 2D image) are rejected with an explanation. |
+| **Open Pipeline Stage** | Starts the analysis at a later stage from a file saved earlier (or made by another program). See [section 4.8](#48-starting-from-a-saved-stage). |
 | **Open Data (.npy / .csv / .xlsx)** | Loads a numeric data file into the "Data Visualization" tab. For CSV files, a dialog lets you pick the initial column (ROI); for `.npy` files, columns are auto-named "Column 1", "Column 2", etc. |
 | **Load Correlation Matrix** | Loads an already-computed correlation matrix (CSV/XLSX, must be square) and displays it as a dendrogram + heatmap. See [section 9](#9-loading-a-precomputed-correlation-matrix). |
 | **Open Multiple Files (.xls / .csv)** | Starts the "Multiple Files" workflow: pick several Excel files and the sheets to load from each. See [section 6](#6-tab-multiple-files). |
@@ -130,44 +131,76 @@ Choosing a method from the **Variability Analysis** menu opens a new 1400×800 w
 
 ### 4.2 Analysis window controls
 
-- **Threshold** (1–1000): binarization threshold for the variability image; starts at the chosen method's default.
+- **Threshold**: binarization threshold for the variability image; starts at the chosen method's default (for a loaded map that isn't one of the 7 methods, at the map's 95th percentile). Not used while a loaded mask is in use.
 - **Min Size** / **Max Size** (1–500 / 1–1000): minimum and maximum cluster size (in pixels) to keep.
 
-### 4.3 Clustering menu
+### 4.3 Data menu
+
+| Item | Action |
+|---|---|
+| **Attach Recording...** | Loads the recording that the map / mask / cells belong to (its frames must be the same size). Needed for the signals and the correlation analysis. If there is no variability map yet, it offers to compute one. |
+| **Load Variability Map...** | Uses a saved map (stage 2) instead of the computed one. |
+| **Load Mask...** | Uses a saved candidate-pixel mask (stage 3): the Clustering items then start from that mask instead of thresholding. |
+| **Load Cells...** | Uses saved cells (stage 4): a label image saved with **Export → Save Cells**, ImageJ ROIs (`.roi`, or the `RoiSet.zip` saved by the ROI Manager; cell *n* is the *n*-th ROI), or a coordinates `.txt` file from older versions. ROI and `.txt` files need the image size, so attach the recording or load a map first. |
+| **Stop Using Loaded Mask** | Goes back to thresholding the variability map. |
+
+Every file is checked when it is loaded (size, contents, and that it matches what is already loaded); a file that can't be used is rejected with a message explaining why.
+
+### 4.4 Clustering menu
 
 | Item | Action |
 |---|---|
 | **Process Cluster (Basic)** | Binarizes the sharpened variability image with the threshold, finds connected regions, and keeps those between Min Size and Max Size. |
 | **Process Cluster (Advanced)** | Same as basic, but regions larger than Max Size are split around the local maxima (peaks) of the variability image instead of being discarded. |
 | **Decompose Large Clusters (KMeans)** | Same as basic, but regions larger than Max Size are split with KMeans (position + variability); parts smaller than Min Size are discarded. |
-| **Load Cells...** | Loads cells saved with **Export → Save Cells** (`.tif`/`.npy` label image), or a coordinates `.txt` file from older versions, onto the current image. The image must be the same size. |
 
-Each item runs a complete detection with the current Threshold / Min Size / Max Size and replaces the previous cells (and clears the selection).
+Each item runs a complete detection with the current Threshold / Min Size / Max Size (or from the loaded mask) and replaces the previous cells (and clears the selection). Advanced and KMeans need a variability map.
 
 **Cell IDs:** every detected cell gets a permanent ID (1, 2, 3, ... in reading order of each cell's top-left pixel: top to bottom, then left to right). The same settings on the same image always give the same IDs, and these IDs are used everywhere: the plot labels, the selection list, the exported signals (`cell_<id>` columns) and the saved cells.
 
-### 4.4 Selecting clusters
+### 4.5 Selecting clusters
 
 - Click cells in the plot to select them (they highlight in red, with their ID).
 - **Region Selection**: hold the right mouse button and drag over the plot to add/remove several clusters at once inside a rectangle; use the Add/Remove toggle to pick the mode.
 - **Selection** menu: `Select All`, `Clear Selection`.
 - The list of selected clusters appears in the side panel, each with a "Remove" button.
 
-### 4.5 3D visualization
+### 4.6 3D visualization
 
 **Visualization → 3D View** menu: opens a 3D surface (matplotlib) of the variability image, which can be rotated with the mouse.
 
-### 4.6 Export
+### 4.7 Export
 
 **Export** menu:
 - **Save Image**: exports the current analysis image.
+- **Save Variability Map...**: saves the map (stage 2) as `.npz` (keeps the method name), `.npy` or 32-bit `.tif`.
+- **Save Mask...**: saves the candidate-pixel mask of the last detection (stage 3) as `.tif` (0/255) or `.npy`.
 - **Save Signals (CSV / XLSX / NPY)...**: exports the signal of each selected cell (the mean of its pixels in every frame), in the NecLab signals format:
   - `.csv` / `.xlsx`: a header row `frame, cell_<id>, cell_<id>, ...` and one row per frame.
   - `.npy`: a `(frames, 1 + cells)` array whose first column is the frame number (0, 1, 2, ...), followed by the cells in ID order. A `.npy` can't store the cell IDs; use `.csv`/`.xlsx` to keep them.
 
   These files can be opened directly with `File → Open Data Files`: the frame column is recognised and not shown as a data column.
-- **Save Cells (Label Image)...**: saves the cells as a label image (`.tif` or `.npy`: an image the size of one frame where each pixel holds the ID of its cell, 0 = background) plus a table with the same name and a `.csv` extension (`cell_id, n_pixels, centroid_row, centroid_col`). If cells are selected, it asks whether to save only those. Load it back later with **Clustering → Load Cells...**.
-- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (same format as Save Signals), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
+- **Save Cells (Label Image)...**: saves the cells as a label image (`.tif` or `.npy`: an image the size of one frame where each pixel holds the ID of its cell, 0 = background) plus a table with the same name and a `.csv` extension (`cell_id, n_pixels, centroid_row, centroid_col`). If cells are selected, it asks whether to save only those. Load it back later with **Data → Load Cells...**.
+- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (same format as Save Signals), **Export Correlation** (the current matrix, which can be reopened as stage 7), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
+
+Signals and the correlation analysis need the recording; without it they say so and point to **Data → Attach Recording...**.
+
+### 4.8 Starting from a saved stage
+
+The analysis is a chain of stages, and each one can be started from a file instead of being recomputed: save a stage's result once, and later (or on another computer) open it and continue from there. **File → Open Pipeline Stage** lists the stages that can be opened:
+
+| Stage | What it holds | Files | Opens in |
+|---|---|---|---|
+| 0 · Recording | The image stack | `.ome.tif`, `.tif`, `.npy` (`File → Open Recording`) | Image Processing tab |
+| 2 · Variability Map | Per-pixel variability | `.npz` (one or more named maps), `.npy`, `.tif` | Analysis window |
+| 3 · Candidate Mask | Pixels that may belong to cells | `.tif`/`.npy` with only two values (0/1 or 0/255) | Analysis window |
+| 4 · Cells | Label image (permanent IDs) | `.tif`/`.npy` label image, ImageJ `.roi`/`.zip`, older `.txt` | Analysis window |
+| 5–6 · Signals | One column per cell, one row per frame | `.csv`, `.xlsx`, `.npy` | Multiple Files tab |
+| 7 · Correlation Matrix | Square matrix | `.csv`, `.xlsx` | Correlation view (section 9) |
+
+- If a recording is open and the file's images are the same size, the recording is attached automatically. If the sizes differ, you are asked whether to continue without it.
+- Whatever is missing switches off only the features that need it: e.g. starting from a mask without a recording, Basic detection works, Advanced/KMeans ask for a variability map, and signals ask for the recording.
+- Signals tables from other programs are accepted: a header row is optional, and a first column named `frame`/`time`/`time_s` or holding 0, 1, 2, … is treated as time rather than as a cell. Sheets with fewer than 2 rows or no numbers are rejected with the reason.
 
 ---
 
