@@ -166,6 +166,7 @@ Cada opción ejecuta una detección completa con los valores actuales de Thresho
 - **Region Selection** (Selección por Región): mantenga el botón derecho y arrastre sobre el gráfico para seleccionar/quitar varios clusters a la vez dentro de un rectángulo; use el conmutador Add/Remove (Añadir/Quitar) para elegir el modo.
 - Menú **Selection** (Selección): `Select All` (Seleccionar Todos), `Clear Selection` (Limpiar Selección).
 - La lista de clusters seleccionados aparece en el panel lateral, con un botón "Remove" (Remover) por cada uno.
+- **Las señales (etapa 5) siguen a la selección.** Con la grabación cargada, cada cambio en la selección (Select All, un clic, un rectángulo, Remove o Clear) extrae de inmediato las señales de las células seleccionadas y las registra como etapa 5 del proyecto; la barra lateral del pipeline la muestra como *done*. Cambiar la selección después marca las etapas 6–7 como *out of date*, y limpiar la selección borra la etapa 5. Sin la grabación, cárguela con **Data → Attach Recording...** y las señales de las células ya seleccionadas se extraen en ese momento.
 
 ### 4.6 Visualización 3D
 
