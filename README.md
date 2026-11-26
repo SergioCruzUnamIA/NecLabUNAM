@@ -148,6 +148,7 @@ You can also load an already-computed correlation matrix with `File → Load Cor
 NecLabUNAM/
 ├── interface3.py               # Main graphical interface (entry point)
 ├── neclab_core/                # Analysis code with no user interface (see below)
+│   ├── project.py              #   Project: every stage's data + status, saved as a .neclab folder
 │   ├── stages.py               #   Pipeline stages: what each reads/writes, load/save any stage
 │   ├── formats.py              #   File readers/writers for every stage
 │   ├── validation.py           #   Checks on loaded data, alone and against other stages
@@ -210,6 +211,23 @@ corr = stages.load_item("correlation", "correlation.csv")  # .data, .warnings
 ```
 
 In the app: **File → Open Pipeline Stage**, and the **Data** / **Export** menus of the cell detection window.
+
+**Projects.** `neclab_core.project.Project` holds every stage for one recording, with the settings used, where it came from and its status (*not run*, *done*, *loaded*, *out of date* when something it was computed from has changed, *missing*). It saves to a `<name>.neclab` folder (`manifest.json` + one subfolder per stage, in the formats above; the recording is referenced by path and checksum, not copied), and single stages can be saved and loaded on their own:
+
+```python
+from neclab_core.project import Project
+
+p = Project()
+p.set_recording(stack, "recording.ome.tif")
+p.set_stage("cells", {"cells": labels}, params={"split": "kmeans", "min_size": 20})
+p.set_stage("signals", {"signals": traces})
+p.save("experiment.neclab")
+
+p, warnings = Project.load("experiment.neclab")
+p.status("signals")           # "done", or "out of date" if the cells changed since
+```
+
+In the app: **File → New / Open / Save Project** and **File → Pipeline Status**.
 
 ### Running the tests
 

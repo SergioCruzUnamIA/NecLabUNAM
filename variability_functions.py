@@ -100,19 +100,33 @@ class VariabilityAnalysisWindow:
         mask: a candidate-pixel mask to start from (stage 3).
         labels: cells to start from (stage 4).
         source: short description of where the starting data came from.
+        project: neclab_core.project.Project that this window reports what
+            it computes or loads to (stages 0 and 2-7), or None.
+        on_recording_attached: callback(stack, path, metadata) when a
+            recording is attached here, so the main window can show it.
+        restore: saved view state to restore (from a project):
+            {"detection_mask", "threshold", "min_size", "max_size", "selected"}.
     """
     def __init__(self, img_array, method, main_window, var_im=None, map_name=None,
-                 mask=None, labels=None, source=""):
+                 mask=None, labels=None, source="", project=None, on_recording_attached=None,
+                 restore=None):
         self.img_array = img_array
         self.method = method
         self.main_window = main_window
+        self.project = project
+        self.on_recording_attached = on_recording_attached
+        restore = restore or {}
 
-        if var_im is None and img_array is not None and method is not None:
+        computed_map = var_im is None and img_array is not None and method is not None
+        if computed_map:
             var_im, _th, map_name = variability.calculate_variability(img_array, method)
         self._set_map_data(var_im, map_name)
+        if computed_map:
+            self._report("features", {"maps": {self.method_name: self.var_im}},
+                         params={"method": self.method_name})
 
         self.loaded_mask = None if mask is None else np.asarray(mask, dtype=bool)
-        self.mask = None            # mask from the last threshold-based detection
+        self.mask = restore.get("detection_mask")  # mask from the last threshold-based detection
         self.labels = None          # label image: 0 = background, n = cell with ID n
         self.cell_pix = {}          # {cell_id: (N, 2) array of (row, col)}
         self.detection_info = ""    # how the current cells were obtained
@@ -125,9 +139,20 @@ class VariabilityAnalysisWindow:
         self.current_fig = None
 
         self.create_window()
+        for key, var in (("threshold", self.threshold_var), ("min_size", self.min_size_var),
+                         ("max_size", self.max_size_var)):
+            if restore.get(key) is not None:
+                var.set(restore[key])
         if labels is not None:
             n = len(segmentation.cell_ids(labels))
-            self._set_cells(np.asarray(labels, dtype=np.int32), f"Loaded {n} cells {source}".strip())
+            detection_mask = self.mask
+            self._set_cells(np.asarray(labels, dtype=np.int32), f"Loaded {n} cells {source}".strip(),
+                            mask=detection_mask)
+            selected = [int(c) for c in restore.get("selected") or [] if int(c) in self.cell_pix]
+            if selected:
+                self.selected_clusters = selected
+                self.update_cluster_colors()
+                self.update_selection_list()
             self.info_label.config(text=self.detection_info)
         else:
             if self.loaded_mask is not None:
@@ -143,6 +168,17 @@ class VariabilityAnalysisWindow:
         self.processed_image = None if var_im is None else variability.sharpen(self.var_im)
         self.method_name = name or ("Variability map" if var_im is not None else "Loaded data")
         self.default_th = default_threshold_for(self.method_name, self.processed_image)
+
+    def _report(self, stage_key, items, params=None, origin="computed", path=None):
+        """Record a stage's new data in the project (if there is one)."""
+        if self.project is None:
+            return
+        source = {"path": os.path.abspath(path)} if path else {}
+        self.project.set_stage(stage_key, items, params=params, origin=origin, source=source)
+
+    def _report_selection(self):
+        if self.project is not None:
+            self.project.set_ui("selected_cells", self._selected_sorted())
 
     @property
     def frame_shape(self):
@@ -485,6 +521,10 @@ class VariabilityAnalysisWindow:
         if loaded is None:
             return
         self.img_array = loaded.data
+        if self.on_recording_attached is not None:
+            self.on_recording_attached(loaded.data, loaded.path, loaded.metadata)
+        elif self.project is not None:
+            self.project.set_recording(loaded.data, loaded.path, loaded.metadata)
         msg = f"Recording attached: {loaded.data.shape[0]} frames"
         if self.var_im is None:
             names = variability.method_names()
@@ -494,6 +534,7 @@ class VariabilityAnalysisWindow:
             if choice is not None:
                 var_im, _th, name = variability.calculate_variability(self.img_array, names.index(choice))
                 self._set_map_data(var_im, name)
+                self._report("features", {"maps": {name: var_im}}, params={"method": name})
                 self.threshold_var.set(self.default_th)
                 msg += f", {name} computed"
         self._update_title()
@@ -511,6 +552,8 @@ class VariabilityAnalysisWindow:
         if name is None:
             return
         self._set_map_data(loaded.data[name], name)
+        self._report("features", {"maps": {name: self.var_im}}, params={"map": name},
+                     origin="imported", path=loaded.path)
         self.threshold_var.set(self.default_th)
         self._update_title()
         self.info_label.config(text=f"Loaded map '{name}' from {os.path.basename(loaded.path)}")
@@ -524,6 +567,7 @@ class VariabilityAnalysisWindow:
         if loaded is None:
             return
         self.loaded_mask = loaded.data
+        self._report("mask", {"mask": self.loaded_mask}, origin="imported", path=loaded.path)
         self.info_label.config(
             text=f"Using mask {os.path.basename(loaded.path)} (threshold not used) - run a Clustering method")
         self.update_display()
@@ -553,6 +597,7 @@ class VariabilityAnalysisWindow:
         show_warnings(self.window, loaded.warnings)
         n = len(segmentation.cell_ids(loaded.data))
         info = f"Loaded {n} cells from {os.path.basename(filename)}"
+        self._report("cells", {"cells": loaded.data}, origin="imported", path=filename)
         self._set_cells(loaded.data, info, mask=None)
         self.info_label.config(text=info)
 
@@ -591,6 +636,11 @@ class VariabilityAnalysisWindow:
             return
         n = len(segmentation.cell_ids(labels))
         info = f"{label}: {n} cells ({where}, size {min_size}–{max_size})"
+        if mask is not None:  # thresholded here (a loaded mask is already recorded)
+            self._report("mask", {"mask": mask}, params={"threshold": th, "map": self.method_name})
+        self._report("cells", {"cells": labels},
+                     params={"method": label, "split": split, "min_size": min_size, "max_size": max_size,
+                             "from": "loaded mask" if mask is None else "threshold"})
         self._set_cells(labels, info, mask=mask)
         self.info_label.config(text=info)
 
@@ -686,6 +736,7 @@ class VariabilityAnalysisWindow:
             self.current_canvas.draw()
 
     def update_selection_list(self):
+        self._report_selection()
         self.selected_listbox.delete(0, tk.END)
         for cid in self._selected_sorted():
             self.selected_listbox.insert(tk.END, f"Cell {cid} ({len(self.cell_pix[cid])} pts)")
@@ -724,8 +775,14 @@ class VariabilityAnalysisWindow:
         self._save("mask", mask, "Save Mask")
 
     def _selected_signals(self):
-        """Signals of the selected cells (frames x "cell_<id>")."""
-        return signals.extract_signals(self.img_array, self.labels, self._selected_sorted())
+        """Signals of the selected cells (frames x "cell_<id>"), recorded as stage 5."""
+        ids = self._selected_sorted()
+        df = signals.extract_signals(self.img_array, self.labels, ids)
+        self._report("signals", {"signals": df}, params={"cells": ids, "measure": "mean of cell pixels"})
+        return df
+
+    def _report_correlation(self, corr_matrix, method):
+        self._report("correlation", {"correlation": corr_matrix}, params={"method": method.lower()})
 
     def save_selected_signals(self):
         """Save the mean signal of each selected cell (shared NecLab signals format)."""
@@ -861,6 +918,7 @@ class VariabilityAnalysisWindow:
             self._plot_corr_matrix(ax2, corr_matrix, 'Preliminary Correlation Matrix (Pearson)')
             self.current_corr_matrix = corr_matrix
             self.current_method = 'Pearson'
+            self._report_correlation(corr_matrix, 'pearson')
         else:
             ax2.text(0.5, 0.5, 'Select at least 2 cells\nfor correlation analysis',
                      ha='center', va='center', transform=ax2.transAxes)
@@ -873,6 +931,7 @@ class VariabilityAnalysisWindow:
             messagebox.showwarning("Warning", "You need at least 2 selected cells")
             return
         corr_matrix = correlation.correlation_matrix(self.signals_df, method)
+        self._report_correlation(corr_matrix, method)
         self.update_correlation_display(corr_matrix, method.capitalize())
 
     def update_correlation_display(self, corr_matrix, method_name):
@@ -1027,20 +1086,23 @@ class VariabilityAnalysisWindow:
             messagebox.showinfo("Success", f"Image saved to {filename}")
 
 
-def show_variability_analysis(img_array, method, main_window):
+def show_variability_analysis(img_array, method, main_window, project=None, on_recording_attached=None):
     """Open the analysis window for `img_array` (the raw stack) and `method`."""
     if img_array is None or len(img_array) == 0:
         messagebox.showwarning("Warning", "No image loaded")
         return None
-    return VariabilityAnalysisWindow(img_array, method, main_window)
+    return VariabilityAnalysisWindow(img_array, method, main_window, project=project,
+                                     on_recording_attached=on_recording_attached)
 
 
 def open_detection_window(main_window, stack=None, var_im=None, map_name=None,
-                          mask=None, labels=None, source=""):
+                          mask=None, labels=None, source="", project=None,
+                          on_recording_attached=None, restore=None):
     """Open the analysis window at stage 2, 3 or 4 from loaded data.
     `stack` is the recording when it is open and the same frame size."""
     return VariabilityAnalysisWindow(stack, None, main_window, var_im=var_im, map_name=map_name,
-                                     mask=mask, labels=labels, source=source)
+                                     mask=mask, labels=labels, source=source, project=project,
+                                     on_recording_attached=on_recording_attached, restore=restore)
 
 
 def get_variability_methods():

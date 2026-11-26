@@ -114,6 +114,7 @@ _trapz = getattr(np, 'trapezoid', None) or np.trapz
 _REPO = "sergiocruzunamia/neclabunam"
 _CORE_FILES = [
     "neclab_core/__init__.py",
+    "neclab_core/project.py",
     "neclab_core/stages.py",
     "neclab_core/validation.py",
     "neclab_core/formats.py",
@@ -175,6 +176,9 @@ _ensure_core_package()
 from neclab_core import correlation as core_correlation
 from neclab_core import display as core_display
 from neclab_core import stages as core_stages
+from neclab_core import project as core_project
+from neclab_core.project import Project
+from neclab_core import validation as core_validation
 from neclab_core.validation import ValidationError
 
 # Local modules
@@ -242,6 +246,14 @@ class NecLabApp:
         self.img_array = None
         self.img_display_range = (0.0, 255.0)  # raw value range mapped to 0-255 for display
         self.auto_contrast_var = tk.BooleanVar(value=False)  # display-only auto contrast
+
+        # State variables - Project (the pipeline's state for one recording,
+        # saved to a .neclab folder; see neclab_core/project.py)
+        self.project = Project()
+        self.project.add_listener(self._on_project_changed)
+        self.detection_windows = []     # open cell detection windows (they report to the project)
+        self.status_window = None       # Pipeline Status window, if open
+        self._status_tree = None
 
         # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
@@ -358,11 +370,15 @@ class NecLabApp:
 
     def _on_close(self):
         """Fully close the application, releasing all resources."""
-        if messagebox.askokcancel("Exit", "Do you want to exit NecLab?"):
-            plt.close('all')
-            self.root.quit()
-            self.root.destroy()
-            sys.exit(0)
+        if self._project_has_unsaved_changes():
+            if not self._confirm_discard_project("exiting"):
+                return
+        elif not messagebox.askokcancel("Exit", "Do you want to exit NecLab?"):
+            return
+        plt.close('all')
+        self.root.quit()
+        self.root.destroy()
+        sys.exit(0)
 
     # ==================== MENU ====================
 
@@ -374,6 +390,12 @@ class NecLabApp:
         # File menu
         self.menu_archivo = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_archivo, label="File")
+        self.menu_archivo.add_command(label="New Project", command=self.new_project)
+        self.menu_archivo.add_command(label="Open Project...", command=self.open_project)
+        self.menu_archivo.add_command(label="Save Project", accelerator="Ctrl+S", command=self.save_project)
+        self.menu_archivo.add_command(label="Save Project As...", command=self.save_project_as)
+        self.menu_archivo.add_command(label="Pipeline Status...", command=self.show_pipeline_status)
+        self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
             label="Open Recording (OME-TIFF / TIFF / NPY)...",
             accelerator="Ctrl+O",
@@ -464,6 +486,7 @@ class NecLabApp:
 
         # Keyboard shortcut
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
+        self.root.bind('<Control-s>', lambda e: self.save_project())
 
     # ==================== MAIN LAYOUT ====================
 
@@ -1027,7 +1050,13 @@ class NecLabApp:
         win.geometry("700x900")
         frame = tk.Frame(win, bg=_C['panel'])
         frame.pack(fill=tk.BOTH, expand=True)
-        load_correlation_matrix(self.root, None, target_frame=frame)
+        result = load_correlation_matrix(self.root, None, target_frame=frame)
+        if result is None:
+            win.destroy()
+            return
+        corr_matrix, filename = result
+        self.project.set_stage("correlation", {"correlation": corr_matrix}, origin="imported",
+                               source={"path": os.path.abspath(filename)})
 
     # ==================== MULTIPLE FILES (XLS) TAB ====================
 
@@ -3329,16 +3358,33 @@ class NecLabApp:
         show_warnings(self.root, loaded.warnings)
 
         source = f"from {os.path.basename(filename)}"
+        imported = {"origin": "imported", "source": {"path": os.path.abspath(filename)}}
         if item_key == "maps":
             name = ask_choice(self.root, "Choose Map", "The file has several maps. Which one?",
                               list(loaded.data))
             if name is None:
                 return None
-            return open_detection_window(self.root, stack=stack, var_im=loaded.data[name],
-                                         map_name=name, source=source)
-        if item_key == "mask":
-            return open_detection_window(self.root, stack=stack, mask=loaded.data, source=source)
-        return open_detection_window(self.root, stack=stack, labels=loaded.data, source=source)
+            self.project.set_stage("features", {"maps": {name: loaded.data[name]}}, params={"map": name}, **imported)
+            kwargs = {"var_im": loaded.data[name], "map_name": name}
+        elif item_key == "mask":
+            self.project.set_stage("mask", {"mask": loaded.data}, **imported)
+            kwargs = {"mask": loaded.data}
+        else:
+            self.project.set_stage("cells", {"cells": loaded.data}, **imported)
+            kwargs = {"labels": loaded.data}
+        return self._open_detection_window(stack=stack, source=source, **kwargs)
+
+    def _open_detection_window(self, **kwargs):
+        """Open a cell detection window that reports to the project."""
+        win = open_detection_window(self.root, project=self.project,
+                                    on_recording_attached=self._on_recording_attached, **kwargs)
+        self.detection_windows.append(win)
+        return win
+
+    def _on_recording_attached(self, stack, path, metadata):
+        """A detection window attached a recording: it becomes the project's
+        recording and is shown in the Image Processing tab."""
+        self._use_recording(stack, path, metadata)
 
     def open_ometiff_file(self):
         """Open a recording (OME-TIFF, TIFF or NumPy stack)."""
@@ -3353,7 +3399,21 @@ class NecLabApp:
         except Exception as e:
             messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
             return
+        self._use_recording(img, filename, metadata)
 
+    def _use_recording(self, img, filename, metadata=None, record=True):
+        """Make `img` the current recording: record it as the project's
+        stage 0 (unless record=False, e.g. when it comes from the project
+        itself) and show it in the Image Processing tab."""
+        if record:
+            try:
+                self.project.set_recording(img, filename, metadata)
+            except OSError as e:
+                messagebox.showwarning("Recording", f"The recording couldn't be added to the project:\n{e}")
+        self._show_recording(img)
+
+    def _show_recording(self, img):
+        """Show a recording in the Image Processing tab and enable its menus."""
         self.img_original = img
         self.img_array = img  # same array: the raw data is never modified
         self.img_display_range = core_display.display_range(img)
@@ -3382,6 +3442,329 @@ class NecLabApp:
         self.notebook.select(self.image_tab)
 
         self._update_image_display()
+
+    # ==================== PROJECT ====================
+    # The project holds every pipeline stage for one recording (see
+    # neclab_core/project.py). Detection windows report what they compute
+    # to it; these commands save/open it and show the status of each stage.
+
+    def _on_project_changed(self):
+        self._update_title()
+        self._refresh_status_window()
+
+    def _update_title(self):
+        mark = " *" if self._project_has_unsaved_changes() else ""
+        self.root.title(f"NecLab - {self.project.name}{mark}")
+
+    def _project_has_unsaved_changes(self):
+        return self.project.modified and not self.project.is_empty()
+
+    def _confirm_discard_project(self, action):
+        """Ask to save unsaved changes before `action`. True = go ahead."""
+        if not self._project_has_unsaved_changes():
+            return True
+        answer = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            f"Save the changes to project '{self.project.name}' before {action}?")
+        if answer is None:
+            return False
+        if answer:
+            return self.save_project()
+        return True
+
+    def _close_detection_windows(self):
+        for win in self.detection_windows:
+            try:
+                if win.window.winfo_exists():
+                    win.window.destroy()
+            except tk.TclError:
+                pass
+        self.detection_windows = []
+
+    def _clear_recording(self):
+        """Back to "no image loaded"."""
+        self.img_original = None
+        self.img_array = None
+        self._load_default_image()
+        self.slice_slider.configure(to=0)
+        self.frame_info_label.config(text="Frame: 0 / 0")
+        self.info_text.config(text="No image loaded")
+        for label in ("Auto Contrast", "Histogram", "Binarize", "Restore Original"):
+            self.menu_imagen.entryconfig(label, state=DISABLED)
+        self.menu_bar.entryconfig("Variability Analysis", state=DISABLED)
+
+    def _set_project(self, project):
+        self._close_detection_windows()
+        self.project.remove_listener(self._on_project_changed)
+        self.project = project
+        self.project.add_listener(self._on_project_changed)
+        self._on_project_changed()
+
+    def new_project(self):
+        if not self._confirm_discard_project("starting a new project"):
+            return
+        self._set_project(Project())
+        self._clear_recording()
+
+    def save_project(self):
+        """Save to the project's folder (asks for one the first time). True if saved."""
+        if self.project.path is None:
+            return self.save_project_as()
+        return self._save_project_to(self.project.path)
+
+    def save_project_as(self):
+        if self.project.is_empty():
+            messagebox.showinfo("Save Project", "There is nothing to save yet: open a recording "
+                                "or a pipeline stage first.")
+            return False
+        path = filedialog.asksaveasfilename(
+            title="Save Project As",
+            initialfile=f"{self.project.name}{core_project.PROJECT_EXTENSION}",
+            defaultextension=core_project.PROJECT_EXTENSION,
+            filetypes=[("NecLab project", f"*{core_project.PROJECT_EXTENSION}")])
+        if not path:
+            return False
+        if not path.endswith(core_project.PROJECT_EXTENSION):
+            path += core_project.PROJECT_EXTENSION
+        return self._save_project_to(path)
+
+    def _save_project_to(self, path):
+        try:
+            self.project.save(path)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Save Project", str(e))
+            return False
+        self._update_title()
+        return True
+
+    def open_project(self):
+        if not self._confirm_discard_project("opening another project"):
+            return
+        folder = filedialog.askdirectory(title="Open Project (a .neclab folder)", mustexist=True)
+        if not folder:
+            return
+        try:
+            project, warnings = Project.load(folder)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Open Project", str(e))
+            return
+        self._set_project(project)
+        if project.status("raw") == core_project.MISSING:
+            warnings = [w for w in warnings if "not found" not in w]
+            warnings += self._locate_missing_recording()
+        show_warnings(self.root, warnings, title="Project Opened with Warnings")
+        self._restore_views_from_project()
+
+    def _locate_missing_recording(self):
+        """The project's recording wasn't found: offer to point to it."""
+        rec = self.project.get("raw")
+        if not messagebox.askyesno(
+                "Recording Not Found",
+                f"{rec.problem}.\n\nThe other stages were loaded. Locate the recording now? "
+                "(It is needed to extract signals.)"):
+            return []
+        path = filedialog.askopenfilename(title="Locate Recording",
+                                          filetypes=core_stages.open_filetypes("stack"))
+        if not path:
+            return []
+        try:
+            return self.project.relocate_recording(path)
+        except (ValidationError, ValueError, OSError) as e:
+            return [f"The recording couldn't be loaded: {e}"]
+
+    def _restore_views_from_project(self):
+        """Show the project's state: the recording in the Image Processing
+        tab, and stages 2-4 (with the cell selection and the settings used)
+        in a cell detection window."""
+        p = self.project
+        self._close_detection_windows()
+        was_modified = p.modified
+        stack = p.stack()
+        if stack is not None:
+            self._use_recording(stack, None, record=False)
+        else:
+            self._clear_recording()
+
+        maps, mask, labels = p.data("features"), p.data("mask"), p.data("cells")
+        if maps is None and mask is None and labels is None:
+            return None
+        name = None
+        if maps:
+            params = p.get("features").params
+            name = params.get("method") or params.get("map")
+            if name not in maps:
+                name = next(iter(maps))
+        try:
+            core_validation.check_compatibility(stack=stack, maps=maps, mask=mask, labels=labels)
+        except ValidationError as e:
+            messagebox.showwarning("Recording Not Attached",
+                                   f"{e}\n\nThe cell detection window opens without the recording.")
+            stack = None
+
+        restore = {"selected": p.ui.get("selected_cells") or []}
+        kwargs = {}
+        if mask is not None:
+            mask_rec = p.get("mask")
+            if mask_rec.origin == "computed" and "threshold" in mask_rec.params:
+                restore["detection_mask"] = mask
+                restore["threshold"] = mask_rec.params["threshold"]
+            else:
+                kwargs["mask"] = mask
+        cells_rec = p.get("cells")
+        if cells_rec is not None:
+            for key in ("min_size", "max_size"):
+                if key in cells_rec.params:
+                    restore[key] = cells_rec.params[key]
+        win = self._open_detection_window(
+            stack=stack, var_im=maps[name] if maps else None, map_name=name, labels=labels,
+            source=f"from project {p.name}", restore=restore, **kwargs)
+        p.modified = was_modified   # restoring the view isn't a change
+        self._update_title()
+        return win
+
+    # ---- Pipeline Status window
+
+    _STATUS_COLORS = {
+        core_project.DONE: "#15803d", core_project.LOADED: "#1d4ed8",
+        core_project.OUT_OF_DATE: "#b45309", core_project.MISSING: "#b91c1c",
+        core_project.NOT_RUN: "#94a3b8",
+    }
+
+    def show_pipeline_status(self):
+        """Window listing every stage with its status, plus per-stage save/load."""
+        if self.status_window is not None and self.status_window.winfo_exists():
+            self.status_window.lift()
+            self._refresh_status_window()
+            return self.status_window
+        win = tk.Toplevel(self.root)
+        win.title("Pipeline Status")
+        win.geometry("820x380")
+        self.status_window = win
+
+        self._status_heading = tk.Label(win, anchor='w', font=('Arial', 11, 'bold'))
+        self._status_heading.pack(fill='x', padx=10, pady=(10, 4))
+
+        columns = ("stage", "status", "source", "updated")
+        tree = ttk.Treeview(win, columns=columns, show="headings", height=8, selectmode="browse")
+        for col, text, width in (("stage", "Stage", 230), ("status", "Status", 100),
+                                 ("source", "Source", 280), ("updated", "Updated", 150)):
+            tree.heading(col, text=text)
+            tree.column(col, width=width, anchor='w')
+        for status, color in self._STATUS_COLORS.items():
+            tree.tag_configure(status, foreground=color)
+        tree.pack(fill='both', expand=True, padx=10)
+        self._status_tree = tree
+
+        self._status_detail = tk.Label(win, anchor='w', justify='left', fg=_C['sub'], wraplength=780)
+        self._status_detail.pack(fill='x', padx=10, pady=4)
+        tree.bind("<<TreeviewSelect>>", lambda e: self._show_status_detail())
+
+        buttons = tk.Frame(win)
+        buttons.pack(fill='x', padx=10, pady=(0, 10))
+        tk.Button(buttons, text="Save Stage...", command=self._status_save_stage).pack(side='left', padx=2)
+        tk.Button(buttons, text="Load Stage...", command=self._status_load_stage).pack(side='left', padx=2)
+        tk.Button(buttons, text="Clear Stage", command=self._status_clear_stage).pack(side='left', padx=2)
+        tk.Button(buttons, text="Close", command=win.destroy).pack(side='right', padx=2)
+        tk.Button(buttons, text="Save Project", command=self.save_project).pack(side='right', padx=2)
+
+        self._refresh_status_window()
+        return win
+
+    def _refresh_status_window(self):
+        if self.status_window is None or not self.status_window.winfo_exists() or self._status_tree is None:
+            return
+        tree = self._status_tree
+        selected = tree.selection()
+        tree.delete(*tree.get_children())
+        for row in self.project.summary():
+            tree.insert("", "end", iid=row["key"], tags=(row["status"],),
+                        values=(f"{row['number']} · {row['title']}", row["status"], row["source"], row["updated"]))
+        if selected and tree.exists(selected[0]):
+            tree.selection_set(selected[0])
+        where = self.project.path or "not saved yet"
+        mark = " (unsaved changes)" if self._project_has_unsaved_changes() else ""
+        self._status_heading.config(text=f"Project: {self.project.name}{mark}  —  {where}")
+        self._show_status_detail()
+
+    def _status_selected_key(self, warn=True):
+        sel = self._status_tree.selection() if self._status_tree is not None else ()
+        if not sel:
+            if warn:
+                messagebox.showinfo("Pipeline Status", "Select a stage first.", parent=self.status_window)
+            return None
+        return sel[0]
+
+    def _show_status_detail(self):
+        key = self._status_selected_key(warn=False)
+        if key is None:
+            self._status_detail.config(text="Select a stage to see its details.")
+            return
+        rec = self.project.get(key)
+        stage = core_stages.stage(key)
+        if rec is None:
+            text = f"{stage.description} Not run yet."
+        else:
+            parts = [stage.description]
+            if rec.problem:
+                parts.append(f"Problem: {rec.problem}")
+            if rec.params:
+                parts.append("Settings: " + ", ".join(f"{k}={v}" for k, v in rec.params.items()))
+            if self.project.status(key) == core_project.OUT_OF_DATE:
+                parts.append("Something it was computed from has changed since: recompute it to update.")
+            text = "  ".join(parts)
+        self._status_detail.config(text=text)
+
+    def _status_save_stage(self):
+        key = self._status_selected_key()
+        if key is None:
+            return
+        folder = filedialog.asksaveasfilename(
+            parent=self.status_window, title="Save Stage (a new folder)",
+            initialfile=core_project.stage_folder_name(key))
+        if not folder:
+            return
+        try:
+            self.project.save_stage(key, folder)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Save Stage", str(e), parent=self.status_window)
+            return
+        messagebox.showinfo("Stage Saved", f"Saved to:\n{folder}", parent=self.status_window)
+
+    def _status_load_stage(self):
+        folder = filedialog.askdirectory(parent=self.status_window, mustexist=True,
+                                         title="Load Stage (a saved stage folder or a .neclab project)")
+        if not folder:
+            return
+        key = None
+        try:
+            if os.path.isfile(os.path.join(folder, core_project.MANIFEST)):
+                keys = Project.stages_in_project_folder(folder)
+                if not keys:
+                    raise ValidationError("That project has no stages to load.")
+                labels = [f"{core_stages.stage(k).number} · {core_stages.stage(k).title}" for k in keys]
+                choice = ask_choice(self.status_window, "Load Stage", "Which stage of that project?", labels)
+                if choice is None:
+                    return
+                key = keys[labels.index(choice)]
+            key, warnings = self.project.load_stage(folder, key)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load Stage", str(e), parent=self.status_window)
+            return
+        show_warnings(self.status_window, warnings)
+        if key in ("features", "mask", "cells"):
+            self._restore_views_from_project()
+
+    def _status_clear_stage(self):
+        key = self._status_selected_key()
+        if key is None or self.project.get(key) is None:
+            return
+        stage = core_stages.stage(key)
+        if not messagebox.askyesno("Clear Stage", f"Remove stage {stage.number} ({stage.title}) "
+                                   "from the project?", parent=self.status_window):
+            return
+        self.project.clear_stage(key)
+        if key in ("raw", "preprocess", "features", "mask", "cells"):
+            self._restore_views_from_project()
 
     # ==================== MENU COMMANDS - IMAGE ====================
 
@@ -3474,7 +3857,10 @@ class NecLabApp:
         if self.img_original is None or len(self.img_original) == 0:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-        show_variability_analysis(self.img_original, method_index, self.root)
+        win = show_variability_analysis(self.img_original, method_index, self.root, project=self.project,
+                                        on_recording_attached=self._on_recording_attached)
+        if win is not None:
+            self.detection_windows.append(win)
 
     # ==================== HELP / AUTO-UPDATER ====================
 

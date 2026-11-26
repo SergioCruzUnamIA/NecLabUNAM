@@ -43,6 +43,8 @@ Both workflows share the same main window, which has a menu bar at the top and a
 
 | Item | Action |
 |---|---|
+| **New Project** / **Open Project...** / **Save Project** (`Ctrl+S`) / **Save Project As...** | Start, open or save a project: the whole analysis of one recording, every stage with its settings, saved in a `.neclab` folder. See [section 4.9](#49-projects). |
+| **Pipeline Status...** | Shows each stage's status (not run, done, loaded, out of date, missing), where it came from and when, and saves or loads a single stage. See [section 4.9](#49-projects). |
 | **Open Recording (OME-TIFF / TIFF / NPY)...** (`Ctrl+O`) | Loads a recording (an image stack of frames × height × width) from an OME-TIFF, a plain TIFF or a NumPy `.npy` file, switches to the "Image Processing" tab, and enables the Image and Variability Analysis menus. Files that aren't a recording (e.g. a single 2D image) are rejected with an explanation. |
 | **Open Pipeline Stage** | Starts the analysis at a later stage from a file saved earlier (or made by another program). See [section 4.8](#48-starting-from-a-saved-stage). |
 | **Open Data (.npy / .csv / .xlsx)** | Loads a numeric data file into the "Data Visualization" tab. For CSV files, a dialog lets you pick the initial column (ROI); for `.npy` files, columns are auto-named "Column 1", "Column 2", etc. |
@@ -201,6 +203,46 @@ The analysis is a chain of stages, and each one can be started from a file inste
 - If a recording is open and the file's images are the same size, the recording is attached automatically. If the sizes differ, you are asked whether to continue without it.
 - Whatever is missing switches off only the features that need it: e.g. starting from a mask without a recording, Basic detection works, Advanced/KMeans ask for a variability map, and signals ask for the recording.
 - Signals tables from other programs are accepted: a header row is optional, and a first column named `frame`/`time`/`time_s` or holding 0, 1, 2, … is treated as time rather than as a cell. Sheets with fewer than 2 rows or no numbers are rejected with the reason.
+
+### 4.9 Projects
+
+A **project** keeps the whole analysis of one recording: the recording itself (referenced, not copied), and every stage you computed or loaded, with the settings used. Everything you do is recorded in the current project automatically: opening a recording, computing or loading a map or a mask, detecting or loading cells, selecting cells, extracting their signals and computing a correlation. The window title shows the project's name, with a `*` when there are unsaved changes.
+
+- **File → Save Project** (`Ctrl+S`) saves it as a folder named `<name>.neclab`; **Save Project As...** saves a copy under another name. NecLab asks to save unsaved changes before closing, starting a new project or opening another one.
+- **File → Open Project...** (choose the `.neclab` folder) restores the recording in the Image Processing tab and the cell detection window with the cells, the selection, the threshold and the sizes used.
+- **The recording isn't copied** into the project. The project remembers where it is (also relative to the project folder, so moving both together keeps working) and a quick checksum of it. If it can't be found, NecLab offers to locate it; the other stages open anyway. If the file has changed, the stages computed from it are marked out of date.
+
+Contents of a project folder (only the stages that have data):
+
+| Folder | Files |
+|---|---|
+| `manifest.json` | List of stages, their status and settings |
+| `s0_raw/` | `stage.json`: where the recording is, its size and checksum |
+| `s2_features/` | `maps.npz` |
+| `s3_mask/` | `mask.tif` |
+| `s4_cells/` | `cells.tif` (label image) + `cells.csv` (cell table) |
+| `s5_signals/` | `signals_raw.csv` |
+| `s6_analysis/` | `signals_norm.csv`, `events.csv` |
+| `s7_correlation/` | `correlation.csv` |
+
+The files are the same formats as the Export menu, so they can be opened in Excel, ImageJ or Python, or with **File → Open Pipeline Stage**.
+
+**Pipeline Status** (File menu) lists the 8 stages with their status:
+
+| Status | Meaning |
+|---|---|
+| not run | No data for this stage yet |
+| done | Computed in NecLab and up to date |
+| loaded | Loaded from a file and up to date |
+| out of date | Something it was computed from has changed since (e.g. you detected cells again after extracting signals, or opened a different recording): recompute it |
+| missing | Its data couldn't be loaded (e.g. the recording wasn't found); the reason is shown below the list |
+
+Select a stage to see its settings, then:
+- **Save Stage...** saves just that stage to a new folder (its files plus a `stage.json` with its settings).
+- **Load Stage...** loads a stage saved that way, or one stage from another project folder, into the current project. It is checked against what is loaded (e.g. the cells must be the same size as the recording) and replaces that stage.
+- **Clear Stage** removes the stage from the project.
+
+> The Multiple Files tab (comparing several recordings' signals) isn't part of a project; its files are opened and saved from that tab as before.
 
 ---
 

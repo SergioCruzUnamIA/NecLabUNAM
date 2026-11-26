@@ -663,6 +663,7 @@ def load_correlation_matrix(root, canvas, target_frame=None):
     Load a correlation matrix from a CSV file and display it.
     'target_frame', if given, is drawn into directly instead of the frame
     _plot_correlation_helper falls back to finding inside 'root'.
+    Returns (matrix DataFrame, filename), or None if nothing was loaded.
     """
     try:
         # Open file dialog to select correlation matrix file
@@ -702,10 +703,11 @@ def load_correlation_matrix(root, canvas, target_frame=None):
                                               corr_method='Loaded Correlation', target_frame=target_frame)
         
         messagebox.showinfo(
-            "Matrix Loaded", 
+            "Matrix Loaded",
             f"Successfully loaded correlation matrix of size {corr_matrix.shape[0]}x{corr_matrix.shape[1]}"
         )
-        
+        return corr_matrix, filename
+
     except pd.errors.EmptyDataError:
         messagebox.showerror("Error", "The selected file is empty or invalid.")
     except pd.errors.ParserError:

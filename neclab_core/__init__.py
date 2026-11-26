@@ -7,6 +7,8 @@ dialog or draws a plot, so the same code runs from the app, a notebook,
 a batch script or a test.
 
 Modules:
+    project       the whole pipeline's state for one recording: status of
+                  every stage, saved to / loaded from a .neclab folder
     stages        the pipeline stages, what each one reads/writes, and
                   load_item()/save_item() to enter or leave any stage
     formats       file readers/writers for every stage
@@ -23,6 +25,7 @@ permanent ID of the cell that pixel belongs to.
 """
 
 __all__ = [
+    "project",
     "stages",
     "formats",
     "validation",

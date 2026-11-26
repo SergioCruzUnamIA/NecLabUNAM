@@ -43,6 +43,8 @@ Ambos flujos comparten la misma ventana principal, que tiene una barra de menús
 
 | Opción | Acción |
 |---|---|
+| **New Project** / **Open Project...** / **Save Project** (`Ctrl+S`) / **Save Project As...** (Nuevo / Abrir / Guardar / Guardar Proyecto Como) | Empieza, abre o guarda un proyecto: todo el análisis de una grabación, cada etapa con sus parámetros, guardado en una carpeta `.neclab`. Ver [sección 4.9](#49-proyectos). |
+| **Pipeline Status...** (Estado del Pipeline) | Muestra el estado de cada etapa (not run, done, loaded, out of date, missing), de dónde vino y cuándo, y guarda o carga una sola etapa. Ver [sección 4.9](#49-proyectos). |
 | **Open Recording (OME-TIFF / TIFF / NPY)...** (Abrir Grabación, `Ctrl+O`) | Carga una grabación (una pila de imágenes de frames × alto × ancho) desde un OME-TIFF, un TIFF normal o un archivo NumPy `.npy`, cambia a la pestaña "Image Processing" y habilita los menús Image y Variability Analysis. Los archivos que no son una grabación (p. ej. una sola imagen 2D) se rechazan con una explicación. |
 | **Open Pipeline Stage** (Abrir Etapa del Pipeline) | Empieza el análisis en una etapa posterior a partir de un archivo guardado antes (o hecho con otro programa). Ver [sección 4.8](#48-comenzar-desde-una-etapa-guardada). |
 | **Open Data (.npy / .csv / .xlsx)** (Abrir Datos) | Carga un archivo de datos numéricos en la pestaña "Data Visualization". Si es CSV, se muestra un diálogo para elegir la columna inicial (ROI); si es `.npy`, las columnas se nombran automáticamente "Column 1", "Column 2", etc. |
@@ -201,6 +203,46 @@ El análisis es una cadena de etapas, y cada una puede empezar desde un archivo 
 - Si hay una grabación abierta y las imágenes del archivo son del mismo tamaño, la grabación se adjunta automáticamente. Si los tamaños no coinciden, se pregunta si continuar sin ella.
 - Lo que falte solo desactiva las funciones que lo necesitan: p. ej. al empezar desde una máscara sin grabación, la detección Basic funciona, Advanced/KMeans piden un mapa de variabilidad y las señales piden la grabación.
 - Se aceptan tablas de señales de otros programas: la fila de encabezado es opcional, y una primera columna llamada `frame`/`time`/`time_s` o con 0, 1, 2, … se trata como tiempo y no como célula. Las hojas con menos de 2 filas o sin números se rechazan indicando el motivo.
+
+### 4.9 Proyectos
+
+Un **proyecto** guarda todo el análisis de una grabación: la grabación misma (referenciada, no copiada) y cada etapa calculada o cargada, con los parámetros usados. Todo lo que hace queda registrado automáticamente en el proyecto actual: abrir una grabación, calcular o cargar un mapa o una máscara, detectar o cargar células, seleccionar células, extraer sus señales y calcular una correlación. El título de la ventana muestra el nombre del proyecto, con un `*` cuando hay cambios sin guardar.
+
+- **File → Save Project** (`Ctrl+S`) lo guarda como una carpeta llamada `<nombre>.neclab`; **Save Project As...** guarda una copia con otro nombre. NecLab pregunta si guardar los cambios antes de cerrar, empezar un proyecto nuevo o abrir otro.
+- **File → Open Project...** (elija la carpeta `.neclab`) restaura la grabación en la pestaña Image Processing y la ventana de detección con las células, la selección, el threshold y los tamaños usados.
+- **La grabación no se copia** al proyecto. El proyecto recuerda dónde está (también en relación con la carpeta del proyecto, así que mover ambos juntos sigue funcionando) y una suma de verificación rápida. Si no se encuentra, NecLab ofrece localizarla; las demás etapas se abren de todos modos. Si el archivo cambió, las etapas calculadas a partir de él se marcan como desactualizadas.
+
+Contenido de una carpeta de proyecto (solo las etapas que tienen datos):
+
+| Carpeta | Archivos |
+|---|---|
+| `manifest.json` | Lista de etapas, su estado y parámetros |
+| `s0_raw/` | `stage.json`: dónde está la grabación, su tamaño y suma de verificación |
+| `s2_features/` | `maps.npz` |
+| `s3_mask/` | `mask.tif` |
+| `s4_cells/` | `cells.tif` (imagen de etiquetas) + `cells.csv` (tabla de células) |
+| `s5_signals/` | `signals_raw.csv` |
+| `s6_analysis/` | `signals_norm.csv`, `events.csv` |
+| `s7_correlation/` | `correlation.csv` |
+
+Los archivos tienen los mismos formatos que el menú Export, así que se pueden abrir en Excel, ImageJ o Python, o con **File → Open Pipeline Stage**.
+
+**Pipeline Status** (menú File) lista las 8 etapas con su estado:
+
+| Estado | Significado |
+|---|---|
+| not run | Aún no hay datos para esta etapa |
+| done | Calculada en NecLab y al día |
+| loaded | Cargada desde un archivo y al día |
+| out of date | Algo a partir de lo que se calculó cambió después (p. ej. volvió a detectar células tras extraer señales, o abrió otra grabación): vuelva a calcularla |
+| missing | Sus datos no se pudieron cargar (p. ej. no se encontró la grabación); el motivo aparece debajo de la lista |
+
+Seleccione una etapa para ver sus parámetros y luego:
+- **Save Stage...** guarda solo esa etapa en una carpeta nueva (sus archivos más un `stage.json` con sus parámetros).
+- **Load Stage...** carga una etapa guardada así, o una etapa de la carpeta de otro proyecto, en el proyecto actual. Se revisa contra lo cargado (p. ej. las células deben ser del mismo tamaño que la grabación) y reemplaza esa etapa.
+- **Clear Stage** quita la etapa del proyecto.
+
+> La pestaña Multiple Files (comparar las señales de varias grabaciones) no forma parte de un proyecto; sus archivos se abren y guardan desde esa pestaña como antes.
 
 ---
 
