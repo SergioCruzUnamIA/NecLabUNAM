@@ -90,6 +90,33 @@ def test_divide_by_lowest_points_keeps_gaps_and_rejects_near_zero_baselines():
     np.testing.assert_allclose(ok["cell_1"].to_numpy()[px], 1.0)
 
 
+def test_subtract_lowest_points_puts_them_on_zero():
+    t = np.arange(200)
+    for y in (50 + 0.1 * t + 20 * (np.cos(t / 7) > 0.9),     # rising baseline
+              np.sin(t / 5) - 3.0):                           # below zero: no division, still fine
+        for n in (2, 6, 10):
+            out = norm.subtract_lowest_points(y, n)
+            baseline, px = norm.lowest_points_baseline(y, n)
+            np.testing.assert_allclose(out[px], 0.0, atol=1e-12)          # lowest points -> 0
+            np.testing.assert_allclose(out, y - baseline)
+            # same baseline as smoothing, without adding the minimum back
+            np.testing.assert_allclose(out, norm.smooth_convex_envelope(y, n) - y[px].min(), atol=1e-12)
+
+
+def test_subtract_lowest_points_in_tables_and_gaps():
+    t = np.arange(120)
+    y = (80 + 10 * (np.sin(t / 5) > 0.9)).astype(float)
+    y[[4, 60]] = np.nan
+    out = norm.subtract_lowest_points(y, 6)
+    assert np.isnan(out[[4, 60]]).all() and np.isfinite(np.delete(out, [4, 60])).all()
+    df = pd.DataFrame({"cell_1": 80 + np.sin(t / 5), "cell_9": np.sin(t / 5)})
+    res = norm.normalize_signals(df, "subtract_lowest_points", lowest_points=4)
+    for col in df.columns:
+        _, px = norm.lowest_points_baseline(df[col], 4)
+        np.testing.assert_allclose(res[col].to_numpy()[px], 0.0, atol=1e-12)
+    assert "subtract_lowest_points" in norm.LOWEST_POINTS_METHODS and not norm.is_identity("subtract_lowest_points")
+
+
 # ------------------------------------------------------------ tables
 
 def test_normalize_signals_methods():

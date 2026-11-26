@@ -185,9 +185,10 @@ Each item runs a complete detection with the current Threshold / Min Size / Max 
 - **Save Cells (Label Image)...**: saves the cells as a label image (`.tif` or `.npy`: an image the size of one frame where each pixel holds the ID of its cell, 0 = background) plus a table with the same name and a `.csv` extension (`cell_id, n_pixels, centroid_row, centroid_col`). If cells are selected, it asks whether to save only those. Load it back later with **Data → Load Cells...**.
 - **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (the raw signals, same format as Save Signals), **Export Normalized** (the signals as shown, stage 6), **Export Correlation** (the current matrix, which can be reopened as stage 7), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
   - **Normalization**, **Lowest points**, **Smoothing**, **Show lowest points** + **Apply**: how the signals are normalized before the correlation is computed (see [section 12](#normalization-methods-correlation-analysis-window)). The default is *None*, the raw mean intensities. The plot, the correlation and the dendrogram all use the normalized signals, which are recorded as stage 6 of the project (and the settings are restored when the project is reopened).
-    - **Lowest points** (2–50, default 6): how many of each signal's genuine lowest points build its baseline, a line through them. Used by *Divide by lowest-points baseline* and by *Smoothing*.
+    - **Lowest points** (2–50, default 6): how many of each signal's genuine lowest points build its baseline, a line through them. Used by *Divide by lowest-points baseline*, *Subtract lowest-points baseline* and *Smoothing*.
     - **Divide by lowest-points baseline**: each signal divided by that baseline, so its lowest points lie on a horizontal line at 1 and every value reads as "times the baseline" (the Convex Envelope normalization of earlier NecLab versions). If a signal's baseline reaches zero or below (e.g. data already normalized to 0–1), dividing would blow up: NecLab says which cell and shows the raw signals instead.
-    - **Smoothing**: subtracts that baseline instead (the lowest points end up on a horizontal line at the signal's lowest level). Not applied on top of *Divide by lowest-points baseline*, which already removes the same baseline.
+    - **Subtract lowest-points baseline**: the same baseline is subtracted instead of divided, so the lowest points lie on a horizontal line at 0 and every value reads as "above the baseline", in the signal's own units. With no division, it works for any signal, including ones near or below zero.
+    - **Smoothing**: subtracts that baseline and adds the signal's lowest level back (the lowest points end up on a horizontal line at that level instead of 0). Not applied on top of the two lowest-points normalizations, which already remove the same baseline.
     - **Show lowest points**: marks the points used on the signals plot.
   - The dendrogram uses Ward linkage on the distance 1 − |r|, like every other dendrogram in NecLab.
 
@@ -450,6 +451,7 @@ See the table in [section 4.1](#41-available-variability-methods).
 | ΔF/F0 | (F − F0) / F0, with F0 = the signal's 10th percentile |
 | Detrend + scale to 0–1 | Removes a linear trend (ElasticNet), then scales to 0–1 |
 | Divide by lowest-points baseline | Divides by the line through the signal's genuine lowest points, so they lie on a horizontal line at 1 |
+| Subtract lowest-points baseline | Subtracts that line instead, so the lowest points lie on a horizontal line at 0 (no division) |
 
 Each can be combined with convex-envelope smoothing (see Peak detection above). The Multiple Files tab's divide-by-minimum modes use the same code.
 

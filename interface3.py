@@ -3573,7 +3573,7 @@ class NecLabApp:
 
     # Settings kept in the project but not printed in the sidebar details
     # (e.g. the list of every cell's ID, which can run to hundreds of numbers).
-    _SIDEBAR_HIDDEN_PARAMS = {"signals": ("cells",)}
+    _SIDEBAR_HIDDEN_PARAMS = {"signals": ("cells", "measure")}
 
     # What each stage needs before it can be run (shown for stages not run yet).
     _STAGE_NEEDS = {

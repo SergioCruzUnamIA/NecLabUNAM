@@ -913,8 +913,9 @@ class VariabilityAnalysisWindow:
 
     def _norm_settings(self):
         """(method key, smoothing points or None, lowest points) from the
-        controls. Smoothing is ignored with the "lowest_points" method: the
-        signal is already divided by that same baseline."""
+        controls. Smoothing is ignored with the lowest-points methods: the
+        signal is already divided by / has already had that same baseline
+        subtracted."""
         label = self.norm_method_var.get() if hasattr(self, 'norm_method_var') else None
         method = self._norm_keys[self._norm_labels.index(label)] if label in getattr(self, '_norm_labels', []) else "none"
         try:
@@ -924,7 +925,7 @@ class VariabilityAnalysisWindow:
         if points < 2:
             points = normalization.DEFAULT_LOWEST_POINTS
         smooth = bool(self.norm_smooth_var.get()) if hasattr(self, 'norm_smooth_var') else False
-        smoothing = points if smooth and method != "lowest_points" else None
+        smoothing = points if smooth and method not in normalization.LOWEST_POINTS_METHODS else None
         return method, smoothing, points
 
     def _normalize(self):
@@ -956,13 +957,16 @@ class VariabilityAnalysisWindow:
         self.norm_description = normalization.NORMALIZATION_METHODS[method]
         if method == "lowest_points":
             self.norm_description = f"divided by lowest-points baseline ({points} points)"
+        elif method == "subtract_lowest_points":
+            self.norm_description = f"lowest-points baseline subtracted ({points} points)"
         if smoothing:
             self.norm_description += f", smoothed ({smoothing} lowest points)"
         # Positions of the lowest points used, to mark them on the plot: on
-        # the raw signal for "lowest_points", on the normalized (not yet
-        # smoothed) signal for smoothing.
-        if method == "lowest_points" or smoothing:
-            base = (self.signals_df if method == "lowest_points"
+        # the raw signal for the lowest-points methods, on the normalized
+        # (not yet smoothed) signal for smoothing.
+        lowest_method = method in normalization.LOWEST_POINTS_METHODS
+        if lowest_method or smoothing:
+            base = (self.signals_df if lowest_method
                     else normalization.normalize_signals(self.signals_df, method, None, points))
             for col in base.columns:
                 if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:

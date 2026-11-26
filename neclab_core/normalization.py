@@ -17,6 +17,10 @@ normalize_signals(df, method, smoothing_points=None)
         "lowest_points"    divide by the Convex Envelope baseline (the line
                            through the signal's genuine lowest points), so
                            the lowest points lie on a horizontal line at 1
+        "subtract_lowest_points"
+                           subtract that baseline instead, so the lowest
+                           points lie on a horizontal line at 0 (no division:
+                           works for signals near or below zero too)
     then optional Convex Envelope smoothing (subtracting that baseline).
 
 divide_by_min_tables(tables, mode)
@@ -37,7 +41,12 @@ NORMALIZATION_METHODS = {
     "delta_f_over_f0": "ΔF/F0 (baseline = 10th percentile)",
     "detrend_minmax": "Detrend + scale to 0–1",
     "lowest_points": "Divide by lowest-points baseline (lowest points → 1)",
+    "subtract_lowest_points": "Subtract lowest-points baseline (lowest points → 0)",
 }
+
+# Methods that use the lowest-points baseline themselves (the "Lowest points"
+# setting applies to them, and smoothing with that same baseline is redundant).
+LOWEST_POINTS_METHODS = ("lowest_points", "subtract_lowest_points")
 
 DEFAULT_LOWEST_POINTS = 6
 
@@ -273,6 +282,22 @@ def divide_by_lowest_points(values, n_points=DEFAULT_LOWEST_POINTS):
     return out
 
 
+def subtract_lowest_points(values, n_points=DEFAULT_LOWEST_POINTS):
+    """Subtract a signal's lowest-points baseline, so the lowest points lie
+    on a horizontal line at 0. Unlike divide_by_lowest_points there is no
+    division, so it works whatever the signal's level (even near or below
+    zero), and unlike Convex Envelope smoothing the signal's minimum isn't
+    added back."""
+    values = np.asarray(values, dtype=float)
+    missing = ~np.isfinite(values)
+    if missing.all():
+        return values.copy()
+    baseline, _px = lowest_points_baseline(values, n_points)
+    out = fill_missing(values) - baseline
+    out[missing] = np.nan
+    return out
+
+
 def smooth_keeping_gaps(values, n_points):
     """Convex Envelope smoothing of a series with missing values: NaNs are
     filled for the computation and put back afterwards."""
@@ -294,7 +319,7 @@ def normalize_signals(df, method="none", smoothing_points=None, lowest_points=DE
         df: signals table (frames x cells).
         method: a key of NORMALIZATION_METHODS.
         smoothing_points: Convex Envelope key points (None/0 = no smoothing).
-        lowest_points: number of lowest points for the "lowest_points" method.
+        lowest_points: number of lowest points for the lowest-points methods.
 
     Returns a new DataFrame with the same index and columns. Raises
     ValueError (naming the signal) if a signal can't be normalized.
@@ -307,6 +332,8 @@ def normalize_signals(df, method="none", smoothing_points=None, lowest_points=DE
         try:
             if method == "lowest_points":
                 values = divide_by_lowest_points(values, int(lowest_points))
+            elif method == "subtract_lowest_points":
+                values = subtract_lowest_points(values, int(lowest_points))
             else:
                 values = _METHOD_FUNCTIONS[method](values)
         except ValueError as e:
