@@ -695,6 +695,10 @@ class VariabilityAnalysisWindow:
         self._apply_binarization()
         self._find_clusters()
 
+        # Reset selection: old indices would point to the wrong clusters
+        self.selected_clusters = []
+        self.cluster_colors = []
+
         try:
             self.final_clusters, _ = process_clusters_advanced(
                 self.var_im, self.res_clusters, min_size, max_size
@@ -702,9 +706,14 @@ class VariabilityAnalysisWindow:
             self.info_label.config(
                 text=f"Advanced: {len(self.final_clusters)} clusters (th={th}, 3D peaks)"
             )
-            self.update_display()
         except Exception as e:
             messagebox.showwarning("Warning", f"Error in advanced processing: {e}\nUsing basic method as fallback")
+            self.final_clusters = [cl for cl in self.res_clusters if min_size <= len(cl) <= max_size]
+            self.info_label.config(
+                text=f"Basic (fallback): {len(self.final_clusters)} clusters (th={th}, size {min_size}–{max_size})"
+            )
+        self.update_display()
+        self.update_selection_list()
 
     def decompose_clusters(self):
         """Decompose large clusters using KMeans"""
@@ -718,18 +727,19 @@ class VariabilityAnalysisWindow:
         # Count large clusters before decomposing
         large_count = sum(1 for cl in self.res_clusters if len(cl) > max_size)
 
-        # Decompose
+        # Decompose and make the result the selectable cluster list, so that
+        # selection, export and correlation analysis use the KMeans sub-clusters
         self.res_clusters = decompose_large_clusters(
             self.res_clusters, self.var_im, min_size, max_size
         )
+        self.final_clusters = list(self.res_clusters)
 
-        # Clear selections and final clusters
+        # Clear selections (indices refer to the new list) and regenerate colors
         self.selected_clusters = []
-        self.final_clusters = None
-        self.cluster_colors = []  # Regenerate colors
+        self.cluster_colors = []
 
         self.info_label.config(
-            text=f"Decomposed {large_count} large clusters → {len(self.res_clusters)} total clusters"
+            text=f"Decomposed {large_count} large clusters → {len(self.final_clusters)} total clusters"
         )
         self.update_display()
         self.update_selection_list()
