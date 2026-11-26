@@ -105,19 +105,91 @@ _C = {
 # for now, but isn't guaranteed to survive future numpy releases).
 _trapz = getattr(np, 'trapezoid', None) or np.trapz
 
+# ── Analysis package (neclab_core) ───────────────────────────────────────────
+# All analysis code lives in the neclab_core/ folder next to this file. The
+# in-app updater ("Help → Check for Updates") of versions released before that
+# folder existed only knew about the top-level .py files, so an install
+# updated from one of them gets this file but not the folder. In that case,
+# fetch the folder from the same place the updater uses before importing it.
+_REPO = "sergiocruzunamia/neclabunam"
+_CORE_FILES = [
+    "neclab_core/__init__.py",
+    "neclab_core/project.py",
+    "neclab_core/stages.py",
+    "neclab_core/validation.py",
+    "neclab_core/formats.py",
+    "neclab_core/display.py",
+    "neclab_core/variability.py",
+    "neclab_core/segmentation.py",
+    "neclab_core/signals.py",
+    "neclab_core/correlation.py",
+    "neclab_core/normalization.py",
+]
+
+
+def _download_repo_files(filenames, app_dir):
+    """Download `filenames` (paths relative to the repo root) from the main
+    branch into app_dir, creating folders as needed. Returns a list of
+    "<file>: <error>" strings for the files that failed."""
+    base_url = f"https://raw.githubusercontent.com/{_REPO}/main/"
+    errors = []
+    for filename in filenames:
+        dest = os.path.join(app_dir, *filename.split("/"))
+        try:
+            req = urllib.request.Request(base_url + filename, headers={"User-Agent": "NecLab-Updater/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                content = resp.read()
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(content)
+        except Exception as e:
+            errors.append(f"{filename}: {e}")
+    return errors
+
+
+def _ensure_core_package():
+    """Make sure neclab_core can be imported (see the comment above)."""
+    try:
+        import neclab_core  # noqa: F401
+        return
+    except ImportError:
+        if getattr(sys, "frozen", False):
+            raise
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    errors = _download_repo_files(_CORE_FILES, app_dir)
+    try:
+        import neclab_core  # noqa: F401
+    except ImportError:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "NecLab - Missing Files",
+            "The 'neclab_core' folder is missing and could not be downloaded.\n\n"
+            + ("\n".join(errors) + "\n\n" if errors else "")
+            + "Download the latest version of NecLab from GitHub, or run 'git pull'."
+        )
+        root.destroy()
+        sys.exit(1)
+
+
+_ensure_core_package()
+
+from neclab_core import correlation as core_correlation
+from neclab_core import display as core_display
+from neclab_core import normalization as core_normalization
+from neclab_core import stages as core_stages
+from neclab_core import project as core_project
+from neclab_core.project import Project
+from neclab_core import validation as core_validation
+from neclab_core.validation import ValidationError
+
 # Local modules
-from pyometiff import OMETIFFReader
-from variability_functions import show_variability_analysis, get_variability_methods
+from variability_functions import (show_variability_analysis, get_variability_methods,
+                                   open_detection_window, ask_choice, show_warnings)
 from corr_dendo_functions import load_correlation_matrix
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
-
-# Try to import image processing modules if they exist
-try:
-    from image_loader import load_ometiff_image, process_image_slice
-    from image_processing import auto_contrast, threshold_image_pil
-    HAS_IMAGE_MODULES = True
-except ImportError:
-    HAS_IMAGE_MODULES = False
+from image_loader import ask_recording_path, load_recording
+from image_processing import mask_to_pil
 
 
 
@@ -167,9 +239,24 @@ class NecLabApp:
         self.root.geometry(f"{self.width}x{self.height}")
 
         # State variables - Images
-        self.img_original = None  # Original, unmodified image
-        self.img_array = None     # Working image (may have modifications)
-        self.img_display = None   # Image for display (with contrast, etc.)
+        # img_original is the raw stack as loaded. It is never modified: all
+        # display adjustments (brightness, contrast, auto contrast, threshold
+        # preview) are applied to a copy of the current frame only, so the
+        # variability analysis always runs on the raw data. img_array is kept
+        # as an alias for code that still uses that name.
+        self.img_original = None
+        self.img_array = None
+        self.img_display_range = (0.0, 255.0)  # raw value range mapped to 0-255 for display
+        self.auto_contrast_var = tk.BooleanVar(value=False)  # display-only auto contrast
+
+        # State variables - Project (the pipeline's state for one recording,
+        # saved to a .neclab folder; see neclab_core/project.py)
+        self.project = Project()
+        self.project.add_listener(self._on_project_changed)
+        self.detection_windows = []     # open cell detection windows (they report to the project)
+        self.status_window = None       # the pipeline sidebar (parent for its dialogs)
+        self._status_tree = None
+        self.sidebar_visible_var = tk.BooleanVar(value=True)
 
         # State variables - Multiple Files tab (multiple .xls files)
         self.multi_xls_tab = None
@@ -286,11 +373,15 @@ class NecLabApp:
 
     def _on_close(self):
         """Fully close the application, releasing all resources."""
-        if messagebox.askokcancel("Exit", "Do you want to exit NecLab?"):
-            plt.close('all')
-            self.root.quit()
-            self.root.destroy()
-            sys.exit(0)
+        if self._project_has_unsaved_changes():
+            if not self._confirm_discard_project("exiting"):
+                return
+        elif not messagebox.askokcancel("Exit", "Do you want to exit NecLab?"):
+            return
+        plt.close('all')
+        self.root.quit()
+        self.root.destroy()
+        sys.exit(0)
 
     # ==================== MENU ====================
 
@@ -302,11 +393,31 @@ class NecLabApp:
         # File menu
         self.menu_archivo = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_archivo, label="File")
+        self.menu_archivo.add_command(label="New Project", command=self.new_project)
+        self.menu_archivo.add_command(label="Open Project...", command=self.open_project)
+        self.menu_archivo.add_command(label="Save Project", accelerator="Ctrl+S", command=self.save_project)
+        self.menu_archivo.add_command(label="Save Project As...", command=self.save_project_as)
+        self.menu_archivo.add_checkbutton(label="Show Pipeline Sidebar", variable=self.sidebar_visible_var,
+                                          command=self._toggle_sidebar)
+        self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label="Open OME-TIFF",
+            label="Open Recording (OME-TIFF / TIFF / NPY)...",
             accelerator="Ctrl+O",
             command=self.open_ometiff_file
         )
+        # Enter the pipeline at a later stage by loading that stage's data.
+        self.menu_etapas = Menu(self.menu_archivo, tearoff=False)
+        self.menu_archivo.add_cascade(label="Open Pipeline Stage", menu=self.menu_etapas)
+        self.menu_etapas.add_command(label="2 · Variability Map (.npz / .npy / .tif)...",
+                                     command=lambda: self.open_pipeline_stage("maps"))
+        self.menu_etapas.add_command(label="3 · Candidate Mask (.tif / .npy)...",
+                                     command=lambda: self.open_pipeline_stage("mask"))
+        self.menu_etapas.add_command(label="4 · Cells (label image / ImageJ ROIs)...",
+                                     command=lambda: self.open_pipeline_stage("cells"))
+        self.menu_etapas.add_command(label="5–6 · Signals (.csv / .xlsx / .npy)...",
+                                     command=self.open_multiple_xls_files)
+        self.menu_etapas.add_command(label="7 · Correlation Matrix (.csv / .xlsx)...",
+                                     command=self.load_correlation_matrix_wrapper)
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
             label='Open Data Files (.npy / .xls / .csv)',
@@ -327,9 +438,10 @@ class NecLabApp:
         # Image menu
         self.menu_imagen = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_imagen, label="Image")
-        self.menu_imagen.add_command(
+        self.menu_imagen.add_checkbutton(
             label="Auto Contrast",
-            command=self.apply_auto_contrast,
+            variable=self.auto_contrast_var,
+            command=self._update_image_display,
             state=DISABLED
         )
         self.menu_imagen.add_command(
@@ -378,6 +490,7 @@ class NecLabApp:
 
         # Keyboard shortcut
         self.root.bind('<Control-o>', lambda e: self.open_ometiff_file())
+        self.root.bind('<Control-s>', lambda e: self.save_project())
 
     # ==================== MAIN LAYOUT ====================
 
@@ -405,8 +518,15 @@ class NecLabApp:
                   foreground=[('selected', _C['acc'])],
                   expand=[('selected', [0, 0, 0, 0])])
 
-        self.notebook = ttk.Notebook(self.root, style='L1.TNotebook')
-        self.notebook.pack(fill='both', expand=True)
+        # Pipeline sidebar (left) | tabs (right), with a draggable divider
+        self.body = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=5,
+                                   bg=_C['border'], bd=0, sashrelief='flat')
+        self.body.pack(fill='both', expand=True)
+        self.sidebar = tk.Frame(self.body, bg=_C['panel'])
+        self.notebook = ttk.Notebook(self.body, style='L1.TNotebook')
+        self.body.add(self.sidebar, minsize=230, width=275)
+        self.body.add(self.notebook, minsize=400, stretch='always')
+        self._build_sidebar(self.sidebar)
 
         # Tab 1: Image Processing
         self.image_tab = tk.Frame(self.notebook, bg=_C['bg'])
@@ -509,10 +629,12 @@ class NecLabApp:
         self.contrast_slider.set(0)
         self.contrast_slider.pack(fill='x')
 
-        ctk.CTkButton(inner, text="Auto Contrast", height=30, corner_radius=6,
-                      fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
-                      font=ctk.CTkFont(size=11),
-                      command=self.apply_auto_contrast).pack(fill='x', pady=(6, 2))
+        self.auto_contrast_button = ctk.CTkButton(
+            inner, text="Auto Contrast: Off", height=30, corner_radius=6,
+            fg_color=_C['acc'], hover_color=_C['acc2'], text_color='white',
+            font=ctk.CTkFont(size=11),
+            command=self.apply_auto_contrast)
+        self.auto_contrast_button.pack(fill='x', pady=(6, 2))
         ctk.CTkButton(inner, text="Reset Adjustments", height=30, corner_radius=6,
                       fg_color=_C['card'], hover_color=_C['border'],
                       text_color=_C['text'], border_width=1, border_color=_C['border'],
@@ -853,18 +975,19 @@ class NecLabApp:
             ).pack(fill=tk.BOTH, expand=True)
             return
 
-        from corr_dendo_functions import AgglomerativeClustering, _plot_dendrogram_helper
+        from scipy.cluster.hierarchy import dendrogram
 
-        plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
-        clustering = AgglomerativeClustering(
-            distance_threshold=0, n_clusters=None
-        ).fit(plot_data.T)
+        try:
+            link, labels, method = self._dendo_linkage(self.dendo_selection_indices)
+        except ValueError as e:
+            tk.Label(self.dendo_bottom_frame, text=f"Can't build the dendrogram:\n{e}",
+                     font=('Arial', 12), bg=_C['panel'], fg=_C['sub']).pack(fill=tk.BOTH, expand=True)
+            return
         self.dendo_fig, ax = plt.subplots()
-        plt.sca(ax)
-        _plot_dendrogram_helper(
-            clustering, truncate_mode="none", count_sort='none', show_contracted='true'
-        )
-        ax.set_title(f'Dendrogram ({len(self.dendo_selection_indices)} signals)')
+        dendrogram(link, ax=ax, labels=labels, leaf_rotation=90)
+        ax.set_title(f'Dendrogram ({len(labels)} signals, {method.capitalize()} correlation, '
+                     f'{core_correlation.LINKAGE_DESCRIPTION})')
+        ax.set_ylabel('Distance')
         self.dendo_fig.tight_layout()
 
         canvas = FigureCanvasTkAgg(self.dendo_fig, master=self.dendo_bottom_frame)
@@ -872,6 +995,20 @@ class NecLabApp:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
 
+
+    def _dendo_linkage(self, column_indices):
+        """Clustering of the given columns: correlation of their
+        concatenated cross-sheet series (method from the Multiple Files
+        correlation setting), clustered like every other view
+        (neclab_core.correlation.cluster_linkage). Returns (linkage,
+        labels, correlation method)."""
+        import pandas as pd
+        indices = list(column_indices)
+        labels = [self.dendo_column_listbox.get(i) for i in indices]
+        data = pd.DataFrame(self._dendo_build_matrix(indices), columns=labels)
+        method = self.multi_xls_corr_method_var.get()
+        corr = core_correlation.correlation_matrix(data, method)
+        return core_correlation.cluster_linkage(corr), labels, method
 
     def _dendo_save_image(self):
         """Save the current dendrogram figure to a file."""
@@ -893,14 +1030,16 @@ class NecLabApp:
         """Save dendrogram clustering data (labels + linkage matrix) to a CSV or Excel file."""
         if not self.multi_xls_common_columns:
             return
-        from corr_dendo_functions import AgglomerativeClustering
         from tkinter.filedialog import asksaveasfilename
         import pandas as pd
 
-        if len(self.dendo_selection_indices) >= 2:
-            plot_data = self._dendo_build_matrix(self.dendo_selection_indices)
-        else:
-            plot_data = self._dendo_build_matrix(range(len(self.multi_xls_common_columns)))
+        indices = (self.dendo_selection_indices if len(self.dendo_selection_indices) >= 2
+                   else range(len(self.multi_xls_common_columns)))
+        try:
+            link, labels, _method = self._dendo_linkage(indices)
+        except ValueError as e:
+            messagebox.showerror("Can't Build Dendrogram", str(e))
+            return
 
         filename = asksaveasfilename(
             defaultextension=".csv",
@@ -910,28 +1049,22 @@ class NecLabApp:
         if not filename:
             return
 
-        clustering = AgglomerativeClustering(
-            distance_threshold=0, n_clusters=None
-        ).fit(plot_data.T)
-
+        order = core_correlation.dendrogram_order(link)
+        position = {leaf: pos for pos, leaf in enumerate(order)}
         df_labels = pd.DataFrame({
-            'Sample_Index': list(range(len(clustering.labels_))),
-            'Cluster_Label': clustering.labels_
+            'Sample_Index': list(range(len(labels))),
+            'Signal': labels,
+            'Dendrogram_Position': [position[i] for i in range(len(labels))],
         })
-        linkage_rows = [
-            {'Merge_Step': i, 'Child_1': int(c1), 'Child_2': int(c2),
-             'Distance': clustering.distances_[i]}
-            for i, (c1, c2) in enumerate(clustering.children_)
-        ]
-        df_linkage = pd.DataFrame(linkage_rows)
+        df_linkage = core_correlation.linkage_table(link)
 
         if filename.lower().endswith(('.xlsx', '.xls')):
             with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
-                df_labels.to_excel(writer, sheet_name='Cluster_Labels', index=False)
+                df_labels.to_excel(writer, sheet_name='Signals', index=False)
                 df_linkage.to_excel(writer, sheet_name='Linkage_Matrix', index=False)
         else:
             with open(filename, 'w', newline='') as f:
-                f.write("# Cluster Labels\n")
+                f.write("# Signals\n")
                 df_labels.to_csv(f, index=False)
                 f.write("\n# Linkage Matrix\n")
                 df_linkage.to_csv(f, index=False)
@@ -947,7 +1080,13 @@ class NecLabApp:
         win.geometry("700x900")
         frame = tk.Frame(win, bg=_C['panel'])
         frame.pack(fill=tk.BOTH, expand=True)
-        load_correlation_matrix(self.root, None, target_frame=frame)
+        result = load_correlation_matrix(self.root, None, target_frame=frame)
+        if result is None:
+            win.destroy()
+            return
+        corr_matrix, filename = result
+        self.project.set_stage("correlation", {"correlation": corr_matrix}, origin="imported",
+                               source={"path": os.path.abspath(filename)})
 
     # ==================== MULTIPLE FILES (XLS) TAB ====================
 
@@ -1166,6 +1305,11 @@ class NecLabApp:
             norm_menu.add_radiobutton(
                 label="Global (minimum of all columns and sheets)",
                 variable=self.multi_xls_norm_mode_var, value='all_global',
+                command=self._on_multi_xls_norm_mode_toggle)
+            norm_menu.add_separator()
+            norm_menu.add_radiobutton(
+                label="None (data already normalized)",
+                variable=self.multi_xls_norm_mode_var, value='none',
                 command=self._on_multi_xls_norm_mode_toggle)
             m.add_cascade(label="Normalization", menu=norm_menu)
 
@@ -2049,38 +2193,39 @@ class NecLabApp:
         the line plot's right margin aligned with it."""
         return self.multi_xls_shared_scale_var.get() or self.multi_xls_heatmap_manual_range is not None
 
+    def _multi_xls_smoothing_points(self):
+        """Convex Envelope key points when 'Smoothing' is on, else None."""
+        if not self.multi_xls_smoothing_var.get():
+            return None
+        try:
+            return self.multi_xls_smoothing_points_var.get()
+        except tk.TclError:
+            return None
+
     def _smooth_multi_xls_signal(self, values):
         """Apply Convex Envelope smoothing to a single sheet's column values
         when the 'Smoothing' checkbox is on."""
-        if not self.multi_xls_smoothing_var.get():
+        n_points = self._multi_xls_smoothing_points()
+        if n_points is None:
             return values
-        try:
-            n_points = self.multi_xls_smoothing_points_var.get()
-        except tk.TclError:
-            return values
-        from peak_functions import _convex_envelope_detrend_signal
-        return _convex_envelope_detrend_signal(values, n_points=n_points)
+        return core_normalization.smooth_convex_envelope(values, n_points=n_points)
 
     def _smooth_multi_xls_matrix(self, m):
-        """Apply _smooth_multi_xls_signal to every data column of a
-        normalized sheet matrix (samples x columns), for the heatmap - so
-        it matches the top line plot when 'Smoothing' is on. NaNs (missing
-        samples) are interpolated before smoothing, since the Convex
-        Envelope algorithm needs a finite series, then restored afterward."""
-        if not self.multi_xls_smoothing_var.get():
+        """Smooth every data column of a normalized sheet matrix (samples x
+        columns) for the heatmap, so it matches the top line plot when
+        'Smoothing' is on. Missing samples stay missing."""
+        n_points = self._multi_xls_smoothing_points()
+        if n_points is None:
             return m
-        import pandas as pd
-        out = np.array(m, dtype=float, copy=True)
-        for c in range(m.shape[1]):
-            col = m[:, c]
-            nan_mask = ~np.isfinite(col)
-            if nan_mask.all():
-                continue
-            filled = pd.Series(col).interpolate(limit_direction='both').to_numpy() if nan_mask.any() else col
-            smoothed = self._smooth_multi_xls_signal(filled)
-            smoothed[nan_mask] = np.nan
-            out[:, c] = smoothed
-        return out
+        m = np.asarray(m, dtype=float)
+        return np.column_stack([core_normalization.smooth_keeping_gaps(m[:, c], n_points)
+                                for c in range(m.shape[1])]) if m.shape[1] else m
+
+    def _multi_xls_normalized_tables(self):
+        """Every loaded sheet divided by the minimum chosen in View →
+        Normalization (neclab_core.normalization.divide_by_min_tables)."""
+        return core_normalization.divide_by_min_tables(
+            [ds['df'] for ds in self.multi_xls_datasets], self.multi_xls_norm_mode_var.get())
 
     def _on_multi_xls_norm_mode_toggle(self):
         """Redraw both plots with the chosen normalization mode: by column
@@ -2111,8 +2256,6 @@ class NecLabApp:
         because a redraw triggered only by a panel resize doesn't change
         any of this data - this avoids reprocessing every sheet on every
         resize."""
-        import pandas as pd
-
         mode = self.multi_xls_norm_mode_var.get()
         smoothing_on = self.multi_xls_smoothing_var.get()
         try:
@@ -2123,48 +2266,13 @@ class NecLabApp:
         if self._multi_xls_series_cache_key == cache_key:
             return self._multi_xls_series_cache
 
-        column_global_min = None
-        if mode == 'column_global':
-            pooled = []
-            for ds in self.multi_xls_datasets:
-                if col_name in ds['df'].columns:
-                    v = ds['df'][col_name].to_numpy(dtype=float)
-                    pooled.append(v[np.isfinite(v)])
-            if pooled:
-                pooled = np.concatenate(pooled)
-                if pooled.size:
-                    column_global_min = pooled.min()
-
-        all_global_min = None
-        if mode == 'all_global':
-            pooled = [ds['df'].to_numpy(dtype=float) for ds in self.multi_xls_datasets]
-            finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
-            if finite.size:
-                all_global_min = finite.min()
-
         series = []
-        for ds in self.multi_xls_datasets:
-            if col_name not in ds['df'].columns:
+        for ds, table in zip(self.multi_xls_datasets, self._multi_xls_normalized_tables()):
+            if col_name not in table.columns:
                 continue
-            values = ds['df'][col_name].to_numpy(dtype=float)
-            values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
+            values = core_normalization.fill_missing(table[col_name])
             if len(values) == 0:
                 continue
-
-            if mode == 'sheet':
-                all_values = ds['df'].to_numpy(dtype=float)
-                finite = all_values[np.isfinite(all_values)]
-                divisor = finite.min() if finite.size else None
-            elif mode == 'column_global':
-                divisor = column_global_min
-            elif mode == 'all_global':
-                divisor = all_global_min
-            else:  # 'local'
-                finite = values[np.isfinite(values)]
-                divisor = finite.min() if finite.size else None
-
-            if divisor is not None and divisor != 0:
-                values = values / divisor
             values = self._smooth_multi_xls_signal(values)
             series.append((ds['label'], values))
 
@@ -2382,6 +2490,8 @@ class NecLabApp:
             ax.set_ylabel('Value / minimum of the column (all sheets)')
         elif norm_mode == 'all_global':
             ax.set_ylabel('Value / global minimum (all columns and sheets)')
+        elif norm_mode == 'none':
+            ax.set_ylabel('Value (not normalized)')
         else:
             ax.set_ylabel('Value / minimum of the column')
 
@@ -2485,41 +2595,10 @@ class NecLabApp:
         if finite_vals.size == 0:
             result = (None, None, None, None)
         else:
-            matrices = []
-            if mode == 'local':
-                # Each data column normalized against its own minimum,
-                # within that sheet only.
-                for m in raw_matrices:
-                    with np.errstate(invalid='ignore'):
-                        col_mins = np.where(np.isfinite(m), m, np.nan)
-                        col_mins = np.nanmin(col_mins, axis=0, keepdims=True)
-                    col_mins = np.where(np.isfinite(col_mins) & (col_mins != 0), col_mins, 1.0)
-                    matrices.append(self._smooth_multi_xls_matrix(m / col_mins).T)
-            elif mode == 'column_global':
-                # Each data column (by position) normalized against the
-                # minimum of that same column position, pooled across
-                # every loaded sheet.
-                n_cols = max((m.shape[1] for m in raw_matrices), default=0)
-                pooled_min = np.full(n_cols, np.nan)
-                for m in raw_matrices:
-                    for c in range(m.shape[1]):
-                        col = m[:, c]
-                        finite = col[np.isfinite(col)]
-                        if finite.size:
-                            v = finite.min()
-                            pooled_min[c] = v if np.isnan(pooled_min[c]) else min(pooled_min[c], v)
-                pooled_min = np.where(np.isfinite(pooled_min) & (pooled_min != 0), pooled_min, 1.0)
-                for m in raw_matrices:
-                    matrices.append(self._smooth_multi_xls_matrix(m / pooled_min[:m.shape[1]]).T)
-            elif mode == 'all_global':
-                all_min = finite_vals.min()
-                if all_min == 0:
-                    all_min = 1.0
-                matrices = [self._smooth_multi_xls_matrix(m / all_min).T for m in raw_matrices]
-            else:  # 'sheet' (default / previous behavior)
-                for m in raw_matrices:
-                    sheet_min = float(m[np.isfinite(m)].min())
-                    matrices.append(self._smooth_multi_xls_matrix(m / sheet_min).T)
+            # Same normalization as the line plot (neclab_core.normalization),
+            # each sheet shown in full: rows = data columns, columns = samples.
+            matrices = [self._smooth_multi_xls_matrix(t.to_numpy(dtype=float)).T
+                        for t in self._multi_xls_normalized_tables()]
 
             per_sheet_ranges = []
             for m in matrices:
@@ -2637,17 +2716,18 @@ class NecLabApp:
             ax.set_xticklabels([])
         ax.set_ylabel('Column')
         norm_mode_desc = {
-            'local': 'minimum of each column in each sheet',
-            'sheet': 'minimum of each sheet',
-            'column_global': 'minimum of each column (all sheets)',
-            'all_global': 'global minimum (all columns and sheets)',
-        }.get(self.multi_xls_norm_mode_var.get(), 'minimum of each sheet')
+            'local': 'value / minimum of each column in each sheet',
+            'sheet': 'value / minimum of each sheet',
+            'column_global': 'value / minimum of each column (all sheets)',
+            'all_global': 'value / global minimum (all columns and sheets)',
+            'none': 'value, not normalized',
+        }.get(self.multi_xls_norm_mode_var.get(), 'value / minimum of each sheet')
         if manual_range is not None:
-            ax.set_title(f'All sheets (value / {norm_mode_desc}, manual range)')
+            ax.set_title(f'All sheets ({norm_mode_desc}, manual range)')
         elif shared_scale:
-            ax.set_title(f'All sheets (value / {norm_mode_desc})')
+            ax.set_title(f'All sheets ({norm_mode_desc})')
         else:
-            ax.set_title(f'All sheets (value / {norm_mode_desc}, per-sheet individual scale)')
+            ax.set_title(f'All sheets ({norm_mode_desc}, per-sheet individual scale)')
         # Same shared left/right bounds as the top line plot (see
         # _multi_xls_axes_margins), so a sample's x-position lines up
         # vertically between the two. The colorbar (when shown) goes in its
@@ -2739,62 +2819,21 @@ class NecLabApp:
             gap_rows = 20
             n_steps = len(datasets) + 1  # +1 for the final write step
 
-            # Precompute the same divisors _compute_multi_xls_series uses,
-            # so the exported values match the plot exactly for every
-            # normalization mode - not just the column currently on screen.
-            column_global_min = {}
-            if norm_mode == 'column_global':
-                for col_name in common_columns:
-                    pooled = []
-                    for ds in datasets:
-                        if col_name in ds['df'].columns:
-                            v = ds['df'][col_name].to_numpy(dtype=float)
-                            pooled.append(v[np.isfinite(v)])
-                    if pooled:
-                        pooled = np.concatenate(pooled)
-                        if pooled.size:
-                            column_global_min[col_name] = pooled.min()
-
-            all_global_min = None
-            if norm_mode == 'all_global':
-                pooled = [ds['df'].to_numpy(dtype=float) for ds in datasets]
-                finite = np.concatenate([m[np.isfinite(m)].ravel() for m in pooled]) if pooled else np.array([])
-                if finite.size:
-                    all_global_min = finite.min()
+            # Same normalization as the plot (neclab_core.normalization), for
+            # every common column - not just the one currently on screen.
+            tables = core_normalization.divide_by_min_tables([ds['df'] for ds in datasets], norm_mode)
 
             blocks = []
-            for i, ds in enumerate(datasets):
+            for i, (ds, table) in enumerate(zip(datasets, tables)):
                 report_progress(i, n_steps, f"Processing {ds['label']}  ({i + 1}/{len(datasets)})")
-
-                sheet_min = None
-                if norm_mode == 'sheet':
-                    all_values = ds['df'].to_numpy(dtype=float)
-                    finite = all_values[np.isfinite(all_values)]
-                    sheet_min = finite.min() if finite.size else None
 
                 out_cols = {}
                 for col_name in common_columns:
-                    if col_name not in ds['df'].columns:
+                    if col_name not in table.columns:
                         continue
-                    values = ds['df'][col_name].to_numpy(dtype=float)
-                    values = pd.Series(values).interpolate(limit_direction='both').to_numpy()
-
-                    if norm_mode == 'sheet':
-                        divisor = sheet_min
-                    elif norm_mode == 'column_global':
-                        divisor = column_global_min.get(col_name)
-                    elif norm_mode == 'all_global':
-                        divisor = all_global_min
-                    else:  # 'local'
-                        finite = values[np.isfinite(values)]
-                        divisor = finite.min() if finite.size else None
-
-                    if divisor is not None and divisor != 0:
-                        values = values / divisor
-
+                    values = core_normalization.fill_missing(table[col_name])
                     if smoothing_on:
-                        from peak_functions import _convex_envelope_detrend_signal
-                        values = _convex_envelope_detrend_signal(values, n_points=smoothing_points)
+                        values = core_normalization.smooth_convex_envelope(values, n_points=smoothing_points)
                     out_cols[col_name] = values
                 blocks.append(pd.DataFrame(out_cols))
 
@@ -2893,7 +2932,7 @@ class NecLabApp:
             ).pack(fill=tk.BOTH, expand=True)
             return
         df = pd.DataFrame({label: v[:min_len] for label, v in cols.items()})
-        corr = df.corr(method=method)
+        corr = core_correlation.correlation_matrix(df, method)
         self._multi_xls_corr_df = corr
         if self.multi_xls_menu_grafica is not None:
             self.multi_xls_menu_grafica.entryconfigure("Save Correlation Data...", state='normal')
@@ -3163,60 +3202,41 @@ class NecLabApp:
         self.image_label.configure(image=image_tk)
         self.image_label.image = image_tk  # Keep a reference
 
-    def _apply_brightness_contrast(self, image_array):
-        """Apply brightness and contrast to the image."""
-        brightness = self.brightness_slider.get()
-        contrast = self.contrast_slider.get()
-
-        # Convert to float for the operations
-        img = image_array.astype(np.float32)
-
-        # Apply brightness
-        img = img + brightness
-
-        # Apply contrast
-        if contrast != 0:
-            factor = (259 * (contrast + 255)) / (255 * (259 - contrast))
-            img = factor * (img - 128) + 128
-
-        # Clamp values
-        img = np.clip(img, 0, 255).astype(np.uint8)
-
-        return img
+    def _display_frame(self, slice_idx):
+        """8-bit copy of one raw frame with the display adjustments applied
+        (auto contrast, brightness, contrast). The raw stack is untouched."""
+        frame = core_display.to_display_uint8(self.img_original[slice_idx], self.img_display_range)
+        if self.auto_contrast_var.get():
+            frame = core_display.auto_contrast(frame)
+        return core_display.apply_brightness_contrast(
+            frame, self.brightness_slider.get(), self.contrast_slider.get())
 
     def _update_image_display(self):
         """Update the displayed image according to the current state."""
-        if self.img_array is None:
+        if self.img_original is None:
             return
 
         slice_idx = self.slice_slider.get()
-        current_slice = self.img_array[slice_idx, :, :].copy()
+        current_slice = self._display_frame(slice_idx)
 
-        # Apply brightness and contrast
-        current_slice = self._apply_brightness_contrast(current_slice)
-
-        # Apply threshold if enabled
         if self.threshold_enabled.get():
-            threshold_val = self.threshold_slider.get()
-            if HAS_IMAGE_MODULES:
-                pil_img = threshold_image_pil(current_slice, threshold=threshold_val)
-            else:
-                pil_img = self._apply_binarize(current_slice, threshold_val)
+            mask = core_display.threshold_mask(current_slice, self.threshold_slider.get())
+            pil_img = mask_to_pil(mask)
         else:
-            pil_img = Image.fromarray(current_slice)
-            if pil_img.mode != 'RGB':
-                pil_img = pil_img.convert('RGB')
+            pil_img = Image.fromarray(current_slice).convert('RGB')
 
         self._display_pil_image(pil_img)
 
-        # Update frame info
-        total_frames = self.img_array.shape[0]
+        total_frames = self.img_original.shape[0]
         self.frame_info_label.config(text=f"Frame: {slice_idx + 1} / {total_frames}")
+        self.auto_contrast_button.configure(
+            text=f"Auto Contrast: {'On' if self.auto_contrast_var.get() else 'Off'}")
 
     def _reset_adjustments(self):
-        """Reset the brightness and contrast adjustments."""
+        """Reset every display adjustment (brightness, contrast, auto contrast)."""
         self.brightness_slider.set(0)
         self.contrast_slider.set(0)
+        self.auto_contrast_var.set(False)
         self._update_image_display()
 
     # ==================== CALLBACKS ====================
@@ -3236,30 +3256,98 @@ class NecLabApp:
 
     # ==================== MENU COMMANDS - FILE ====================
 
-    def open_ometiff_file(self):
-        """Open an OME-TIFF file."""
-        if HAS_IMAGE_MODULES:
-            img, metadata, xml_metadata = load_ometiff_image()
-        else:
-            filename = filedialog.askopenfilename(
-                title="Open OME-TIFF",
-                filetypes=[("OME-TIFF files", "*.ome.tiff *.ome.tif"), ("All files", "*.*")]
-            )
-            if not filename:
-                return
-
-            try:
-                reader = OMETIFFReader(fpath=filename)
-                img, metadata, xml_metadata = reader.read()
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
-                return
-
-        if img is None:
+    def open_pipeline_stage(self, item_key):
+        """File → Open Pipeline Stage: start at stage 2 (map), 3 (mask) or
+        4 (cells) from a saved file, in the cell detection window. The open
+        recording, if any, is attached when its frames are the same size."""
+        it = core_stages.item(item_key)
+        stage = core_stages.stage(it.stage)
+        filename = filedialog.askopenfilename(
+            title=f"Open Stage {stage.number} - {it.title}",
+            filetypes=core_stages.open_filetypes(item_key))
+        if not filename:
             return
 
+        stack = self.img_original
+        try:
+            try:
+                loaded = core_stages.load_item(item_key, filename, core_stages.Context(stack=stack))
+            except ValidationError as e:
+                if stack is None or "same size" not in str(e):
+                    raise
+                if not messagebox.askyesno(
+                        "Different Image Size",
+                        f"{e}\n\nOpen it without the recording? "
+                        "(Signals need a recording of the same size.)"):
+                    return
+                stack = None
+                loaded = core_stages.load_item(item_key, filename, core_stages.Context())
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load File", f"{os.path.basename(filename)}:\n\n{e}")
+            return
+        show_warnings(self.root, loaded.warnings)
+
+        source = f"from {os.path.basename(filename)}"
+        imported = {"origin": "imported", "source": {"path": os.path.abspath(filename)}}
+        if item_key == "maps":
+            name = ask_choice(self.root, "Choose Map", "The file has several maps. Which one?",
+                              list(loaded.data))
+            if name is None:
+                return None
+            self.project.set_stage("features", {"maps": {name: loaded.data[name]}}, params={"map": name}, **imported)
+            kwargs = {"var_im": loaded.data[name], "map_name": name}
+        elif item_key == "mask":
+            self.project.set_stage("mask", {"mask": loaded.data}, **imported)
+            kwargs = {"mask": loaded.data}
+        else:
+            self.project.set_stage("cells", {"cells": loaded.data}, **imported)
+            kwargs = {"labels": loaded.data}
+        return self._open_detection_window(stack=stack, source=source, **kwargs)
+
+    def _open_detection_window(self, **kwargs):
+        """Open a cell detection window that reports to the project."""
+        win = open_detection_window(self.root, project=self.project,
+                                    on_recording_attached=self._on_recording_attached, **kwargs)
+        self.detection_windows.append(win)
+        self._refresh_status_window()
+        return win
+
+    def _on_recording_attached(self, stack, path, metadata):
+        """A detection window attached a recording: it becomes the project's
+        recording and is shown in the Image Processing tab."""
+        self._use_recording(stack, path, metadata)
+
+    def open_ometiff_file(self):
+        """Open a recording (OME-TIFF, TIFF or NumPy stack)."""
+        filename = ask_recording_path(self.root)
+        if not filename:
+            return
+        try:
+            img, metadata = load_recording(filename)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load Recording", f"{os.path.basename(filename)}:\n\n{e}")
+            return
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load the image:\n{str(e)}")
+            return
+        self._use_recording(img, filename, metadata)
+
+    def _use_recording(self, img, filename, metadata=None, record=True):
+        """Make `img` the current recording: record it as the project's
+        stage 0 (unless record=False, e.g. when it comes from the project
+        itself) and show it in the Image Processing tab."""
+        if record:
+            try:
+                self.project.set_recording(img, filename, metadata)
+            except OSError as e:
+                messagebox.showwarning("Recording", f"The recording couldn't be added to the project:\n{e}")
+        self._show_recording(img)
+
+    def _show_recording(self, img):
+        """Show a recording in the Image Processing tab and enable its menus."""
         self.img_original = img
-        self.img_array = img.copy()
+        self.img_array = img  # same array: the raw data is never modified
+        self.img_display_range = core_display.display_range(img)
 
         # Update the layer slider
         num_slices = self.img_array.shape[0]
@@ -3286,34 +3374,523 @@ class NecLabApp:
 
         self._update_image_display()
 
+    # ==================== PROJECT ====================
+    # The project holds every pipeline stage for one recording (see
+    # neclab_core/project.py). Detection windows report what they compute
+    # to it; these commands save/open it and show the status of each stage.
+
+    def _on_project_changed(self):
+        self._update_title()
+        self._refresh_status_window()
+
+    def _update_title(self):
+        mark = " *" if self._project_has_unsaved_changes() else ""
+        self.root.title(f"NecLab - {self.project.name}{mark}")
+
+    def _project_has_unsaved_changes(self):
+        return self.project.modified and not self.project.is_empty()
+
+    def _confirm_discard_project(self, action):
+        """Ask to save unsaved changes before `action`. True = go ahead."""
+        if not self._project_has_unsaved_changes():
+            return True
+        answer = messagebox.askyesnocancel(
+            "Unsaved Changes",
+            f"Save the changes to project '{self.project.name}' before {action}?")
+        if answer is None:
+            return False
+        if answer:
+            return self.save_project()
+        return True
+
+    def _close_detection_windows(self):
+        for win in self.detection_windows:
+            try:
+                if win.window.winfo_exists():
+                    win.window.destroy()
+            except tk.TclError:
+                pass
+        self.detection_windows = []
+
+    def _clear_recording(self):
+        """Back to "no image loaded"."""
+        self.img_original = None
+        self.img_array = None
+        self._load_default_image()
+        self.slice_slider.configure(to=0)
+        self.frame_info_label.config(text="Frame: 0 / 0")
+        self.info_text.config(text="No image loaded")
+        for label in ("Auto Contrast", "Histogram", "Binarize", "Restore Original"):
+            self.menu_imagen.entryconfig(label, state=DISABLED)
+        self.menu_bar.entryconfig("Variability Analysis", state=DISABLED)
+
+    def _set_project(self, project):
+        self._close_detection_windows()
+        self.project.remove_listener(self._on_project_changed)
+        self.project = project
+        self.project.add_listener(self._on_project_changed)
+        self._on_project_changed()
+
+    def new_project(self):
+        if not self._confirm_discard_project("starting a new project"):
+            return
+        self._set_project(Project())
+        self._clear_recording()
+
+    def save_project(self):
+        """Save to the project's folder (asks for one the first time). True if saved."""
+        if self.project.path is None:
+            return self.save_project_as()
+        return self._save_project_to(self.project.path)
+
+    def save_project_as(self):
+        if self.project.is_empty():
+            messagebox.showinfo("Save Project", "There is nothing to save yet: open a recording "
+                                "or a pipeline stage first.")
+            return False
+        path = filedialog.asksaveasfilename(
+            title="Save Project As",
+            initialfile=f"{self.project.name}{core_project.PROJECT_EXTENSION}",
+            defaultextension=core_project.PROJECT_EXTENSION,
+            filetypes=[("NecLab project", f"*{core_project.PROJECT_EXTENSION}")])
+        if not path:
+            return False
+        if not path.endswith(core_project.PROJECT_EXTENSION):
+            path += core_project.PROJECT_EXTENSION
+        return self._save_project_to(path)
+
+    def _save_project_to(self, path):
+        try:
+            self.project.save(path)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Save Project", str(e))
+            return False
+        self._update_title()
+        return True
+
+    def open_project(self):
+        if not self._confirm_discard_project("opening another project"):
+            return
+        folder = filedialog.askdirectory(title="Open Project (a .neclab folder)", mustexist=True)
+        if not folder:
+            return
+        try:
+            project, warnings = Project.load(folder)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Open Project", str(e))
+            return
+        self._set_project(project)
+        if project.status("raw") == core_project.MISSING:
+            warnings = [w for w in warnings if "not found" not in w]
+            warnings += self._locate_missing_recording()
+        show_warnings(self.root, warnings, title="Project Opened with Warnings")
+        self._restore_views_from_project()
+
+    def _locate_missing_recording(self):
+        """The project's recording wasn't found: offer to point to it."""
+        rec = self.project.get("raw")
+        if not messagebox.askyesno(
+                "Recording Not Found",
+                f"{rec.problem}.\n\nThe other stages were loaded. Locate the recording now? "
+                "(It is needed to extract signals.)"):
+            return []
+        path = filedialog.askopenfilename(title="Locate Recording",
+                                          filetypes=core_stages.open_filetypes("stack"))
+        if not path:
+            return []
+        try:
+            return self.project.relocate_recording(path)
+        except (ValidationError, ValueError, OSError) as e:
+            return [f"The recording couldn't be loaded: {e}"]
+
+    def _restore_views_from_project(self):
+        """Show the project's state: the recording in the Image Processing
+        tab, and stages 2-4 (with the cell selection and the settings used)
+        in a cell detection window."""
+        p = self.project
+        self._close_detection_windows()
+        was_modified = p.modified
+        stack = p.stack()
+        if stack is not None:
+            self._use_recording(stack, None, record=False)
+        else:
+            self._clear_recording()
+
+        maps, mask, labels = p.data("features"), p.data("mask"), p.data("cells")
+        if maps is None and mask is None and labels is None:
+            return None
+        name = None
+        if maps:
+            params = p.get("features").params
+            name = params.get("method") or params.get("map")
+            if name not in maps:
+                name = next(iter(maps))
+        try:
+            core_validation.check_compatibility(stack=stack, maps=maps, mask=mask, labels=labels)
+        except ValidationError as e:
+            messagebox.showwarning("Recording Not Attached",
+                                   f"{e}\n\nThe cell detection window opens without the recording.")
+            stack = None
+
+        restore = {"selected": p.ui.get("selected_cells") or []}
+        kwargs = {}
+        if mask is not None:
+            mask_rec = p.get("mask")
+            if mask_rec.origin == "computed" and "threshold" in mask_rec.params:
+                restore["detection_mask"] = mask
+                restore["threshold"] = mask_rec.params["threshold"]
+            else:
+                kwargs["mask"] = mask
+        cells_rec = p.get("cells")
+        if cells_rec is not None:
+            for key in ("min_size", "max_size"):
+                if key in cells_rec.params:
+                    restore[key] = cells_rec.params[key]
+        win = self._open_detection_window(
+            stack=stack, var_im=maps[name] if maps else None, map_name=name, labels=labels,
+            source=f"from project {p.name}", restore=restore, **kwargs)
+        p.modified = was_modified   # restoring the view isn't a change
+        self._update_title()
+        return win
+
+    # ---- Pipeline sidebar
+    # A permanent panel on the left of the main window: the 8 stages with
+    # their live status, the selected stage's details, and its actions (open
+    # its view / run it, save or load just that stage, clear it).
+
+    _STATUS_COLORS = {
+        core_project.DONE: "#15803d", core_project.LOADED: "#1d4ed8",
+        core_project.OUT_OF_DATE: "#b45309", core_project.MISSING: "#b91c1c",
+        core_project.NOT_RUN: "#94a3b8",
+    }
+
+    # Names short enough for the sidebar list (the full title is in the details).
+    _STAGE_SHORT_NAMES = {
+        "raw": "Recording", "preprocess": "Preprocessing", "features": "Variability map",
+        "mask": "Candidate mask", "cells": "Cells", "signals": "Signals",
+        "analysis": "Normalization", "correlation": "Correlation",
+    }
+
+    # Settings kept in the project but not printed in the sidebar details
+    # (e.g. the list of every cell's ID, which can run to hundreds of numbers).
+    _SIDEBAR_HIDDEN_PARAMS = {"signals": ("cells", "measure")}
+
+    # What each stage needs before it can be run (shown for stages not run yet).
+    _STAGE_NEEDS = {
+        "raw": "Open a recording (File → Open Recording), or open a saved project.",
+        "preprocess": "No preprocessing filters are available yet; analysis uses the raw recording.",
+        "features": "Needs the recording (stage 0): compute a variability map from it, or open a saved map.",
+        "mask": "Made from a variability map (stage 2) in the cell detection window, or open a saved mask.",
+        "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
+        "signals": "Needs cells (stage 4) and the recording (stage 0): select cells and open the correlation "
+                   "analysis, or open a signals file.",
+        "analysis": "Choose a normalization in the correlation analysis window (signals from stage 5).",
+        "correlation": "Computed in the correlation analysis window from the (normalized) signals, "
+                       "or open a correlation matrix.",
+    }
+
+    def _build_sidebar(self, parent):
+        """Create the pipeline sidebar inside `parent`."""
+        self.status_window = parent
+        header = tk.Frame(parent, bg=_C['panel'])
+        header.pack(fill='x', padx=10, pady=(10, 0))
+        tk.Label(header, text="PIPELINE", font=('Arial', 9, 'bold'), bg=_C['panel'],
+                 fg=_C['sub']).pack(side='left')
+        tk.Button(header, text="Hide", relief='flat', bg=_C['panel'], fg=_C['sub'], bd=0,
+                  command=lambda: self._set_sidebar_visible(False)).pack(side='right')
+        self._status_heading = tk.Label(parent, anchor='w', justify='left', font=('Arial', 10, 'bold'),
+                                        bg=_C['panel'], fg=_C['text'], wraplength=250)
+        self._status_heading.pack(fill='x', padx=10, pady=(2, 6))
+
+        tree = ttk.Treeview(parent, columns=("stage", "status"), show="headings", height=8,
+                            selectmode="browse")
+        tree.heading("stage", text="Stage")
+        tree.heading("status", text="Status")
+        tree.column("stage", width=165, anchor='w')
+        tree.column("status", width=85, anchor='w')
+        for status, color in self._STATUS_COLORS.items():
+            tree.tag_configure(status, foreground=color)
+        tree.pack(fill='x', padx=10)
+        tree.bind("<<TreeviewSelect>>", lambda e: self._show_status_detail())
+        tree.bind("<Double-1>", lambda e: self._run_stage_action())
+        self._status_tree = tree
+
+        self._status_detail = tk.Label(parent, anchor='nw', justify='left', bg=_C['panel'], fg=_C['text'],
+                                       wraplength=250, font=('Arial', 9))
+        self._status_detail.pack(fill='x', padx=10, pady=8)
+
+        self._stage_action_button = ctk.CTkButton(
+            parent, text="", height=30, corner_radius=6, fg_color=_C['acc'], hover_color=_C['acc2'],
+            text_color='white', font=ctk.CTkFont(size=11), command=self._run_stage_action)
+        self._stage_action_button.pack(fill='x', padx=10, pady=(0, 6))
+
+        grid = tk.Frame(parent, bg=_C['panel'])
+        grid.pack(fill='x', padx=10, pady=(0, 10))
+        grid.columnconfigure((0, 1), weight=1, uniform="sidebar_buttons")
+        for i, (text, cmd) in enumerate((("Save Stage...", self._status_save_stage),
+                                         ("Load Stage...", self._status_load_stage),
+                                         ("Clear Stage", self._status_clear_stage),
+                                         ("Save Project", self.save_project))):
+            tk.Button(grid, text=text, command=cmd).grid(row=i // 2, column=i % 2, sticky='ew', padx=1, pady=1)
+
+        self._refresh_status_window()
+        tree.selection_set("raw")
+
+    def _set_sidebar_visible(self, visible):
+        """Show or hide the pipeline sidebar (File → Show Pipeline Sidebar)."""
+        self.sidebar_visible_var.set(visible)
+        shown = str(self.sidebar) in [str(p) for p in self.body.panes()]
+        if visible and not shown:
+            self.body.add(self.sidebar, before=self.notebook, minsize=230, width=275)
+        elif not visible and shown:
+            self.body.forget(self.sidebar)
+
+    def _toggle_sidebar(self):
+        self._set_sidebar_visible(self.sidebar_visible_var.get())
+
+    def show_pipeline_status(self):
+        """Show the pipeline sidebar (and return it)."""
+        self._set_sidebar_visible(True)
+        self._refresh_status_window()
+        return self.sidebar
+
+    def _refresh_status_window(self):
+        tree = self._status_tree
+        if tree is None or not tree.winfo_exists():
+            return
+        selected = tree.selection()
+        tree.delete(*tree.get_children())
+        for row in self.project.summary():
+            tree.insert("", "end", iid=row["key"], tags=(row["status"],),
+                        values=(f"{row['number']} · {self._STAGE_SHORT_NAMES[row['key']]}", row["status"]))
+        if selected and tree.exists(selected[0]):
+            tree.selection_set(selected[0])
+        mark = " *" if self._project_has_unsaved_changes() else ""
+        where = self.project.path or "not saved yet"
+        self._status_heading.config(text=f"{self.project.name}{mark}\n{where}")
+        self._show_status_detail()
+
+    def _status_selected_key(self, warn=True):
+        sel = self._status_tree.selection() if self._status_tree is not None else ()
+        if not sel:
+            if warn:
+                messagebox.showinfo("Pipeline", "Select a stage first.", parent=self.status_window)
+            return None
+        return sel[0]
+
+    def _show_status_detail(self):
+        key = self._status_selected_key(warn=False)
+        if key is None:
+            self._status_detail.config(text="Select a stage to see its details.")
+            self._stage_action_button.configure(text="", state='disabled')
+            return
+        rec = self.project.get(key)
+        stage = core_stages.stage(key)
+        status = self.project.status(key)
+        parts = [f"{stage.number} · {stage.title} — {status}", stage.description]
+        if rec is None:
+            parts.append(self._STAGE_NEEDS[key])
+        else:
+            parts.append(f"Source: {rec.describe_source()}")
+            if rec.updated_at:
+                parts.append(f"Updated: {rec.updated_at.replace('T', ' ')}")
+            if rec.problem:
+                parts.append(f"Problem: {rec.problem}")
+            shown = {k: v for k, v in rec.params.items() if k not in self._SIDEBAR_HIDDEN_PARAMS.get(key, ())}
+            if shown:
+                parts.append("Settings: " + ", ".join(f"{k}={v}" for k, v in shown.items()))
+            if status == core_project.OUT_OF_DATE:
+                parts.append("Something it was computed from has changed since: recompute it to update.")
+        self._status_detail.config(text="\n".join(parts))
+        label, action = self._stage_action(key)
+        self._stage_action_button.configure(text=label, state='normal' if action else 'disabled')
+
+    # ---- what each stage's action button does
+
+    def _active_detection_window(self):
+        for win in reversed(self.detection_windows):
+            try:
+                if win.window.winfo_exists():
+                    return win
+            except tk.TclError:
+                pass
+        return None
+
+    def _stage_action(self, key):
+        """(button label, callable or None) for a stage: open its view,
+        run it, or load it, depending on what is available."""
+        p = self.project
+        win = self._active_detection_window()
+        if key == "raw":
+            if p.status("raw") == core_project.MISSING:
+                return "Locate Recording...", self._locate_and_restore_recording
+            if self.img_original is not None:
+                return "Show Recording", lambda: self.notebook.select(self.image_tab)
+            return "Open Recording...", self.open_ometiff_file
+        if key == "preprocess":
+            return "No preprocessing filters yet", None
+        if key in ("features", "mask", "cells"):
+            if win is not None:
+                return "Show Cell Detection Window", lambda: self._lift_window(win.window)
+            if any(p.data(k) is not None for k in ("features", "mask", "cells")):
+                return "Open Cell Detection Window", self._restore_views_from_project
+            if key == "features" and self.img_original is not None:
+                return "Compute Variability Map...", self._ask_and_compute_map
+            item_key, label = {"features": ("maps", "Open Variability Map..."),
+                               "mask": ("mask", "Open Candidate Mask..."),
+                               "cells": ("cells", "Open Cells...")}[key]
+            return label, lambda: self.open_pipeline_stage(item_key)
+        # stages 5-7
+        if win is not None and win.labels is not None and win.img_array is not None:
+            return "Open Signals & Correlation", lambda: self._open_signal_analysis(win)
+        if p.data(key) is not None:
+            if key == "correlation":
+                return "View Correlation Matrix", self._view_project_correlation
+            return "View in Multiple Files", lambda: self._view_signals_in_multiple_files(key)
+        if key in ("signals", "analysis"):
+            return "Open Signals Files...", self.open_multiple_xls_files
+        return "Open Correlation Matrix...", self.load_correlation_matrix_wrapper
+
+    def _run_stage_action(self):
+        key = self._status_selected_key()
+        if key is None:
+            return
+        _label, action = self._stage_action(key)   # recomputed: windows may have opened/closed
+        if action is not None:
+            action()
+        self._refresh_status_window()
+
+    @staticmethod
+    def _lift_window(window):
+        window.deiconify()
+        window.lift()
+        window.focus_force()
+
+    def _locate_and_restore_recording(self):
+        warnings = self._locate_missing_recording()
+        show_warnings(self.root, warnings)
+        if self.project.status("raw") != core_project.MISSING:
+            self._restore_views_from_project()
+
+    def _ask_and_compute_map(self):
+        names = get_variability_methods()
+        choice = ask_choice(self.root, "Variability Map", "Which variability measure?", names)
+        if choice is not None:
+            self.show_variability_menu(names.index(choice))
+
+    def _open_signal_analysis(self, win):
+        """Stages 5-7 from the cell detection window: signals of the
+        selected cells, their normalization and correlation."""
+        if not win.selected_clusters:
+            if not messagebox.askyesno("No Cells Selected",
+                                       f"No cells are selected. Use all {len(win.cell_pix)} cells?"):
+                return
+            win.select_all_clusters()
+        self._lift_window(win.window)
+        win.use_selected_clusters()
+
+    def _view_signals_in_multiple_files(self, key):
+        """Show the project's signals (stage 5) or normalized signals (stage 6)
+        in the Multiple Files tab."""
+        df = self.project.data(key)
+        if df is None:
+            return
+        title = core_stages.stage(key).title
+        table = df.copy()
+        table.columns = [str(i) for i in range(table.shape[1])]   # Multiple Files matches columns by position
+        datasets = [{'file': self.project.path or self.project.name, 'sheet': title,
+                     'label': f"{self.project.name} - {title}", 'df': table,
+                     'column_names': list(table.columns)}]
+        if key == "analysis":
+            self.multi_xls_norm_mode_var.set('none')     # already normalized
+        self._on_multi_xls_load_complete(datasets)
+
+    def _view_project_correlation(self):
+        """Show the project's correlation matrix (stage 7) with its dendrogram."""
+        corr = self.project.data("correlation")
+        if corr is None:
+            return None
+        from corr_dendo_functions import _plot_correlation_helper
+        win = tk.Toplevel(self.root)
+        win.title(f"Correlation Matrix - {self.project.name}")
+        win.geometry("700x900")
+        frame = tk.Frame(win, bg=_C['panel'])
+        frame.pack(fill=tk.BOTH, expand=True)
+        method = self.project.get("correlation").params.get("method") or "loaded"
+        size = min(10, max(5, corr.shape[0] * 0.5))
+        _plot_correlation_helper(corr, size, self.root, None, is_precomputed_corr=True,
+                                 corr_method=str(method), target_frame=frame)
+        return win
+
+    def _status_save_stage(self):
+        key = self._status_selected_key()
+        if key is None:
+            return
+        folder = filedialog.asksaveasfilename(
+            parent=self.status_window, title="Save Stage (a new folder)",
+            initialfile=core_project.stage_folder_name(key))
+        if not folder:
+            return
+        try:
+            self.project.save_stage(key, folder)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Save Stage", str(e), parent=self.status_window)
+            return
+        messagebox.showinfo("Stage Saved", f"Saved to:\n{folder}", parent=self.status_window)
+
+    def _status_load_stage(self):
+        folder = filedialog.askdirectory(parent=self.status_window, mustexist=True,
+                                         title="Load Stage (a saved stage folder or a .neclab project)")
+        if not folder:
+            return
+        key = None
+        try:
+            if os.path.isfile(os.path.join(folder, core_project.MANIFEST)):
+                keys = Project.stages_in_project_folder(folder)
+                if not keys:
+                    raise ValidationError("That project has no stages to load.")
+                labels = [f"{core_stages.stage(k).number} · {core_stages.stage(k).title}" for k in keys]
+                choice = ask_choice(self.status_window, "Load Stage", "Which stage of that project?", labels)
+                if choice is None:
+                    return
+                key = keys[labels.index(choice)]
+            key, warnings = self.project.load_stage(folder, key)
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load Stage", str(e), parent=self.status_window)
+            return
+        show_warnings(self.status_window, warnings)
+        if key in ("features", "mask", "cells"):
+            self._restore_views_from_project()
+
+    def _status_clear_stage(self):
+        key = self._status_selected_key()
+        if key is None or self.project.get(key) is None:
+            return
+        stage = core_stages.stage(key)
+        if not messagebox.askyesno("Clear Stage", f"Remove stage {stage.number} ({stage.title}) "
+                                   "from the project?", parent=self.status_window):
+            return
+        self.project.clear_stage(key)
+        if key in ("raw", "preprocess", "features", "mask", "cells"):
+            self._restore_views_from_project()
+
     # ==================== MENU COMMANDS - IMAGE ====================
 
     def restore_original(self):
-        """Restore the original image."""
+        """Show the image exactly as loaded (turns off every display adjustment)."""
         if self.img_original is None:
             messagebox.showwarning("Warning", "No original image loaded")
             return
-        self.img_array = self.img_original.copy()
+        self.threshold_enabled.set(False)
         self._reset_adjustments()
 
     def apply_auto_contrast(self):
-        """Apply auto contrast to the image."""
-        if self.img_array is None:
+        """Toggle auto contrast. It is display-only: each frame is rescaled
+        as it is shown, and the analysis keeps using the raw data."""
+        if self.img_original is None:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-
-        if HAS_IMAGE_MODULES:
-            # Use the processing module if available
-            self.img_array = auto_contrast(self.img_array)
-        else:
-            # Fallback: apply auto contrast frame by frame
-            for i in range(self.img_array.shape[0]):
-                im_pil = Image.fromarray(self.img_array[i, :, :])
-                if im_pil.mode != 'RGB':
-                    im_pil = im_pil.convert('RGB')
-                im2 = ImageOps.autocontrast(im_pil, cutoff=2, ignore=2).convert('L')
-                self.img_array[i, :, :] = np.array(im2)
-
+        self.auto_contrast_var.set(not self.auto_contrast_var.get())
         self._update_image_display()
 
     def show_histogram(self):
@@ -3380,29 +3957,23 @@ class NecLabApp:
         ).pack(side=tk.LEFT, padx=5)
 
     def _apply_binarize(self, var_im, threshold):
-        """Apply binarization to the image based on the threshold."""
-        if len(var_im.shape) == 2:
-            # It's a 2D (variance) image
-            binary = (var_im > threshold).astype(np.uint8) * 255
-        else:
-            # It's a regular image
-            binary = (var_im > threshold).astype(np.uint8) * 255
-
-        pil_img = Image.fromarray(binary)
-        if pil_img.mode != 'RGB':
-            pil_img = pil_img.convert('RGB')
-        return pil_img
+        """Binary (black/white) PIL image of the pixels above the threshold."""
+        return mask_to_pil(core_display.threshold_mask(var_im, threshold))
 
     def show_variability_menu(self, method_index):
-        """Show the full variability analysis."""
-        if self.img_array is None or len(self.img_array) == 0:
+        """Show the full variability analysis (always on the raw data)."""
+        if self.img_original is None or len(self.img_original) == 0:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
-        show_variability_analysis(self.img_array, method_index, self.root)
+        win = show_variability_analysis(self.img_original, method_index, self.root, project=self.project,
+                                        on_recording_attached=self._on_recording_attached)
+        if win is not None:
+            self.detection_windows.append(win)
+            self._refresh_status_window()
 
     # ==================== HELP / AUTO-UPDATER ====================
 
-    _REPO = "sergiocruzunamia/neclabunam"
+    _REPO = _REPO
     _UPDATABLE_FILES = [
         "interface3.py",
         "peak_functions.py",
@@ -3412,7 +3983,7 @@ class NecLabApp:
         "image_loader.py",
         "image_processing.py",
         "multi_xls_helpers.py",
-    ]
+    ] + _CORE_FILES
 
     def _get_local_sha(self):
         version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
@@ -3444,10 +4015,10 @@ class NecLabApp:
                 data = json.loads(resp.read().decode())
             remote_sha = data["sha"]
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror(
-                "Update Check Failed",
-                f"Could not reach GitHub:\n{e}"
-            ))
+            # Format now: Python deletes `e` when the except block ends,
+            # before the lambda runs on the Tk thread.
+            msg = f"Could not reach GitHub:\n{e}"
+            self.root.after(0, lambda: messagebox.showerror("Update Check Failed", msg))
             return
 
         local_sha = self._get_local_sha()
@@ -3471,20 +4042,8 @@ class NecLabApp:
                          args=(remote_sha,), daemon=True).start()
 
     def _download_and_restart(self, remote_sha):
-        base_url = f"https://raw.githubusercontent.com/{self._REPO}/main/"
         app_dir = os.path.dirname(os.path.abspath(__file__))
-        errors = []
-        for filename in self._UPDATABLE_FILES:
-            url = base_url + filename
-            dest = os.path.join(app_dir, filename)
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "NecLab-Updater/1.0"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    content = resp.read()
-                with open(dest, "wb") as f:
-                    f.write(content)
-            except Exception as e:
-                errors.append(f"{filename}: {e}")
+        errors = _download_repo_files(self._UPDATABLE_FILES, app_dir)
 
         if errors:
             msg = "Some files could not be downloaded:\n" + "\n".join(errors)

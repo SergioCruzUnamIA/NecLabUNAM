@@ -147,7 +147,19 @@ You can also load an already-computed correlation matrix with `File → Load Cor
 ```
 NecLabUNAM/
 ├── interface3.py               # Main graphical interface (entry point)
-├── variability_functions.py    # Variability methods and cell clustering
+├── neclab_core/                # Analysis code with no user interface (see below)
+│   ├── project.py              #   Project: every stage's data + status, saved as a .neclab folder
+│   ├── stages.py               #   Pipeline stages: what each reads/writes, load/save any stage
+│   ├── formats.py              #   File readers/writers for every stage
+│   ├── validation.py           #   Checks on loaded data, alone and against other stages
+│   ├── display.py              #   Display-only adjustments (never change the data)
+│   ├── variability.py          #   The 7 variability maps + sharpening
+│   ├── segmentation.py         #   Cell detection -> label image with permanent IDs
+│   ├── signals.py              #   Per-cell signal extraction
+│   ├── normalization.py        #   Normalization + smoothing, shared by every view
+│   └── correlation.py          #   Correlation + clustering (Ward on 1 − |r|), shared by every view
+├── tests/                      # Tests for neclab_core (pytest)
+├── variability_functions.py    # Cell detection window (UI)
 ├── peak_functions.py           # Peak detection (7 methods) and smoothing
 ├── corr_dendo_functions.py     # Correlations, dendrograms, and time series
 ├── multi_xls_helpers.py        # Loading and processing for the Multiple Files tab
@@ -166,6 +178,67 @@ NecLabUNAM/
 │   ├── MANUAL_USUARIO.md       # Complete user manual (Español)
 │   └── USER_MANUAL.md          # Full user manual (English)
 └── README.md                   # This file
+```
+
+### The `neclab_core` package
+
+All calculations live in `neclab_core/`, which never imports tkinter or opens a window: its functions take arrays, tables or file paths and return arrays or tables. The tabs and windows only call these functions and draw the results, so the same code can be used from a notebook or a script:
+
+```python
+from neclab_core import formats, variability, segmentation, signals, normalization, correlation
+
+stack, metadata = formats.load_ometiff("recording.ome.tif")          # (frames, height, width)
+var_im, threshold, name = variability.calculate_variability(stack, method=1)
+labels, mask = segmentation.detect_cells(var_im, variability.sharpen(var_im),
+                                         threshold, min_size=20, max_size=200, split="kmeans")
+traces = signals.extract_signals(stack, labels)                       # frames x cell_<id>
+formats.write_signals(traces, "signals.csv")
+formats.save_cells(labels, "cells.tif")                               # + cells.csv
+dff = normalization.normalize_signals(traces, "delta_f_over_f0")      # stage 6 (ΔF/F0)
+corr = correlation.correlation_matrix(dff, "pearson")
+tree = correlation.cluster_linkage(corr)                              # Ward on 1 − |r|, as in the app
+```
+
+Cells are represented by a **label image** (0 = background, n = cell with ID n). IDs are permanent: they are numbered in reading order, saved with the cells, and used as the `cell_<id>` column names of every signals file.
+
+**Starting at any stage.** Each stage's output can be saved and loaded back, so the analysis can start from a recording, a variability map, a mask, cells (including ImageJ ROIs), a signals table or a correlation matrix. `neclab_core.stages` is the single entry point; every load is validated, including against what is already loaded (frame size, frame count, cell IDs), and bad files raise `ValidationError` with a readable message:
+
+```python
+from neclab_core import stages
+
+ctx = stages.Context(stack=stack)                          # what is already loaded
+cells = stages.load_item("cells", "RoiSet.zip", ctx)       # ImageJ ROIs -> label image
+traces = signals.extract_signals(stack, cells.data)
+stages.save_item("signals", traces, "signals_raw.csv")
+corr = stages.load_item("correlation", "correlation.csv")  # .data, .warnings
+```
+
+In the app: **File → Open Pipeline Stage**, and the **Data** / **Export** menus of the cell detection window.
+
+**Projects.** `neclab_core.project.Project` holds every stage for one recording, with the settings used, where it came from and its status (*not run*, *done*, *loaded*, *out of date* when something it was computed from has changed, *missing*). It saves to a `<name>.neclab` folder (`manifest.json` + one subfolder per stage, in the formats above; the recording is referenced by path and checksum, not copied), and single stages can be saved and loaded on their own:
+
+```python
+from neclab_core.project import Project
+
+p = Project()
+p.set_recording(stack, "recording.ome.tif")
+p.set_stage("cells", {"cells": labels}, params={"split": "kmeans", "min_size": 20})
+p.set_stage("signals", {"signals": traces})
+p.save("experiment.neclab")
+
+p, warnings = Project.load("experiment.neclab")
+p.status("signals")           # "done", or "out of date" if the cells changed since
+```
+
+In the app: **File → New / Open / Save Project**, and the **pipeline sidebar** on the left of the main window, which lists the 8 stages with their live status and, for the selected stage, its details, a button that opens or runs it, and Save / Load / Clear Stage.
+
+![Pipeline sidebar](docs/images/pipeline_sidebar.png)
+
+### Running the tests
+
+```
+pip install pytest
+python -m pytest tests
 ```
 
 ---

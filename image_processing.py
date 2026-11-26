@@ -1,37 +1,38 @@
 # image_processing.py
+"""
+PIL/matplotlib helpers for showing images. The calculations are in
+neclab_core.display (display-only adjustments) and neclab_core.variability.
+"""
 
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image, ImageOps
+from PIL import Image
+
+from neclab_core import display
+
 
 def auto_contrast(img_array, cutoff=2, ignore=2):
     """
-    Applies auto-contrast to each slice of the image stack.
-    Works on a COPY so the original data isn't modified,
-    since the contrast is only for display, not processing.
+    Returns a display COPY of the stack with auto contrast applied to each
+    frame separately. Only for viewing: the per-frame rescaling changes
+    intensities over time, so the result must never be used for analysis.
 
     Args:
         img_array (numpy.ndarray): Image stack with shape (num_slices, height, width).
         cutoff (int): Percentage of pixels to clip from each end of the histogram.
-        ignore (int): Number of pixels to ignore at the ends of the histogram.
+        ignore (int): Background value left out of the histogram.
 
     Returns:
-        numpy.ndarray: Copy of the array with auto-contrast applied.
+        numpy.ndarray: 8-bit copy of the stack with auto contrast applied.
     """
-    result = img_array.copy()
-    for i in range(result.shape[0]):
-        im_pil = Image.fromarray(result[i, :, :])
-        if im_pil.mode != 'RGB':
-            im_pil = im_pil.convert('RGB')
-        im2 = ImageOps.autocontrast(im_pil, cutoff=cutoff, ignore=ignore).convert('L')
-        result[i, :, :] = np.array(im2)
-    return result
+    value_range = display.display_range(img_array)
+    return np.stack([display.auto_contrast(display.to_display_uint8(frame, value_range), cutoff, ignore)
+                     for frame in img_array])
 
 
 def show_histogram(img_array):
     """
-    Shows the histogram of the variance of the image stack.
-    Computes the variance along axis 0 (stack) and then plots the 2D histogram.
+    Shows the histogram of the per-pixel variance of the image stack.
 
     Args:
         img_array (numpy.ndarray): Image stack with shape (num_slices, height, width).
@@ -44,53 +45,22 @@ def show_histogram(img_array):
     plt.show()
 
 
+def mask_to_pil(mask):
+    """Boolean mask -> black/white RGB PIL image."""
+    return Image.fromarray(display.mask_to_uint8(mask)).convert('RGB')
+
+
 def binarize_variance(img_array, threshold=150):
     """
-    Computes the variance along the stack (axis 0) and creates a 2D binary
-    image using the given threshold.
-
-    Args:
-        img_array (numpy.ndarray): Image stack with shape (num_slices, height, width).
-        threshold (int): Threshold for binarizing the variance.
-
-    Returns:
-        PIL.Image: Resulting binary (RGB) image.
+    Binary RGB PIL image of the pixels whose variance over the stack is
+    above `threshold`.
     """
-    # Compute the variance per pixel along axis 0
-    var_im = np.var(img_array, axis=0)
-    # Convert to a 1D vector
-    var_im_flat = var_im.ravel()
-    # Generate the binary mask according to the threshold
-    bin_mask = (var_im_flat > threshold).astype(np.uint8) * 255
-    # Reshape back to 2D
-    bin_mask_2d = bin_mask.reshape(var_im.shape)
-    # Create the PIL image
-    pil_img = Image.fromarray(bin_mask_2d)
-    if pil_img.mode != 'RGB':
-        pil_img = pil_img.convert('RGB')
-    return pil_img
+    return mask_to_pil(display.threshold_mask(np.var(img_array, axis=0), threshold))
+
 
 def threshold_image_pil(image_2d, threshold=200):
     """
-    Applies a simple threshold to a 2D image (one slice) and returns the binary image as a PIL.Image.
-
-    Args:
-        image_2d (numpy.ndarray): 2D image (height x width).
-        threshold (int): Threshold value. Pixels with value > threshold become 255 (white)
-                         and the rest become 0 (black).
-
-    Returns:
-        PIL.Image: Binary image in RGB mode.
+    Binary RGB PIL image of the pixels of a 2D image above `threshold`
+    (255 = above, 0 = at or below).
     """
-    # Flatten the image to a 1D vector
-    arr_flat = image_2d.ravel()
-    # Apply the threshold and multiply by 255 to get values of 0 or 255
-    bin_mask = (arr_flat > threshold).astype(np.uint8) * 255
-    # Reconstruct the image in its original shape (2D)
-    bin_mask_2d = bin_mask.reshape(image_2d.shape)
-    # Create the PIL image
-    pil_img = Image.fromarray(bin_mask_2d)
-    # The image must be in RGB mode for compatibility with Tkinter
-    if pil_img.mode != 'RGB':
-        pil_img = pil_img.convert('RGB')
-    return pil_img
+    return mask_to_pil(display.threshold_mask(image_2d, threshold))

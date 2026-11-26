@@ -1,14 +1,16 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import scipy.cluster.hierarchy as sch
 import numpy as np
-from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import dendrogram
 import tkinter as tk
 from tkinter import ttk
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 from tkinter import messagebox
+
+from neclab_core import correlation as core_correlation
+from neclab_core import stages as core_stages
+from neclab_core.validation import ValidationError
 
 def get_main_plot_frame(main_window):
     """
@@ -34,49 +36,24 @@ def get_main_plot_frame(main_window):
 
 def correlation_pearson(data):
     plt.close('all')
-    df = pd.DataFrame(data)
-    corr1 = df.corr(method='pearson')
-    return corr1
+    return core_correlation.correlation_matrix(data, 'pearson')
 
 def correlation_kendall(data):
     plt.close('all')
-    df = pd.DataFrame(data)
-    corr1 = df.corr(method='kendall')
-    return corr1
+    return core_correlation.correlation_matrix(data, 'kendall')
 
 def correlation_spearman(data):
     plt.close('all')
-    df = pd.DataFrame(data)
-    corr1 = df.corr(method='spearman')
-    return corr1
+    return core_correlation.correlation_matrix(data, 'spearman')
 
-def _plot_dendrogram_helper(model, **kwargs):
-    """
-    Helper function to create and plot a dendrogram from an AgglomerativeClustering model.
-    
-    Args:
-        model: Fitted AgglomerativeClustering model
-        **kwargs: Additional arguments passed to scipy.cluster.hierarchy.dendrogram
-    """
-    # Create linkage matrix and then plot the dendrogram
-    # create the counts of samples under each node
-    counts = np.zeros(model.children_.shape[0])
-    n_samples = len(model.labels_)
-    for i, merge in enumerate(model.children_):
-        current_count = 0
-        for child_idx in merge:
-            if child_idx < n_samples:
-                current_count += 1  # leaf node
-            else:
-                current_count += counts[child_idx - n_samples]
-        counts[i] = current_count
+def _plot_dendrogram_helper(corr, ax=None):
+    """Draw the dendrogram of a correlation matrix with the clustering
+    shared by every view (neclab_core.correlation.cluster_linkage)."""
+    labels = [str(c) for c in corr.columns] if hasattr(corr, "columns") else None
+    dendrogram(core_correlation.cluster_linkage(corr), labels=labels, ax=ax, leaf_rotation=90)
+    if ax is not None:
+        ax.set_ylabel("Distance")
 
-    linkage_matrix = np.column_stack(
-        [model.children_, model.distances_, counts]
-    ).astype(float)
-
-    # Plot the corresponding dendrogram
-    dendrogram(linkage_matrix, **kwargs)
 
 def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, corr_method=None, target_frame=None):
     '''Plot a graphical correlation matrix for a dataframe.
@@ -101,19 +78,20 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
     else:
         corr_func = df.corr()  # compute correlation matrix from data
     
-    # For dendrogram, use correlation matrix values for clustering
-    data_for_dendro = corr_func.values
-    
     # Create figure with two subplots: dendrogram on top, correlation below (50/50 split)
     fig = plt.figure(figsize=(size, size * 2))
     
     # Dendrogram subplot (top, 50%)
     ax_dendro = plt.subplot2grid((2, 1), (0, 0), rowspan=1)
     
-    # Compute dendrogram from correlation matrix
-    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data_for_dendro)
-    _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    ax_dendro.set_title('Dendrogram')
+    # Dendrogram of the correlation matrix (shared clustering)
+    try:
+        _plot_dendrogram_helper(corr_func, ax=ax_dendro)
+        ax_dendro.set_title(f'Dendrogram ({core_correlation.LINKAGE_DESCRIPTION})')
+    except ValueError as e:
+        ax_dendro.text(0.5, 0.5, f"Can't build the dendrogram:\n{e}", ha='center', va='center',
+                       transform=ax_dendro.transAxes, wrap=True)
+        ax_dendro.set_title('Dendrogram')
     
     # Correlation matrix subplot (bottom, 50%)
     ax_corr = plt.subplot2grid((2, 1), (1, 0), rowspan=1)
@@ -204,9 +182,8 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
             fig_dendro = plt.figure(figsize=(size, size))
             ax_dendro_temp = fig_dendro.add_subplot(111)
             plt.sca(ax_dendro_temp)
-            clustering_temp = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data_for_dendro)
-            _plot_dendrogram_helper(clustering_temp, truncate_mode="none", count_sort='none', show_contracted='true')
-            ax_dendro_temp.set_title('Dendrogram')
+            _plot_dendrogram_helper(corr_func, ax=ax_dendro_temp)
+            ax_dendro_temp.set_title(f'Dendrogram ({core_correlation.LINKAGE_DESCRIPTION})')
             fig_dendro.savefig(filename)
             plt.close(fig_dendro)
     
@@ -265,157 +242,6 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
     save_all_button.pack(side=tk.LEFT, padx=5)
 
     return canvas, fig
-
-def plot_correlation(data, corr, root, canvas, corr_method=None):
-    # Clean up by clearing the plot frame (don't rely on stale canvas reference)
-    plot_frame = get_main_plot_frame(root)
-    for widget in list(plot_frame.winfo_children()):
-        widget.destroy()
-    plt.close('all')
-
-    # Also remove any existing button frames from root
-    for widget in list(root.winfo_children()):
-        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
-            widget.destroy()
-
-    df = pd.DataFrame(data)
-    X = corr.values
-    d = sch.distance.pdist(X)   # vector of ('55' choose 2) pairwise distances
-    L = sch.linkage(d, method='complete')
-    ind = sch.fcluster(L, 50, criterion='maxclust')
-    columns = [df.columns.tolist()[i] for i in list((np.argsort(ind)))]
-    df = df.reindex(columns, axis=1)
-    size = 5
-    canvas, _ = _plot_correlation_helper(df, size, root, canvas, corr_method=corr_method)
-    return canvas
-
-def plot_dendogram(data, root, canvas):
-    # Remove any existing buttons
-    for widget in list(root.winfo_children()):
-        if isinstance(widget, tk.Frame) and hasattr(widget, 'peak_button_frame'):
-            widget.destroy()
-    
-    # Get the main plot frame
-    plot_frame = get_main_plot_frame(root)
-    
-    # Clear ALL widgets from the plot frame
-    for widget in list(plot_frame.winfo_children()):
-        widget.destroy()
-    
-    # Close all matplotlib figures
-    plt.close('all')
-
-    clustering = AgglomerativeClustering(distance_threshold=0, n_clusters=None).fit(data.transpose())
-    clustering.labels_.shape
-    # plot the top three levels of the dendrogram
-    _plot_dendrogram_helper(clustering, truncate_mode="none", count_sort='none', show_contracted='true')
-    fig = plt.gcf()
-    
-    # Create canvas in the plot frame using pack
-    canvas = FigureCanvasTkAgg(fig, master=plot_frame)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    
-    # Get default filename from visualization_helpers if available
-    def get_default_dendogram_name(extension):
-        try:
-            from visualization_helpers import loaded_filename
-            if loaded_filename:
-                import os
-                base_name = os.path.splitext(os.path.basename(loaded_filename))[0]
-                return f"{base_name}_dendrogram{extension}"
-        except:
-            pass
-        return f"dendrogram{extension}"
-    
-    # Add save buttons for dendrogram
-    def _save_dendrogram_image():
-        default_name = get_default_dendogram_name('.png')
-        filename = asksaveasfilename(
-            initialfile=default_name,
-            defaultextension=".png",
-            filetypes=[
-                ("PNG Image", "*.png"),
-                ("PDF Document", "*.pdf"),
-                ("TIFF Image", "*.tiff"),
-                ("SVG Vector", "*.svg"),
-                ("EPS Vector", "*.eps"),
-                ("All Files", "*.*")
-            ]
-        )
-        if filename:
-            fig.savefig(filename)
-    
-    def _save_dendrogram_csv():
-        """Save dendrogram clustering data to a CSV or Excel file"""
-        default_name = get_default_dendogram_name('.csv')
-        filename = asksaveasfilename(
-            initialfile=default_name,
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All Files", "*.*")],
-            title="Save Dendrogram Data"
-        )
-
-        if filename:
-            # Create DataFrame with clustering information
-            # Include cluster labels and linkage information
-            df_data = {
-                'Sample_Index': list(range(len(clustering.labels_))),
-                'Cluster_Label': clustering.labels_
-            }
-
-            df = pd.DataFrame(df_data)
-
-            # Add linkage matrix information as separate section
-            linkage_data = []
-            for i, (child1, child2) in enumerate(clustering.children_):
-                linkage_data.append({
-                    'Merge_Step': i,
-                    'Child_1': int(child1),
-                    'Child_2': int(child2),
-                    'Distance': clustering.distances_[i]
-                })
-
-            df_linkage = pd.DataFrame(linkage_data)
-
-            if filename.lower().endswith(('.xlsx', '.xls')):
-                with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='Cluster_Labels', index=False)
-                    df_linkage.to_excel(writer, sheet_name='Linkage_Matrix', index=False)
-            else:
-                # Save both dataframes to CSV
-                with open(filename, 'w', newline='') as f:
-                    f.write("# Cluster Labels\n")
-                    df.to_csv(f, index=False)
-                    f.write("\n# Linkage Matrix\n")
-                    df_linkage.to_csv(f, index=False)
-
-            messagebox.showinfo("Success", f"Dendrogram data saved to {filename}")
-    
-    # Create button frame for dendrogram inside the plot frame using pack
-    button_frame = tk.Frame(plot_frame)
-    button_frame.peak_button_frame = True  # Mark for cleanup
-    button_frame.pack(fill=tk.X, padx=5, pady=5)
-    
-    # Create save buttons
-    save_img_button = tk.Button(
-        button_frame,
-        text="Save Image",
-        command=_save_dendrogram_image
-    )
-    save_img_button.pack(side=tk.LEFT, padx=5)
-    
-    save_csv_button = tk.Button(
-        button_frame,
-        text="Save CSV",
-        command=_save_dendrogram_csv
-    )
-    save_csv_button.pack(side=tk.LEFT, padx=5)
-    
-    # Configure button frame
-    root.grid_rowconfigure(1, weight=0)  # Don't expand button row
-    
-    return canvas
 
 def plot_time_series(norm_data, column_names=None, notebook=None):
     if notebook is not None:
@@ -683,65 +509,51 @@ def load_correlation_matrix(root, canvas, target_frame=None):
     Load a correlation matrix from a CSV file and display it.
     'target_frame', if given, is drawn into directly instead of the frame
     _plot_correlation_helper falls back to finding inside 'root'.
+    Returns (matrix DataFrame, filename), or None if nothing was loaded.
     """
     try:
         # Open file dialog to select correlation matrix file
         filename = askopenfilename(
             title="Load Correlation Matrix",
-            filetypes=[
-                ("CSV files", "*.csv"),
-                ("Excel files", "*.xlsx"),
-                ("All files", "*.*")
-            ]
+            filetypes=core_stages.open_filetypes("correlation")
         )
-        
+
         if not filename:
             return  # User cancelled
-        
-        # Load the correlation matrix based on file extension
-        if filename.lower().endswith('.csv'):
-            corr_matrix = pd.read_csv(filename, index_col=0)
-        elif filename.lower().endswith(('.xlsx', '.xls')):
+
+        options = {}
+        if filename.lower().endswith(('.xlsx', '.xls')):
             sheet_names = pd.ExcelFile(filename).sheet_names
-            sheet_name = sheet_names[0]
+            options['sheet_name'] = sheet_names[0]
             if len(sheet_names) > 1:
                 from visualization_helpers import _show_sheet_selection_dialog
                 chosen = _show_sheet_selection_dialog(root, sheet_names)
                 if chosen is None:
                     return  # User cancelled sheet selection
-                sheet_name = chosen
-            corr_matrix = pd.read_excel(filename, sheet_name=sheet_name, index_col=0)
-        else:
-            # Try CSV as default
-            corr_matrix = pd.read_csv(filename, index_col=0)
-        
-        # Validate that it's a square matrix (correlation matrices should be square)
-        if corr_matrix.shape[0] != corr_matrix.shape[1]:
-            messagebox.showerror(
-                "Invalid Matrix", 
-                "The loaded matrix is not square. Correlation matrices must be square."
-            )
+                options['sheet_name'] = chosen
+
+        # Read + validate (square, numeric, same labels) via the stage-7 format
+        try:
+            loaded = core_stages.load_item("correlation", filename, **options)
+        except ValidationError as e:
+            messagebox.showerror("Invalid Matrix", str(e))
             return
-        
-        # Check if values are in valid correlation range [-1, 1]
-        if (corr_matrix.min().min() < -1.1) or (corr_matrix.max().max() > 1.1):
-            response = messagebox.askyesno(
-                "Warning", 
-                "The matrix contains values outside the typical correlation range [-1, 1]. Continue anyway?"
-            )
-            if not response:
-                return
-        
+        corr_matrix = loaded.data
+        if loaded.warnings and not messagebox.askyesno(
+                "Warning", "\n\n".join(loaded.warnings) + "\n\nContinue anyway?"):
+            return
+
         # Display the correlation matrix
         size = min(10, max(5, corr_matrix.shape[0] * 0.5))  # Dynamic size based on matrix dimensions
         canvas, _ = _plot_correlation_helper(corr_matrix, size, root, canvas, is_precomputed_corr=True,
                                               corr_method='Loaded Correlation', target_frame=target_frame)
         
         messagebox.showinfo(
-            "Matrix Loaded", 
+            "Matrix Loaded",
             f"Successfully loaded correlation matrix of size {corr_matrix.shape[0]}x{corr_matrix.shape[1]}"
         )
-        
+        return corr_matrix, filename
+
     except pd.errors.EmptyDataError:
         messagebox.showerror("Error", "The selected file is empty or invalid.")
     except pd.errors.ParserError:
