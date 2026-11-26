@@ -176,6 +176,7 @@ _ensure_core_package()
 
 from neclab_core import correlation as core_correlation
 from neclab_core import display as core_display
+from neclab_core import events as core_events
 from neclab_core import normalization as core_normalization
 from neclab_core import stages as core_stages
 from neclab_core import project as core_project
@@ -198,32 +199,8 @@ class NecLabApp:
 
     # Parameter specs for each Peak Finder method (used by the parameter
     # dialog and the per-method params cache in the Multiple Files tab).
-    _PEAK_PARAM_SPECS = {
-        'Elliptic Envelope': ('Elliptic Envelope Parameters', [
-            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
-        ]),
-        'Peak Caller': ('Peak Caller Parameters', [
-            {'name': 'Rise %', 'key': 'rise_percent', 'default': 5, 'type': int},
-            {'name': 'Fall %', 'key': 'fall_percent', 'default': 5, 'type': int},
-            {'name': 'Max Lookback', 'key': 'max_lookback', 'default': 10, 'type': int},
-            {'name': 'Max Lookahead', 'key': 'max_lookahead', 'default': 10, 'type': int},
-        ]),
-        'Local Outlier Factor': ('Local Outlier Factor Parameters', [
-            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
-        ]),
-        'Peak Function 4': ('Peak Function 4 (Elliptic Envelope + SVR) Parameters', [
-            {'name': 'Contamination', 'key': 'contamination', 'default': 0.01, 'type': float},
-        ]),
-        'Isolation Forest': ('Isolation Forest Parameters', [
-            {'name': 'Contamination', 'key': 'contamination', 'default': 0.05, 'type': float},
-        ]),
-        'Linear Model': ('Linear Model (SGDOneClassSVM) Parameters', [
-            {'name': 'Nu', 'key': 'nu', 'default': 0.131, 'type': float},
-        ]),
-        'Peak Function 7': ('Peak Function 7 (Lasso + LOF) Parameters', [
-            {'name': 'N Neighbors', 'key': 'n_neighbors', 'default': 20, 'type': int},
-        ]),
-    }
+    # Shared with the correlation window (stage 6 events): neclab_core.events.
+    _PEAK_PARAM_SPECS = core_events.PEAK_METHODS
 
     def __init__(self, root):
         self.root = root
@@ -3568,7 +3545,7 @@ class NecLabApp:
     _STAGE_SHORT_NAMES = {
         "raw": "Recording", "preprocess": "Preprocessing", "features": "Variability map",
         "mask": "Candidate mask", "cells": "Cells", "signals": "Signals",
-        "analysis": "Normalization", "correlation": "Correlation",
+        "analysis": "Normalization & events", "correlation": "Correlation",
     }
 
     # Settings kept in the project but not printed in the sidebar details
@@ -3584,7 +3561,8 @@ class NecLabApp:
         "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
         "signals": "Needs cells (stage 4) and the recording (stage 0): extracted automatically for the "
                    "cells you select (Select All, click or drag), or open a signals file.",
-        "analysis": "Choose a normalization in the correlation analysis window (signals from stage 5).",
+        "analysis": "Choose a normalization and/or a peak method in the correlation analysis window "
+                    "(signals from stage 5).",
         "correlation": "Computed in the correlation analysis window from the (normalized) signals, "
                        "or open a correlation matrix.",
     }
