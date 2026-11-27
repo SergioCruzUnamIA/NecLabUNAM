@@ -243,23 +243,15 @@ def _plot_correlation_helper(df, size, root, canvas, is_precomputed_corr=False, 
 
     return canvas, fig
 
-def plot_time_series(norm_data, column_names=None, notebook=None):
-    if notebook is not None:
-        container = tk.Frame(notebook)
-        notebook.add(container, text='Time Series')
-        notebook.select(container)
-        is_tab = True
-    else:
-        container = tk.Toplevel()
-        container.title('Time Series Plot')
-        screen_width = container.winfo_screenwidth()
-        screen_height = container.winfo_screenheight()
-        win_width = int(screen_width * 0.8)
-        win_height = int(screen_height * 0.8)
-        x = (screen_width - win_width) // 2
-        y = (screen_height - win_height) // 2
-        container.geometry(f"{win_width}x{win_height}+{x}+{y}")
-        is_tab = False
+def plot_time_series(norm_data, column_names=None, notebook=None, parent=None, after=None, select=True):
+    """Time Series view of the columns of `norm_data` (samples x columns):
+    a single-signal preview and an overlay of the selected columns. A tab
+    of `notebook` (right after the tab `after`, if given), or a window
+    without one. Returns its ui_tabs.Tab."""
+    from ui_tabs import add_tab
+
+    tab = add_tab(notebook, 'Time Series', parent=parent, after=after, select=select)
+    container = tab.body
 
     num_series = norm_data.shape[1]
     if column_names is None:
@@ -487,22 +479,18 @@ def plot_time_series(norm_data, column_names=None, notebook=None):
             else:
                 df_out.to_csv(filename, index=False)
 
-    def close_window():
+    def release_figures(event):
+        if event.widget is not tab.frame:
+            return
         for key in ('signal', 'multi'):
             if ts_figs[key] is not None:
                 plt.close(ts_figs[key])
-        if is_tab:
-            try:
-                notebook.forget(container)
-            except Exception:
-                pass
-        else:
-            container.destroy()
+                ts_figs[key] = None
 
+    tab.frame.bind('<Destroy>', release_figures, add='+')
     tk.Button(button_frame, text="Save Image", command=save_image, width=12).pack(side=tk.LEFT, padx=5)
     tk.Button(button_frame, text="Save CSV", command=save_csv, width=12).pack(side=tk.LEFT, padx=5)
-    close_label = "Close Tab" if is_tab else "Close"
-    tk.Button(button_frame, text=close_label, command=close_window, width=12).pack(side=tk.RIGHT, padx=5)
+    return tab
 
 def load_correlation_matrix(root, canvas, target_frame=None):
     """

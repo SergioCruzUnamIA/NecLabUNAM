@@ -1,5 +1,6 @@
 """
-Cell detection window ("Full Analysis - <name>").
+Cell detection view ("Cell Detection - <name>"), a tab of the main window,
+with its "Signals & Correlation" and "3D View" tabs.
 
 This module is user interface only: every computation is delegated to
 neclab_core (variability maps, detection, signal extraction, correlation,
@@ -7,7 +8,7 @@ file formats, validation). Cells are kept as a label image whose values
 are the cells' permanent IDs, so the IDs shown here are the same ones
 written to every exported file.
 
-The window covers pipeline stages 2-4 (variability map, candidate mask,
+The view covers pipeline stages 2-4 (variability map, candidate mask,
 cells) and can start from any of them: from the recording (the map is
 computed), from a saved map, from a saved mask or from saved cells. What
 needs data that isn't loaded is switched off with a message saying what
@@ -31,6 +32,7 @@ from neclab_core import analysis as core_analysis
 from neclab_core import correlation, events, normalization, segmentation, signals, stages, variability
 from neclab_core.validation import ValidationError
 from neclab_core.project import DONE, LOADED
+from ui_tabs import add_tab
 
 # Detection mode -> (label, split method passed to neclab_core.segmentation).
 _DETECTION_MODES = {
@@ -109,13 +111,20 @@ class VariabilityAnalysisWindow:
             recording is attached here, so the main window can show it.
         restore: saved view state to restore (from a project):
             {"detection_mask", "threshold", "min_size", "max_size", "selected"}.
+        notebook: the main window's ttk.Notebook: the view, its signals &
+            correlation analysis and its 3D views are tabs of it. Without
+            one they are separate windows.
     """
     def __init__(self, img_array, method, main_window, var_im=None, map_name=None,
                  mask=None, labels=None, source="", project=None, on_recording_attached=None,
-                 restore=None):
+                 restore=None, notebook=None):
         self.img_array = img_array
         self.method = method
         self.main_window = main_window
+        self.notebook = notebook
+        self.tab = None             # ui_tabs.Tab of this view (self.window is its frame)
+        self.corr_tab = None        # the signals & correlation analysis tab, when open
+        self.extra_tabs = []        # 3D views opened from here
         self.project = project
         self.on_recording_attached = on_recording_attached
         restore = restore or {}
@@ -247,10 +256,11 @@ class VariabilityAnalysisWindow:
         corr_window = getattr(self, 'corr_window', None)
         if corr_window is not None:
             try:
-                corr_window.destroy()
+                corr_window.destroy()      # also removes its tab
             except tk.TclError:
                 pass
         self.corr_window = None
+        self.corr_tab = None
         if getattr(self, 'current_corr_fig', None) is not None:
             plt.close(self.current_corr_fig)
         self.current_corr_fig = None
@@ -340,36 +350,48 @@ class VariabilityAnalysisWindow:
     # ------------------------------------------------------------- layout
 
     def create_window(self):
-        self.window = tk.Toplevel(self.main_window)
-        self.window.geometry("1400x800")
-        self._update_title()
-        self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
-        self.window.config(menu=self._create_menu_bar())
+        """The view: a tab of the main window (or a window, without a
+        notebook) with its menus in the tab's bar."""
+        self.tab = add_tab(self.notebook, self._title_text(), parent=self.main_window,
+                           on_close=self._on_window_close, geometry="1400x800")
+        self.window = self.tab.frame
+        self._create_menu_bar()
 
-        main_frame = tk.Frame(self.window)
+        main_frame = tk.Frame(self.tab.body)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.create_controls(main_frame)
 
         content_frame = tk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.viz_frame = tk.Frame(content_frame)
-        self.viz_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
+        # The selection panel is packed first so it keeps its width when
+        # the tab is narrower than the plots would like.
         self.selection_frame = tk.Frame(content_frame, width=200, relief=tk.RAISED, borderwidth=1)
         self.selection_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         self.selection_frame.pack_propagate(False)
         self.create_selection_panel()
 
-    def _update_title(self):
+        self.viz_frame = tk.Frame(content_frame)
+        self.viz_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def _title_text(self):
         suffix = "" if self.img_array is not None else " (no recording)"
-        self.window.title(f"Full Analysis - {self.method_name}{suffix}")
+        return f"Cell Detection - {self.method_name}{suffix}"
+
+    def _update_title(self):
+        self.tab.set_title(self._title_text())
+
+    def show(self):
+        """Bring this view to the front."""
+        self.tab.show()
+
+    def exists(self):
+        return self.tab is not None and self.tab.exists()
 
     def _create_menu_bar(self):
-        menu_bar = tk.Menu(self.window, tearoff=False)
-
-        menu_data = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Data", menu=menu_data)
+        """The view's menus (Data, Clustering, Selection, Visualization,
+        Export), in its tab's bar."""
+        menu_data = self.tab.add_menu("Data", lambda m: None)
         menu_data.add_command(label="Attach Recording...", command=self.attach_recording)
         menu_data.add_separator()
         menu_data.add_command(label="Load Variability Map...", command=self.load_map)
@@ -378,24 +400,20 @@ class VariabilityAnalysisWindow:
         menu_data.add_separator()
         menu_data.add_command(label="Stop Using Loaded Mask", command=self.clear_loaded_mask)
 
-        menu_clustering = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Clustering", menu=menu_clustering)
+        menu_clustering = self.tab.add_menu("Clustering", lambda m: None)
         menu_clustering.add_command(label="Process Cluster (Basic)", command=self.process_clusters_basic)
         menu_clustering.add_command(label="Process Cluster (Advanced)", command=self.process_clusters_advanced)
         menu_clustering.add_separator()
         menu_clustering.add_command(label="Decompose Large Clusters (KMeans)", command=self.decompose_clusters)
 
-        menu_seleccion = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Selection", menu=menu_seleccion)
+        menu_seleccion = self.tab.add_menu("Selection", lambda m: None)
         menu_seleccion.add_command(label="Select All", command=self.select_all_clusters)
         menu_seleccion.add_command(label="Clear Selection", command=self.clear_selection)
 
-        menu_visual = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Visualization", menu=menu_visual)
+        menu_visual = self.tab.add_menu("Visualization", lambda m: None)
         menu_visual.add_command(label="3D View", command=self.show_3d_surface)
 
-        menu_exportar = tk.Menu(menu_bar, tearoff=False)
-        menu_bar.add_cascade(label="Export", menu=menu_exportar)
+        menu_exportar = self.tab.add_menu("Export", lambda m: None)
         menu_exportar.add_command(label="Save Image", command=self.save_image)
         menu_exportar.add_separator()
         menu_exportar.add_command(label="Save Variability Map...", command=self.save_map)
@@ -404,8 +422,6 @@ class VariabilityAnalysisWindow:
         menu_exportar.add_command(label="Save Signals (CSV / XLSX / NPY)...", command=self.save_selected_signals)
         menu_exportar.add_separator()
         menu_exportar.add_command(label="Use Selected (Correlations)", command=self.use_selected_clusters)
-
-        return menu_bar
 
     def create_controls(self, parent):
         control_frame = tk.Frame(parent)
@@ -1029,8 +1045,17 @@ class VariabilityAnalysisWindow:
         self._save("cells", labels, "Save Cells")
 
     def _on_window_close(self):
-        plt.close('all')
-        self.window.destroy()
+        """Close this view with the tabs it opened (signals & correlation, 3D)."""
+        self._close_correlation_window()
+        for tab in self.extra_tabs:
+            tab.close()
+        self.extra_tabs = []
+        if self.current_fig is not None:
+            plt.close(self.current_fig)
+            self.current_fig = None
+        self.tab.close()
+
+    close = _on_window_close
 
     # -------------------------------------------------------- correlation
 
@@ -1046,12 +1071,13 @@ class VariabilityAnalysisWindow:
         """Window with the selected cells' signals and their correlation.
         Only one at a time: opening it again replaces the previous one."""
         self._close_correlation_window()
-        corr_window = tk.Toplevel(self.window)
+        self.corr_tab = add_tab(self.notebook, f"Signals & Correlation - {self.method_name}",
+                                parent=self.window, after=self.window if self.notebook is not None else None,
+                                on_close=self._close_correlation_window)
+        corr_window = self.corr_tab.frame
         self.corr_window = corr_window
-        corr_window.title("Correlation Analysis - Selected Cells")
-        corr_window.geometry("1200x800")
 
-        main_frame = tk.Frame(corr_window)
+        main_frame = tk.Frame(self.corr_tab.body)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         control_frame = tk.Frame(main_frame)
@@ -1237,8 +1263,8 @@ class VariabilityAnalysisWindow:
                 plt.close(self.current_corr_fig)
                 self.current_corr_fig = None
             tk.Label(self.corr_viz_frame, fg='gray', font=("Arial", 12),
-                     text="No cells selected.\n\nSelect cells in the cell detection window "
-                          "(click, drag or Select All): this window follows the selection.").pack(expand=True)
+                     text="No cells selected.\n\nSelect cells in the cell detection tab "
+                          "(click, drag or Select All): this tab follows the selection.").pack(expand=True)
             return
         if self.current_corr_matrix is not None:
             self.update_correlation_display(self.current_corr_matrix, self.current_method)
@@ -1447,9 +1473,10 @@ class VariabilityAnalysisWindow:
             return
         from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers the 3d projection)
 
-        window_3d = tk.Toplevel(self.window)
-        window_3d.title(f"3D Surface - {self.method_name}")
-        window_3d.geometry("800x600")
+        tab = add_tab(self.notebook, f"3D View - {self.method_name}", parent=self.window,
+                      after=self.window if self.notebook is not None else None, geometry="800x600")
+        self.extra_tabs = [t for t in self.extra_tabs if t.exists()] + [tab]
+        window_3d = tab.body
 
         # Subsample so the view stays responsive (at most ~100 points per side)
         step = max(1, min(self.var_im.shape) // 100)
@@ -1465,12 +1492,12 @@ class VariabilityAnalysisWindow:
         ax.set_title(f'Variability Surface - {self.method_name}')
         fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label=self.method_name)
 
+        control_frame = tk.Frame(window_3d)
+        control_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
         canvas = FigureCanvasTkAgg(fig, master=window_3d)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        control_frame = tk.Frame(window_3d)
-        control_frame.pack(fill=tk.X, pady=5)
+        tab.frame.bind("<Destroy>", lambda e: plt.close(fig) if e.widget is tab.frame else None, add="+")
 
         def save_3d():
             filename = asksaveasfilename(
@@ -1503,23 +1530,27 @@ class VariabilityAnalysisWindow:
             messagebox.showinfo("Success", f"Image saved to {filename}")
 
 
-def show_variability_analysis(img_array, method, main_window, project=None, on_recording_attached=None):
-    """Open the analysis window for `img_array` (the raw stack) and `method`."""
+def show_variability_analysis(img_array, method, main_window, project=None, on_recording_attached=None,
+                              notebook=None):
+    """Open the cell detection view for `img_array` (the raw stack) and
+    `method` (a tab of `notebook`, if given)."""
     if img_array is None or len(img_array) == 0:
         messagebox.showwarning("Warning", "No image loaded")
         return None
     return VariabilityAnalysisWindow(img_array, method, main_window, project=project,
-                                     on_recording_attached=on_recording_attached)
+                                     on_recording_attached=on_recording_attached, notebook=notebook)
 
 
 def open_detection_window(main_window, stack=None, var_im=None, map_name=None,
                           mask=None, labels=None, source="", project=None,
-                          on_recording_attached=None, restore=None):
-    """Open the analysis window at stage 2, 3 or 4 from loaded data.
-    `stack` is the recording when it is open and the same frame size."""
+                          on_recording_attached=None, restore=None, notebook=None):
+    """Open the cell detection view at stage 2, 3 or 4 from loaded data
+    (a tab of `notebook`, if given). `stack` is the recording when it is
+    open and the same frame size."""
     return VariabilityAnalysisWindow(stack, None, main_window, var_im=var_im, map_name=map_name,
                                      mask=mask, labels=labels, source=source, project=project,
-                                     on_recording_attached=on_recording_attached, restore=restore)
+                                     on_recording_attached=on_recording_attached, restore=restore,
+                                     notebook=notebook)
 
 
 def get_variability_methods():

@@ -17,6 +17,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 import sys
 import threading
 import queue
@@ -124,7 +125,12 @@ _CORE_FILES = [
     "neclab_core/signals.py",
     "neclab_core/correlation.py",
     "neclab_core/normalization.py",
+    "neclab_core/events.py",
+    "neclab_core/analysis.py",
 ]
+# Other modules added after the updater's file list was first released; an
+# install updated by an older version gets this file but not these.
+_ADDED_FILES = ["ui_tabs.py"]
 
 
 def _download_repo_files(filenames, app_dir):
@@ -148,23 +154,29 @@ def _download_repo_files(filenames, app_dir):
 
 
 def _ensure_core_package():
-    """Make sure neclab_core can be imported (see the comment above)."""
-    try:
-        import neclab_core  # noqa: F401
-        return
-    except ImportError:
-        if getattr(sys, "frozen", False):
-            raise
+    """Make sure neclab_core and the other newer modules are there (see the
+    comment above): download whichever of them is missing."""
+    if getattr(sys, "frozen", False):
+        return      # the executables bundle everything
     app_dir = os.path.dirname(os.path.abspath(__file__))
-    errors = _download_repo_files(_CORE_FILES, app_dir)
+
+    def missing():
+        return [f for f in _CORE_FILES + _ADDED_FILES
+                if not os.path.isfile(os.path.join(app_dir, *f.split("/")))]
+
+    if not missing():
+        return
+    errors = _download_repo_files(missing(), app_dir)
     try:
+        if missing():
+            raise ImportError
         import neclab_core  # noqa: F401
     except ImportError:
         root = tk.Tk()
         root.withdraw()
         messagebox.showerror(
             "NecLab - Missing Files",
-            "The 'neclab_core' folder is missing and could not be downloaded.\n\n"
+            "Some of NecLab's files are missing and could not be downloaded.\n\n"
             + ("\n".join(errors) + "\n\n" if errors else "")
             + "Download the latest version of NecLab from GitHub, or run 'git pull'."
         )
@@ -187,7 +199,8 @@ from neclab_core.validation import ValidationError
 # Local modules
 from variability_functions import (show_variability_analysis, get_variability_methods,
                                    open_detection_window, ask_choice, show_warnings)
-from corr_dendo_functions import load_correlation_matrix
+from corr_dendo_functions import load_correlation_matrix, plot_time_series
+from ui_tabs import add_tab
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
 from image_loader import ask_recording_path, load_recording
 from image_processing import mask_to_pil
@@ -230,7 +243,12 @@ class NecLabApp:
         # saved to a .neclab folder; see neclab_core/project.py)
         self.project = Project()
         self.project.add_listener(self._on_project_changed)
-        self.detection_windows = []     # open cell detection windows (they report to the project)
+        self.detection_windows = []     # open cell detection tabs (they report to the project)
+        # Views opened as tabs (ui_tabs.Tab), one of each kind at a time
+        self.corr_matrix_tab = None     # a loaded / the project's correlation matrix
+        self.time_series_tab = None     # Visualization → Time Series
+        self.histogram_tab = None       # Image → Histogram
+        self.binarize_tab = None        # Image → Binarize
         self.status_window = None       # the pipeline sidebar (parent for its dialogs)
         self._status_tree = None
         self.sidebar_visible_var = tk.BooleanVar(value=True)
@@ -391,9 +409,9 @@ class NecLabApp:
                                      command=lambda: self.open_pipeline_stage("mask"))
         self.menu_etapas.add_command(label="4 · Cells (label image / ImageJ ROIs)...",
                                      command=lambda: self.open_pipeline_stage("cells"))
-        self.menu_etapas.add_command(label="5–6 · Signals (.csv / .xlsx / .npy)...",
+        self.menu_etapas.add_command(label="5 · Signals (.csv / .xlsx / .npy)...",
                                      command=self.open_multiple_xls_files)
-        self.menu_etapas.add_command(label="7 · Correlation Matrix (.csv / .xlsx)...",
+        self.menu_etapas.add_command(label="6 · Correlation Matrix (.csv / .xlsx)...",
                                      command=self.load_correlation_matrix_wrapper)
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
@@ -1049,19 +1067,18 @@ class NecLabApp:
         messagebox.showinfo("Saved", f"Dendrogram data saved to:\n{filename}")
 
     def load_correlation_matrix_wrapper(self):
-        """Open a precomputed correlation matrix file into its own window
-        (a dendrogram + heatmap of the loaded matrix), independent of
-        whichever tab is currently selected."""
-        win = tk.Toplevel(self.root)
-        win.title("Loaded Correlation Matrix")
-        win.geometry("700x900")
-        frame = tk.Frame(win, bg=_C['panel'])
+        """Open a precomputed correlation matrix file into its own tab
+        (a dendrogram + heatmap of the loaded matrix)."""
+        tab = self._new_correlation_matrix_tab("Loaded Correlation Matrix")
+        frame = tk.Frame(tab.body, bg=_C['panel'])
         frame.pack(fill=tk.BOTH, expand=True)
         result = load_correlation_matrix(self.root, None, target_frame=frame)
         if result is None:
-            win.destroy()
+            tab.close()
             return
         corr_matrix, filename = result
+        tab.set_title(f"Correlation Matrix - {os.path.basename(filename)}")
+        self._show_correlation_matrix_tab(tab)
         self.project.set_stage("correlation", {"correlation": corr_matrix}, origin="imported",
                                source={"path": os.path.abspath(filename)})
 
@@ -1096,8 +1113,39 @@ class NecLabApp:
 
         self.menu_visual.entryconfig(
             "Dendrogram", command=self._run_dendogram_on_selection, state=NORMAL)
+        self.menu_visual.entryconfig(
+            "Time Series", command=self._run_time_series, state=NORMAL)
         if self.dendo_tab is not None and self.dendo_tab.winfo_exists():
             self._dendo_populate_columns()
+        if self.time_series_tab is not None and self.time_series_tab.exists():
+            self._run_time_series(select=False)     # show the newly loaded data there too
+
+    def _run_time_series(self, select=True):
+        """Visualization → Time Series: every column of the Multiple Files
+        data (its series across the loaded sheets, as plotted there, with
+        the same normalization and smoothing) in the Time Series tab. An
+        open Time Series tab is replaced in place."""
+        if not self.multi_xls_common_columns:
+            return
+        vectors = [np.asarray(self._multi_xls_concatenated_column(c), dtype=float)
+                   for c in self.multi_xls_common_columns]
+        n = min(len(v) for v in vectors)
+        if n == 0:
+            messagebox.showwarning("No Data", "The loaded columns have no values to plot.")
+            return
+        data = np.column_stack([v[:n] for v in vectors])
+        names = [self.multi_xls_column_listbox.get(i) for i in range(self.multi_xls_column_listbox.size())]
+        after = None
+        old = self.time_series_tab
+        if old is not None and old.exists():
+            tabs = list(self.notebook.tabs())
+            index = tabs.index(str(old.frame))
+            after = tabs[index - 1] if index > 0 else None
+            old.close()
+        elif self.multi_xls_tab is not None and self.multi_xls_tab.winfo_exists():
+            after = self.multi_xls_tab
+        self.time_series_tab = plot_time_series(data, names, self.notebook, parent=self.root,
+                                                after=after, select=select)
 
     def _run_with_progress_window(self, title, message, maximum, worker_fn,
                                    on_complete, on_error=None):
@@ -3235,7 +3283,7 @@ class NecLabApp:
 
     def open_pipeline_stage(self, item_key):
         """File → Open Pipeline Stage: start at stage 2 (map), 3 (mask) or
-        4 (cells) from a saved file, in the cell detection window. The open
+        4 (cells) from a saved file, in a cell detection tab. The open
         recording, if any, is attached when its frames are the same size."""
         it = core_stages.item(item_key)
         stage = core_stages.stage(it.stage)
@@ -3282,15 +3330,16 @@ class NecLabApp:
         return self._open_detection_window(stack=stack, source=source, **kwargs)
 
     def _open_detection_window(self, **kwargs):
-        """Open a cell detection window that reports to the project."""
+        """Open a cell detection tab that reports to the project."""
         win = open_detection_window(self.root, project=self.project,
-                                    on_recording_attached=self._on_recording_attached, **kwargs)
+                                    on_recording_attached=self._on_recording_attached,
+                                    notebook=self.notebook, **kwargs)
         self.detection_windows.append(win)
         self._refresh_status_window()
         return win
 
     def _on_recording_attached(self, stack, path, metadata):
-        """A detection window attached a recording: it becomes the project's
+        """A detection tab attached a recording: it becomes the project's
         recording and is shown in the Image Processing tab."""
         self._use_recording(stack, path, metadata)
 
@@ -3353,7 +3402,7 @@ class NecLabApp:
 
     # ==================== PROJECT ====================
     # The project holds every pipeline stage for one recording (see
-    # neclab_core/project.py). Detection windows report what they compute
+    # neclab_core/project.py). Detection tabs report what they compute
     # to it; these commands save/open it and show the status of each stage.
 
     def _on_project_changed(self):
@@ -3381,10 +3430,11 @@ class NecLabApp:
         return True
 
     def _close_detection_windows(self):
+        """Close every cell detection tab (with the tabs each one opened)."""
         for win in self.detection_windows:
             try:
-                if win.window.winfo_exists():
-                    win.window.destroy()
+                if win.exists():
+                    win.close()
             except tk.TclError:
                 pass
         self.detection_windows = []
@@ -3483,7 +3533,7 @@ class NecLabApp:
     def _restore_views_from_project(self):
         """Show the project's state: the recording in the Image Processing
         tab, and stages 2-4 (with the cell selection and the settings used)
-        in a cell detection window."""
+        in a cell detection tab."""
         p = self.project
         self._close_detection_windows()
         was_modified = p.modified
@@ -3506,7 +3556,7 @@ class NecLabApp:
             core_validation.check_compatibility(stack=stack, maps=maps, mask=mask, labels=labels)
         except ValidationError as e:
             messagebox.showwarning("Recording Not Attached",
-                                   f"{e}\n\nThe cell detection window opens without the recording.")
+                                   f"{e}\n\nThe cell detection tab opens without the recording.")
             stack = None
 
         restore = {"selected": p.ui.get("selected_cells") or []}
@@ -3531,7 +3581,7 @@ class NecLabApp:
         return win
 
     # ---- Pipeline sidebar
-    # A permanent panel on the left of the main window: the 8 stages with
+    # A permanent panel on the left of the main window: the 7 stages with
     # their live status, the selected stage's details, and its actions (open
     # its view / run it, save or load just that stage, clear it).
 
@@ -3557,8 +3607,8 @@ class NecLabApp:
         "raw": "Open a recording (File → Open Recording), or open a saved project.",
         "preprocess": "No preprocessing filters are available yet; analysis uses the raw recording.",
         "features": "Needs the recording (stage 0): compute a variability map from it, or open a saved map.",
-        "mask": "Made from a variability map (stage 2) in the cell detection window, or open a saved mask.",
-        "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
+        "mask": "Made from a variability map (stage 2) in the cell detection tab, or open a saved mask.",
+        "cells": "Detected in the cell detection tab from a map or a mask, or open saved cells / ImageJ ROIs.",
         "signals": "Needs cells (stage 4) and the recording (stage 0): extracted, normalized and searched "
                    "for events automatically for the cells you select (Select All, click or drag), with the "
                    "settings last applied in the Signals & Correlation tab; or open a signals file.",
@@ -3685,13 +3735,9 @@ class NecLabApp:
     # ---- what each stage's action button does
 
     def _active_detection_window(self):
-        for win in reversed(self.detection_windows):
-            try:
-                if win.window.winfo_exists():
-                    return win
-            except tk.TclError:
-                pass
-        return None
+        """The most recently opened cell detection tab that is still open."""
+        self.detection_windows = [w for w in self.detection_windows if w.exists()]
+        return self.detection_windows[-1] if self.detection_windows else None
 
     def _stage_action(self, key):
         """(button label, callable or None) for a stage: open its view,
@@ -3708,9 +3754,9 @@ class NecLabApp:
             return "No preprocessing filters yet", None
         if key in ("features", "mask", "cells"):
             if win is not None:
-                return "Show Cell Detection Window", lambda: self._lift_window(win.window)
+                return "Show Cell Detection Tab", win.show
             if any(p.data(k) is not None for k in ("features", "mask", "cells")):
-                return "Open Cell Detection Window", self._restore_views_from_project
+                return "Open Cell Detection Tab", self._restore_views_from_project
             if key == "features" and self.img_original is not None:
                 return "Compute Variability Map...", self._ask_and_compute_map
             item_key, label = {"features": ("maps", "Open Variability Map..."),
@@ -3725,7 +3771,7 @@ class NecLabApp:
                 return "View Correlation Matrix", self._view_project_correlation
             return "View in Multiple Files", lambda: self._view_signals_in_multiple_files(key)
         if key == "signals":
-            return "Open Signals Files...",self.open_multiple_xls_files
+            return "Open Signals Files...", self.open_multiple_xls_files
         return "Open Correlation Matrix...", self.load_correlation_matrix_wrapper
 
     def _run_stage_action(self):
@@ -3736,12 +3782,6 @@ class NecLabApp:
         if action is not None:
             action()
         self._refresh_status_window()
-
-    @staticmethod
-    def _lift_window(window):
-        window.deiconify()
-        window.lift()
-        window.focus_force()
 
     def _locate_and_restore_recording(self):
         warnings = self._locate_missing_recording()
@@ -3756,14 +3796,14 @@ class NecLabApp:
             self.show_variability_menu(names.index(choice))
 
     def _open_signal_analysis(self, win):
-        """Stages 5-6 from the cell detection window: signals of the
-        selected cells, their normalization, events and correlation."""
+        """Stages 5-6 from the cell detection tab: signals of the selected
+        cells, their normalization, events and correlation (in the Signals
+        & Correlation tab)."""
         if not win.selected_clusters:
             if not messagebox.askyesno("No Cells Selected",
                                        f"No cells are selected. Use all {len(win.cell_pix)} cells?"):
                 return
             win.select_all_clusters()
-        self._lift_window(win.window)
         win.use_selected_clusters()
 
     def _view_signals_in_multiple_files(self, key):
@@ -3792,16 +3832,28 @@ class NecLabApp:
         if corr is None:
             return None
         from corr_dendo_functions import _plot_correlation_helper
-        win = tk.Toplevel(self.root)
-        win.title(f"Correlation Matrix - {self.project.name}")
-        win.geometry("700x900")
-        frame = tk.Frame(win, bg=_C['panel'])
+        tab = self._new_correlation_matrix_tab(f"Correlation Matrix - {self.project.name}")
+        frame = tk.Frame(tab.body, bg=_C['panel'])
         frame.pack(fill=tk.BOTH, expand=True)
         method = self.project.get("correlation").params.get("method") or "loaded"
         size = min(10, max(5, corr.shape[0] * 0.5))
         _plot_correlation_helper(corr, size, self.root, None, is_precomputed_corr=True,
                                  corr_method=str(method), target_frame=frame)
-        return win
+        self._show_correlation_matrix_tab(tab)
+        return tab
+
+    def _new_correlation_matrix_tab(self, title):
+        """A tab for a correlation matrix, hidden until it is filled (see
+        _show_correlation_matrix_tab)."""
+        return add_tab(self.notebook, title, parent=self.root, hidden=True)
+
+    def _show_correlation_matrix_tab(self, tab):
+        """Show a filled correlation matrix tab in place of the previous
+        one, so opening matrices doesn't pile up tabs."""
+        if self.corr_matrix_tab is not None:
+            self.corr_matrix_tab.close()
+        self.corr_matrix_tab = tab
+        tab.show()
 
     def _status_save_stage(self):
         key = self._status_selected_key()
@@ -3881,15 +3933,21 @@ class NecLabApp:
             return
 
         var_im = np.var(self.img_original, axis=0)
-        plt.figure(figsize=(8, 6))
-        plt.hist(var_im.flatten(), bins=50)
-        plt.title('Variance Histogram')
-        plt.xlabel('Variance')
-        plt.ylabel('Frequency')
-        plt.show()
+        if self.histogram_tab is not None:
+            self.histogram_tab.close()
+        tab = self.histogram_tab = add_tab(self.notebook, "Histogram", parent=self.root)
+        fig = Figure(figsize=(8, 6))
+        ax = fig.add_subplot(111)
+        ax.hist(var_im.flatten(), bins=50)
+        ax.set_title('Variance Histogram')
+        ax.set_xlabel('Variance')
+        ax.set_ylabel('Frequency')
+        canvas = FigureCanvasTkAgg(fig, master=tab.body)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def show_binarize(self):
-        """Show the binarization window."""
+        """Show the binarization tab."""
         if self.img_original is None:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
@@ -3897,10 +3955,10 @@ class NecLabApp:
         var_im = np.var(self.img_original, axis=0)
         pil_img = self._apply_binarize(var_im, 150)
 
-        # Create popup window
-        top = tk.Toplevel(self.root)
-        top.title("Binarization")
-        top.geometry("600x700")
+        if self.binarize_tab is not None:
+            self.binarize_tab.close()
+        self.binarize_tab = add_tab(self.notebook, "Binarization", parent=self.root)
+        top = self.binarize_tab.body
 
         # Frame for the image
         img_frame = tk.Frame(top, relief=tk.RAISED, borderwidth=1)
@@ -3947,7 +4005,8 @@ class NecLabApp:
             messagebox.showwarning("Warning", "Load an OME-TIFF image first")
             return
         win = show_variability_analysis(self.img_original, method_index, self.root, project=self.project,
-                                        on_recording_attached=self._on_recording_attached)
+                                        on_recording_attached=self._on_recording_attached,
+                                        notebook=self.notebook)
         if win is not None:
             self.detection_windows.append(win)
             self._refresh_status_window()
@@ -3964,7 +4023,7 @@ class NecLabApp:
         "image_loader.py",
         "image_processing.py",
         "multi_xls_helpers.py",
-    ] + _CORE_FILES
+    ] + _ADDED_FILES + _CORE_FILES
 
     def _get_local_sha(self):
         version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")

@@ -125,8 +125,8 @@ This section is only a summary. For detailed step-by-step instructions for each 
 
 The application is organized into tabs:
 
-- **Image Processing**: open an OME-TIFF image (`File → Open OME-TIFF`, or `Ctrl+O`), adjust brightness/contrast/threshold, and from the **Variability Analysis** menu choose one of the 7 methods to open the cell detection and clustering window.
-- **Data Visualization**: open a `.npy`/`.csv` file (`File → Open Data`) to find peaks, apply smoothing, compute correlations, and generate dendrograms or time series.
+- **Image Processing**: open an OME-TIFF image (`File → Open OME-TIFF`, or `Ctrl+O`), adjust brightness/contrast/threshold, and from the **Variability Analysis** menu choose one of the 7 methods to open the cell detection and clustering tab. Every view opens as a tab of the main window.
+- **Dendrogram** and **Time Series** (`Visualization` menu): views of the data in the Multiple Files tab, enabled once data is loaded there.
 - **Multiple Files** (appears when using `File → Open Multiple Files (.xls)`): load and compare several Excel sheets at once, with smoothing, normalization, a heatmap, and sheet classification.
 - **Dendrogram** and **Time Series**: created automatically when using the corresponding options in the **Visualization** menu, once data has been loaded.
 
@@ -161,7 +161,8 @@ NecLabUNAM/
 │   ├── analysis.py             #   Normalization + events of a set of signals (stage 5; peaks cached per cell)
 │   └── correlation.py          #   Correlation + clustering (Ward on 1 − |r|), shared by every view
 ├── tests/                      # Tests for neclab_core (pytest)
-├── variability_functions.py    # Cell detection window (UI)
+├── variability_functions.py    # Cell detection tab + its Signals & Correlation and 3D View tabs (UI)
+├── ui_tabs.py                  # Closable tabs (with their own menu bar) for every view
 ├── peak_functions.py           # Peak detection (7 methods) and smoothing
 ├── corr_dendo_functions.py     # Correlations, dendrograms, and time series
 ├── multi_xls_helpers.py        # Loading and processing for the Multiple Files tab
