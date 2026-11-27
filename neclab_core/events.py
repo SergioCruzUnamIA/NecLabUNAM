@@ -1,10 +1,10 @@
 """
-Event (peak) detection - stage 6.
+Event (peak) detection - part of stage 5.
 
 The same 7 Peak Finder methods as the Multiple Files tab, without any
 drawing: `compute_peaks` finds the peaks of one signal, `detect_events`
 runs a method on every signal of a signals table and returns an events
-table (one row per peak), the stage 6 "events" item.
+table (one row per peak), the stage 5 "events" item.
 """
 
 import numpy as np

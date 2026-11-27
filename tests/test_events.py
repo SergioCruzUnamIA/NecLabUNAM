@@ -1,4 +1,4 @@
-"""Tests for event (peak) detection, stage 6 events. Run with:  python -m pytest tests"""
+"""Tests for event (peak) detection, stage 5 events. Run with:  python -m pytest tests"""
 
 import os
 import sys
@@ -72,7 +72,7 @@ def test_events_by_column():
     assert by_col["cell_2"].tolist() == [50, 150, 250] and by_col["cell_9"].tolist() == []
 
 
-def test_events_save_and_load_as_stage_6(tmp_path):
+def test_events_save_and_load_as_stage_5(tmp_path):
     ev = events.detect_events(_signals(), "Peak Caller")
     stages.save_item("events", ev, tmp_path / "events.csv")
     loaded = stages.load_item("events", tmp_path / "events.csv",
@@ -80,10 +80,10 @@ def test_events_save_and_load_as_stage_6(tmp_path):
     assert loaded.data[["cell_id", "frame"]].equals(ev[["cell_id", "frame"]])
 
     p = Project()
-    p.set_stage("analysis", {"events": ev}, params={"method": "none", "peak_method": "Peak Caller",
+    p.set_stage("signals", {"signals": _signals(), "events": ev}, params={"method": "none", "peak_method": "Peak Caller",
                                                      "peak_params": events.default_params("Peak Caller")})
     p.save(tmp_path / "x.neclab")
     q, warnings = Project.load(tmp_path / "x.neclab")
     assert not warnings
-    assert q.get("analysis").items["events"][["cell_id", "frame"]].equals(ev[["cell_id", "frame"]])
-    assert q.get("analysis").params["peak_params"]["rise_percent"] == 5
+    assert q.get("signals").items["events"][["cell_id", "frame"]].equals(ev[["cell_id", "frame"]])
+    assert q.get("signals").params["peak_params"]["rise_percent"] == 5

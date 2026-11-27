@@ -166,12 +166,11 @@ Cada opción ejecuta una detección completa con los valores actuales de Thresho
 - **Region Selection** (Selección por Región): mantenga el botón derecho y arrastre sobre el gráfico para seleccionar/quitar varios clusters a la vez dentro de un rectángulo; use el conmutador Add/Remove (Añadir/Quitar) para elegir el modo.
 - Menú **Selection** (Selección): `Select All` (Seleccionar Todos), `Clear Selection` (Limpiar Selección).
 - La lista de clusters seleccionados aparece en el panel lateral, con un botón "Remove" (Remover) por cada uno.
-- **Las etapas 5–7 siguen a la selección.** Con la grabación cargada, cada cambio en la selección (Select All, un clic, un rectángulo, Remove o Clear) de inmediato:
-  - extrae las señales de las células seleccionadas y las registra como etapa 5 (*Signals*);
-  - las normaliza, detecta sus picos y registra el resultado como etapa 6 (*Normalization & events*), con los últimos ajustes aplicados en la ventana de análisis de correlación (o los del proyecto). Por defecto no hay normalización ni detección de picos; la etapa 6 contiene entonces las señales crudas tal cual, así que igualmente queda *done* y se puede usar. Los picos solo se vuelven a detectar en las células nuevas en la selección, mientras no cambien los ajustes;
-  - calcula su correlación y la registra como etapa 7 (*Correlation*), con el último método de correlación elegido (Pearson por defecto). Con una sola célula no hay correlación, así que la etapa 7 se borra.
+- **Las etapas 5–6 siguen a la selección.** Con la grabación cargada, cada cambio en la selección (Select All, un clic, un rectángulo, Remove o Clear) de inmediato:
+  - extrae las señales de las células seleccionadas, las normaliza y detecta sus picos, y registra las tres cosas como etapa 5 (*Signals & events*): las señales crudas, las señales normalizadas y los eventos. La normalización y el método de picos son los últimos aplicados en el análisis de correlación (o los del proyecto). Por defecto no hay normalización ni detección de picos; las señales normalizadas son entonces las crudas tal cual. Los picos solo se vuelven a detectar en las células nuevas en la selección, mientras no cambien los ajustes;
+  - calcula su correlación y la registra como etapa 6 (*Correlation*), con el último método de correlación elegido (Pearson por defecto). Con una sola célula no hay correlación, así que la etapa 6 se borra.
 
-  La barra lateral del pipeline muestra las tres como *done*, y una ventana de análisis de correlación abierta se vuelve a dibujar para la nueva selección. Limpiar la selección borra las etapas 5–7. Las etapas que ya están al día se dejan como están (p. ej. al reabrir un proyecto). Sin la grabación, cárguela con **Data → Attach Recording...** y las etapas 5–7 de las células ya seleccionadas se calculan en ese momento.
+  La barra lateral del pipeline muestra ambas como *done*, y un análisis de correlación abierto se vuelve a dibujar para la nueva selección. Limpiar la selección borra las etapas 5–6. Las etapas que ya están al día se dejan como están (p. ej. al reabrir un proyecto). Sin la grabación, cárguela con **Data → Attach Recording...** y las etapas 5–6 de las células ya seleccionadas se calculan en ese momento.
 
 ### 4.6 Visualización 3D
 
@@ -189,14 +188,14 @@ Menú **Export** (Exportar):
 
   Estos archivos se pueden abrir directamente con `File → Open Data Files`: la columna de frame se reconoce y no se muestra como columna de datos.
 - **Save Cells (Label Image)...** (Guardar Células): guarda las células como una imagen de etiquetas (`.tif` o `.npy`: una imagen del tamaño de un frame donde cada píxel contiene el ID de su célula, 0 = fondo) más una tabla con el mismo nombre y extensión `.csv` (`cell_id, n_pixels, centroid_row, centroid_col`). Si hay células seleccionadas, pregunta si guardar solo esas. Se vuelven a cargar con **Data → Load Cells...**.
-- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (las señales crudas, mismo formato que Save Signals), **Export Normalized** (las señales tal como se muestran, etapa 6), **Export Events** (los picos detectados, etapa 6), **Export Correlation** (la matriz actual, que se puede volver a abrir como etapa 7), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
-  - **Normalization**, **Lowest points**, **Smoothing**, **Subtract lowest-points baseline**, **Show lowest points** + **Apply**: cómo se normalizan las señales antes de calcular la correlación (ver [sección 12](#métodos-de-normalización-ventana-de-análisis-de-correlación)). Por defecto es *None*, las intensidades medias crudas. La gráfica, la correlación y el dendrograma usan las señales normalizadas, que se registran como etapa 6 del proyecto (y los ajustes se restauran al reabrir el proyecto). Los ajustes aplicados aquí, y el último botón de correlación pulsado, son también los que se usan cuando cambia la selección.
+- **Use Selected (Correlations)** (Usar Seleccionados — Correlaciones): abre la ventana "Correlation Analysis — Selected Cells" (Análisis de Correlaciones — Células Seleccionadas), con botones para calcular correlación Pearson, Kendall o Spearman entre las señales de las células elegidas, además de **Export Time Series** (las señales crudas, mismo formato que Save Signals), **Export Normalized** (las señales tal como se muestran, etapa 5), **Export Events** (los picos detectados, etapa 5), **Export Correlation** (la matriz actual, que se puede volver a abrir como etapa 6), **Export Cells** (guarda las células seleccionadas como imagen de etiquetas) y **Generate Report**.
+  - **Normalization**, **Lowest points**, **Smoothing**, **Subtract lowest-points baseline**, **Show lowest points** + **Apply**: cómo se normalizan las señales antes de calcular la correlación (ver [sección 12](#métodos-de-normalización-ventana-de-análisis-de-correlación)). Por defecto es *None*, las intensidades medias crudas. La gráfica, la correlación y el dendrograma usan las señales normalizadas, que se registran en la etapa 5 del proyecto junto a las crudas (y los ajustes se restauran al reabrir el proyecto). Los ajustes aplicados aquí, y el último botón de correlación pulsado, son también los que se usan cuando cambia la selección.
     - **Lowest points** (Puntos más bajos, 2–50, por defecto 6): cuántos de los puntos más bajos genuinos de cada señal forman su línea base, una línea que pasa por ellos. La usan *Divide by lowest-points baseline*, *Subtract lowest-points baseline* y *Smoothing*.
     - **Divide by lowest-points baseline** (Dividir entre la línea base de los puntos más bajos): cada señal se divide entre esa línea base, así sus puntos más bajos quedan en una línea horizontal en 1 y cada valor se lee como "veces la línea base" (la normalización de envolvente convexa de versiones anteriores de NecLab). Si la línea base de una señal llega a cero o menos (p. ej. datos ya normalizados a 0–1), dividir haría explotar los valores: NecLab indica qué célula y muestra las señales crudas.
     - **Subtract lowest-points baseline** (Restar la línea base de los puntos más bajos; casilla, se combina con cualquier normalización): después de la normalización elegida, se resta la línea base de los puntos más bajos de la señal *normalizada*, así sus puntos más bajos quedan en una línea horizontal en 0 y cada valor se lee como "por encima de la línea base", en las unidades de esa normalización (p. ej. *ΔF/F0* + restar = ΔF/F0 por encima de una línea base que sigue las derivas lentas; *None* + restar = intensidad cruda por encima de la línea base). Al no dividir, funciona con cualquier señal, incluso cercana a cero o negativa.
     - **Smoothing** (Suavizado): resta esa línea base y vuelve a sumar el nivel más bajo de la señal (los puntos más bajos quedan en una línea horizontal a ese nivel en lugar de 0; por lo demás, el mismo resultado que la casilla anterior). Se omite cuando *Subtract lowest-points baseline* está marcada, y con *Divide by lowest-points baseline* sola, porque cualquiera de las dos ya quita la misma línea base.
     - **Show lowest points** (Mostrar puntos más bajos): marca los puntos usados en la gráfica de señales.
-  - **Peaks** (Picos) + **Parameters...** (Parámetros) + **Show peaks** (Mostrar picos): detección de eventos (picos), la otra mitad de la etapa 6. Elija uno de los mismos 7 métodos del Peak Finder de la pestaña Multiple Files (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); se abre su diálogo de parámetros (con los últimos valores usados; **Parameters...** lo vuelve a abrir) y **Run** detecta los picos de cada célula seleccionada. Los picos se buscan en las señales tal como se muestran, es decir, después de la normalización (en las señales crudas cuando Normalization es *None*), y se vuelven a detectar cada vez que se pulsa **Apply**. Se marcan con triángulos en la gráfica de señales, se cuentan junto al menú ("N peaks in M of K cells") y en **Generate Report** (por célula), y se registran como los eventos de la etapa 6: una tabla con una fila por pico (`cell_id, frame, value`), que se guarda con el proyecto y con **Export Events** (`.csv`/`.xlsx`). El método y sus parámetros se restauran al reabrir el proyecto. Elija *None* para dejar de detectar picos.
+  - **Peaks** (Picos) + **Parameters...** (Parámetros) + **Show peaks** (Mostrar picos): detección de eventos (picos), la última parte de la etapa 5. Elija uno de los mismos 7 métodos del Peak Finder de la pestaña Multiple Files (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); se abre su diálogo de parámetros (con los últimos valores usados; **Parameters...** lo vuelve a abrir) y **Run** detecta los picos de cada célula seleccionada. Los picos se buscan en las señales tal como se muestran, es decir, después de la normalización (en las señales crudas cuando Normalization es *None*), y se vuelven a detectar cada vez que se pulsa **Apply**. Se marcan con triángulos en la gráfica de señales, se cuentan junto al menú ("N peaks in M of K cells") y en **Generate Report** (por célula), y se registran como los eventos de la etapa 5: una tabla con una fila por pico (`cell_id, frame, value`), que se guarda con el proyecto y con **Export Events** (`.csv`/`.xlsx`). El método y sus parámetros se restauran al reabrir el proyecto. Elija *None* para dejar de detectar picos.
     - En *Peak Caller*, Rise % y Fall % son porcentajes del propio valor de la señal en el pico, así que en señales cercanas a cero (*ΔF/F0*, *Detrend + scale to 0–1*, *Subtract lowest-points baseline*) pequeñas fluctuaciones superan el umbral; úselo con señales crudas o divididas, o suba los porcentajes.
   - El dendrograma usa el enlace de Ward sobre la distancia 1 − |r|, como todos los demás dendrogramas de NecLab.
 
@@ -212,8 +211,8 @@ El análisis es una cadena de etapas, y cada una puede empezar desde un archivo 
 | 2 · Mapa de variabilidad | Variabilidad por píxel | `.npz` (uno o más mapas con nombre), `.npy`, `.tif` | Ventana de análisis |
 | 3 · Máscara de candidatos | Píxeles que pueden pertenecer a células | `.tif`/`.npy` con solo dos valores (0/1 o 0/255) | Ventana de análisis |
 | 4 · Células | Imagen de etiquetas (IDs permanentes) | Imagen de etiquetas `.tif`/`.npy`, ImageJ `.roi`/`.zip`, `.txt` anterior | Ventana de análisis |
-| 5–6 · Señales | Una columna por célula, una fila por frame | `.csv`, `.xlsx`, `.npy` | Pestaña Multiple Files |
-| 7 · Matriz de correlación | Matriz cuadrada | `.csv`, `.xlsx` | Vista de correlación (sección 9) |
+| 5 · Señales (crudas o normalizadas) | Una columna por célula, una fila por frame | `.csv`, `.xlsx`, `.npy` | Pestaña Multiple Files |
+| 6 · Matriz de correlación | Matriz cuadrada | `.csv`, `.xlsx` | Vista de correlación (sección 9) |
 
 - Si hay una grabación abierta y las imágenes del archivo son del mismo tamaño, la grabación se adjunta automáticamente. Si los tamaños no coinciden, se pregunta si continuar sin ella.
 - Lo que falte solo desactiva las funciones que lo necesitan: p. ej. al empezar desde una máscara sin grabación, la detección Basic funciona, Advanced/KMeans piden un mapa de variabilidad y las señales piden la grabación.
@@ -236,17 +235,18 @@ Contenido de una carpeta de proyecto (solo las etapas que tienen datos):
 | `s2_features/` | `maps.npz` |
 | `s3_mask/` | `mask.tif` |
 | `s4_cells/` | `cells.tif` (imagen de etiquetas) + `cells.csv` (tabla de células) |
-| `s5_signals/` | `signals_raw.csv` |
-| `s6_analysis/` | `signals_norm.csv`, `events.csv` |
-| `s7_correlation/` | `correlation.csv` |
+| `s5_signals/` | `signals_raw.csv`, `signals_norm.csv`, `events.csv` (si se detectaron picos) |
+| `s6_correlation/` | `correlation.csv` |
 
 Los archivos tienen los mismos formatos que el menú Export, así que se pueden abrir en Excel, ImageJ o Python, o con **File → Open Pipeline Stage**.
+
+Los proyectos guardados con versiones anteriores, que tenían las señales normalizadas y los eventos aparte como etapa 6 (`s6_analysis/`) y la correlación como etapa 7 (`s7_correlation/`), se abren normalmente: sus señales normalizadas y eventos pasan a la etapa 5 (o se omiten, con un aviso, si estaban desactualizados). Una carpeta de etapa 6 guardada sola por una versión anterior se puede cargar con **Load Stage...** una vez cargadas las señales.
 
 > La pestaña Multiple Files (comparar las señales de varias grabaciones) no forma parte de un proyecto; sus archivos se abren y guardan desde esa pestaña como antes.
 
 ### 4.10 La barra lateral del pipeline
 
-El panel a la izquierda de la ventana principal muestra el proyecto actual y sus 8 etapas, y es la forma más rápida de avanzar por el análisis. Ocúltelo con su botón **Hide** y vuelva a mostrarlo con **File → Show Pipeline Sidebar**; arrastre su borde derecho para cambiar su ancho.
+El panel a la izquierda de la ventana principal muestra el proyecto actual y sus 7 etapas, y es la forma más rápida de avanzar por el análisis. Ocúltelo con su botón **Hide** y vuelva a mostrarlo con **File → Show Pipeline Sidebar**; arrastre su borde derecho para cambiar su ancho.
 
 ![Barra lateral del pipeline](images/pipeline_sidebar.png)
 
@@ -269,10 +269,10 @@ Haga clic en una etapa para ver sus detalles: qué contiene, de dónde vino, cu�
 | 2 · Variability map | **Compute Variability Map...** (pregunta qué medida) si hay grabación; si no, **Open Variability Map...** |
 | 2–4 (con datos) | **Open / Show Cell Detection Window** |
 | 3 · Candidate mask, 4 · Cells | **Open Candidate Mask... / Open Cells...** cuando aún no hay nada |
-| 5–7 con células y grabación | **Open Signals & Correlation**: el análisis de correlación de las células seleccionadas (pregunta si usar todas si no hay ninguna seleccionada) |
-| 5–6 solo con datos | **View in Multiple Files** (la etapa 6 se abre con Normalization = None) |
-| 7 solo con datos | **View Correlation Matrix** (matriz + dendrograma) |
-| 5–7 sin nada aún | **Open Signals Files... / Open Correlation Matrix...** |
+| 5–6 con células y grabación | **Open Signals & Correlation**: el análisis de correlación de las células seleccionadas (pregunta si usar todas si no hay ninguna seleccionada) |
+| 5 solo con datos | **View in Multiple Files** (las señales normalizadas, con Normalization = None, si difieren de las crudas; si no, las crudas) |
+| 6 solo con datos | **View Correlation Matrix** (matriz + dendrograma) |
+| 5–6 sin nada aún | **Open Signals Files... / Open Correlation Matrix...** |
 
 Los botones de abajo:
 - **Save Stage...** guarda solo esa etapa en una carpeta nueva (sus archivos más un `stage.json` con sus parámetros).
@@ -347,7 +347,7 @@ Se crea la primera vez que usa `File → Open Multiple Files (.xls)`. Permite ca
     | By Sheet (Por Hoja) | divide entre el mínimo de toda la hoja |
     | By Column Across All Sheets (Por Columna en Todas las Hojas) | divide entre el mínimo de esa columna combinando todas las hojas cargadas |
     | Global | divide entre el mínimo de todo el conjunto de datos cargado |
-    | None (Ninguna — datos ya normalizados) | usa los valores tal como se cargaron, p. ej. para señales guardadas con **Export Normalized** (etapa 6) |
+    | None (Ninguna — datos ya normalizados) | usa los valores tal como se cargaron, p. ej. para señales guardadas con **Export Normalized** (etapa 5) |
 
     Una columna (u hoja) cuyo mínimo es 0 no se divide, en lugar de producir valores infinitos. La gráfica de líneas, el mapa de calor y `Save Smoothed Data` usan el mismo código de normalización que el resto de NecLab.
 - **Visualization** (Visualización)

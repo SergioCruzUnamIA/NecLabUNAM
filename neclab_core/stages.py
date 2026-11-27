@@ -19,9 +19,12 @@ Stages:
     2 features     per-pixel variability maps
     3 mask         candidate-pixel mask
     4 cells        label image (permanent cell IDs)
-    5 signals      raw signal of each cell
-    6 analysis     normalized signals and detected events
-    7 correlation  correlation matrix between signals
+    5 signals      each cell's signal: raw, normalized, and its detected events
+    6 correlation  correlation matrix between signals
+
+(Projects saved before stages 5 and 6 were merged had a separate stage 6
+"analysis" with the normalized signals and events; project.py reads them
+into stage 5.)
 """
 
 from dataclasses import dataclass, field
@@ -45,9 +48,10 @@ STAGES = (
     Stage(2, "features", "Pixel feature maps", "Variability of every pixel over time."),
     Stage(3, "mask", "Candidate pixel mask", "Pixels that may belong to an active cell."),
     Stage(4, "cells", "Cell detection", "Label image: each cell's pixels hold its permanent ID."),
-    Stage(5, "signals", "Signal extraction", "Mean intensity of each cell in every frame."),
-    Stage(6, "analysis", "Normalization and events", "Normalized signals and detected events (peaks)."),
-    Stage(7, "correlation", "Correlation", "Correlation between the signals."),
+    Stage(5, "signals", "Signals, normalization and events",
+          "Mean intensity of each cell in every frame, the same signals normalized, "
+          "and their detected events (peaks)."),
+    Stage(6, "correlation", "Correlation", "Correlation between the signals."),
 )
 _STAGE_BY_KEY = {s.key: s for s in STAGES}
 
@@ -109,12 +113,12 @@ ITEMS = {
         save_types=(("CSV", "*.csv"), ("Excel", "*.xlsx"), ("NumPy", "*.npy")),
         default_name="signals_raw.csv"),
     "normalized_signals": Item(
-        "normalized_signals", "analysis", "Normalized signals",
+        "normalized_signals", "signals", "Normalized signals",
         open_types=(("Signals", "*.csv *.xlsx *.npy"),),
         save_types=(("CSV", "*.csv"), ("Excel", "*.xlsx"), ("NumPy", "*.npy")),
         default_name="signals_norm.csv"),
     "events": Item(
-        "events", "analysis", "Events (peaks)",
+        "events", "signals", "Events (peaks)",
         open_types=(_TABLE,),
         save_types=(("CSV", "*.csv"), ("Excel", "*.xlsx")),
         default_name="events.csv"),

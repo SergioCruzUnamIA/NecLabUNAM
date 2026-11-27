@@ -12,9 +12,12 @@ Layout of a project folder (name.neclab/):
     s2_features/           stage.json, maps.npz
     s3_mask/               stage.json, mask.tif
     s4_cells/              stage.json, cells.tif, cells.csv
-    s5_signals/            stage.json, signals_raw.csv
-    s6_analysis/           stage.json, signals_norm.csv, events.csv
-    s7_correlation/        stage.json, correlation.csv
+    s5_signals/            stage.json, signals_raw.csv, signals_norm.csv, events.csv
+    s6_correlation/        stage.json, correlation.csv
+
+Projects saved before stages 5 and 6 were merged (format version 1) have
+s5_signals/, s6_analysis/ and s7_correlation/; they open normally: the
+normalized signals and events of s6_analysis/ join stage 5.
 
 Only stages that have data get a folder. Each stage.json records:
     origin      "computed" (made in NecLab) or "imported" (loaded from a file)
@@ -50,7 +53,7 @@ from . import stages
 from .validation import ValidationError
 
 FORMAT = "neclab-project"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2   # 2: stages 5 (signals) and 6 (analysis) merged into stage 5
 PROJECT_EXTENSION = ".neclab"
 MANIFEST = "manifest.json"
 STAGE_FILE = "stage.json"
@@ -68,8 +71,7 @@ STAGE_ITEMS = {
     "features": ("maps",),
     "mask": ("mask",),
     "cells": ("cells",),
-    "signals": ("signals",),
-    "analysis": ("normalized_signals", "events"),
+    "signals": ("signals", "normalized_signals", "events"),
     "correlation": ("correlation",),
 }
 
@@ -83,11 +85,13 @@ DEPENDENCIES = {
     "mask": ("features",),
     "cells": ("mask", "features"),
     "signals": ("cells", "preprocess", "raw"),
-    "analysis": ("signals",),
-    "correlation": ("analysis", "signals"),
+    "correlation": ("signals",),
 }
 
 STAGE_KEYS = tuple(s.key for s in stages.STAGES)
+
+# Stage 6 of projects saved before stages 5 and 6 were merged.
+LEGACY_ANALYSIS = "analysis"
 
 
 def stage_folder_name(key):
@@ -510,10 +514,36 @@ class Project:
                 warnings.append(f"Stage {stages.stage(key).number} ({stages.stage(key).title}) "
                                 f"couldn't be loaded: {e}")
             project.records[key] = rec
+        legacy = entries.get(LEGACY_ANALYSIS)
+        if legacy is not None:
+            project._merge_legacy_analysis(
+                legacy, os.path.join(folder, legacy.get("folder") or "s6_analysis"), warnings)
         project.ui = manifest.get("ui") or {}
         project.path = folder
         project.modified = False
         return project, warnings
+
+    def _merge_legacy_analysis(self, entry, stage_dir, warnings):
+        """Normalized signals and events saved as a separate stage 6 by an
+        earlier version join stage 5, if they still match its signals. The
+        signals' fingerprint is kept, so the correlation stays up to date."""
+        sig = self.records.get("signals")
+        what = "The normalized signals and events saved by an earlier NecLab version"
+        if sig is None or not sig.available:
+            warnings.append(f"{what} were skipped: the project has no signals.")
+            return
+        if (entry.get("inputs") or {}).get("signals") not in (None, sig.fingerprint):
+            warnings.append(f"{what} were out of date and were skipped; they are computed again "
+                            "when cells are selected.")
+            return
+        try:
+            items, w = self._load_items("signals", stage_dir, entry, self.context())
+        except (ValidationError, ValueError, OSError) as e:
+            warnings.append(f"{what} couldn't be loaded: {e}")
+            return
+        sig.items.update(items)
+        sig.params.update(entry.get("params") or {})
+        warnings += [f"Stage 5: {x}" for x in w]
 
     def relocate_recording(self, path):
         """Point the project at the recording's new location (after it moved).
@@ -552,6 +582,8 @@ class Project:
             raise ValidationError(f"{os.path.basename(stage_dir)} isn't a saved NecLab stage (no {STAGE_FILE}).")
         entry = self._read_json(stage_json)
         stage_key = entry.get("stage")
+        if stage_key == LEGACY_ANALYSIS and key in (None, "signals"):
+            return self._load_legacy_analysis_stage(stage_dir, entry)
         if stage_key not in STAGE_ITEMS:
             raise ValidationError(f"Unknown stage {stage_key!r} in {STAGE_FILE}.")
         if key is not None and stage_key != key:
@@ -571,3 +603,15 @@ class Project:
         self.set_stage(stage_key, items, params=params, origin="imported",
                        source={"path": stage_dir, "original_origin": entry.get("origin")})
         return stage_key, warnings
+
+    def _load_legacy_analysis_stage(self, stage_dir, entry):
+        """A stage 6 folder saved before stages 5 and 6 were merged: its
+        normalized signals and events are added to stage 5's signals."""
+        sig = self.records.get("signals")
+        if sig is None or not sig.available or sig.items.get("signals") is None:
+            raise ValidationError("This folder holds normalized signals and events saved by an earlier "
+                                  "NecLab version (stage 6): load the signals (stage 5) first.")
+        items, warnings = self._load_items("signals", stage_dir, entry, self.context())
+        self.set_stage("signals", {**sig.items, **items}, params={**sig.params, **(entry.get("params") or {})},
+                       origin="imported", source={"path": stage_dir, "original_origin": entry.get("origin")})
+        return "signals", warnings

@@ -199,7 +199,7 @@ class NecLabApp:
 
     # Parameter specs for each Peak Finder method (used by the parameter
     # dialog and the per-method params cache in the Multiple Files tab).
-    # Shared with the correlation window (stage 6 events): neclab_core.events.
+    # Shared with the correlation window (stage 5 events): neclab_core.events.
     _PEAK_PARAM_SPECS = core_events.PEAK_METHODS
 
     def __init__(self, root):
@@ -3544,13 +3544,13 @@ class NecLabApp:
     # Names short enough for the sidebar list (the full title is in the details).
     _STAGE_SHORT_NAMES = {
         "raw": "Recording", "preprocess": "Preprocessing", "features": "Variability map",
-        "mask": "Candidate mask", "cells": "Cells", "signals": "Signals",
-        "analysis": "Normalization & events", "correlation": "Correlation",
+        "mask": "Candidate mask", "cells": "Cells", "signals": "Signals & events",
+        "correlation": "Correlation",
     }
 
     # Settings kept in the project but not printed in the sidebar details
     # (e.g. the list of every cell's ID, which can run to hundreds of numbers).
-    _SIDEBAR_HIDDEN_PARAMS = {"signals": ("cells", "measure")}
+    _SIDEBAR_HIDDEN_PARAMS = {"signals": ("cells", "measure", "peak_params")}
 
     # What each stage needs before it can be run (shown for stages not run yet).
     _STAGE_NEEDS = {
@@ -3559,11 +3559,10 @@ class NecLabApp:
         "features": "Needs the recording (stage 0): compute a variability map from it, or open a saved map.",
         "mask": "Made from a variability map (stage 2) in the cell detection window, or open a saved mask.",
         "cells": "Detected in the cell detection window from a map or a mask, or open saved cells / ImageJ ROIs.",
-        "signals": "Needs cells (stage 4) and the recording (stage 0): extracted automatically for the "
-                   "cells you select (Select All, click or drag), or open a signals file.",
-        "analysis": "Computed automatically from the signals (stage 5) of the cells you select, with the "
-                    "normalization and peak method last applied in the correlation analysis window.",
-        "correlation": "Computed automatically when 2 or more cells are selected, from the (normalized) "
+        "signals": "Needs cells (stage 4) and the recording (stage 0): extracted, normalized and searched "
+                   "for events automatically for the cells you select (Select All, click or drag), with the "
+                   "settings last applied in the Signals & Correlation tab; or open a signals file.",
+        "correlation":"Computed automatically when 2 or more cells are selected, from the (normalized) "
                        "signals, with the last correlation method chosen; or open a correlation matrix.",
     }
 
@@ -3718,15 +3717,15 @@ class NecLabApp:
                                "mask": ("mask", "Open Candidate Mask..."),
                                "cells": ("cells", "Open Cells...")}[key]
             return label, lambda: self.open_pipeline_stage(item_key)
-        # stages 5-7
+        # stages 5-6
         if win is not None and win.labels is not None and win.img_array is not None:
             return "Open Signals & Correlation", lambda: self._open_signal_analysis(win)
         if p.data(key) is not None:
             if key == "correlation":
                 return "View Correlation Matrix", self._view_project_correlation
             return "View in Multiple Files", lambda: self._view_signals_in_multiple_files(key)
-        if key in ("signals", "analysis"):
-            return "Open Signals Files...", self.open_multiple_xls_files
+        if key == "signals":
+            return "Open Signals Files...",self.open_multiple_xls_files
         return "Open Correlation Matrix...", self.load_correlation_matrix_wrapper
 
     def _run_stage_action(self):
@@ -3757,8 +3756,8 @@ class NecLabApp:
             self.show_variability_menu(names.index(choice))
 
     def _open_signal_analysis(self, win):
-        """Stages 5-7 from the cell detection window: signals of the
-        selected cells, their normalization and correlation."""
+        """Stages 5-6 from the cell detection window: signals of the
+        selected cells, their normalization, events and correlation."""
         if not win.selected_clusters:
             if not messagebox.askyesno("No Cells Selected",
                                        f"No cells are selected. Use all {len(win.cell_pix)} cells?"):
@@ -3768,23 +3767,27 @@ class NecLabApp:
         win.use_selected_clusters()
 
     def _view_signals_in_multiple_files(self, key):
-        """Show the project's signals (stage 5) or normalized signals (stage 6)
-        in the Multiple Files tab."""
+        """Show the project's signals (stage 5) in the Multiple Files tab:
+        the normalized ones when they differ from the raw ones."""
         df = self.project.data(key)
         if df is None:
             return
-        title = core_stages.stage(key).title
+        title = "Signals"
+        norm = self.project.data(key, "normalized_signals")
+        normalized = norm is not None and not norm.equals(df)
+        if normalized:
+            df, title = norm, "Normalized signals"
         table = df.copy()
         table.columns = [str(i) for i in range(table.shape[1])]   # Multiple Files matches columns by position
         datasets = [{'file': self.project.path or self.project.name, 'sheet': title,
                      'label': f"{self.project.name} - {title}", 'df': table,
                      'column_names': list(table.columns)}]
-        if key == "analysis":
+        if normalized:
             self.multi_xls_norm_mode_var.set('none')     # already normalized
         self._on_multi_xls_load_complete(datasets)
 
     def _view_project_correlation(self):
-        """Show the project's correlation matrix (stage 7) with its dendrogram."""
+        """Show the project's correlation matrix (stage 6) with its dendrogram."""
         corr = self.project.data("correlation")
         if corr is None:
             return None

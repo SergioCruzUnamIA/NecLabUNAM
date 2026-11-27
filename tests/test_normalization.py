@@ -1,4 +1,4 @@
-"""Tests for the shared normalization (stage 6) and clustering (stage 7)
+"""Tests for the shared normalization (stage 5) and clustering (stage 6)
 modules. Run with:  python -m pytest tests"""
 
 import os
