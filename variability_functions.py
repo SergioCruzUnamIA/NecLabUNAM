@@ -127,6 +127,7 @@ class VariabilityAnalysisWindow:
         self.extra_tabs = []        # 3D views opened from here
         self.project = project
         self.on_recording_attached = on_recording_attached
+        self.on_open_cell_view = None   # opens the Cell Signals tab (set by the main window)
         restore = restore or {}
 
         computed_map = var_im is None and img_array is not None and method is not None
@@ -1185,6 +1186,12 @@ class VariabilityAnalysisWindow:
                        command=self._redraw_correlation).pack(side=tk.LEFT, padx=(10, 10))
         self.peak_info_label = tk.Label(peak_frame, text="", fg='gray')
         self.peak_info_label.pack(side=tk.LEFT, padx=5)
+        if self.on_open_cell_view is not None:
+            cell_view_frame = row(proc)
+            tk.Button(cell_view_frame, text="Per-Cell View",
+                      command=self.on_open_cell_view).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Label(cell_view_frame, fg='gray',
+                     text="each cell on its own: raw and processed signal with its peaks").pack(side=tk.LEFT)
 
         # ---- Stage 6: correlation, and the exports
         corr_box = tk.LabelFrame(control_frame, text=" Correlation (stage 6) & export ", padx=8, pady=4)
@@ -1337,6 +1344,35 @@ class VariabilityAnalysisWindow:
         if self.signals_df is None:
             return
         self._read_controls()
+        self._process_settings()
+
+    def owns_signals_stage(self):
+        """True if the project's stage 5 holds this tab's selected cells,
+        extracted from its recording: settings for stage 5 then go
+        through this tab (apply_settings), which keeps it up to date."""
+        if self.project is None or self.img_array is None or self.labels is None or not self.selected_clusters:
+            return False
+        rec = self.project.get("signals")
+        return rec is not None and list(rec.params.get("cells") or []) == self._selected_sorted()
+
+    def apply_settings(self, settings):
+        """Use these normalization and peak settings (see
+        neclab_core.analysis.DEFAULT_SETTINGS) from now on, e.g. chosen in
+        the Cell Signals tab: as Apply in the correlation tab, whose
+        controls are updated to match."""
+        settings = {**core_analysis.DEFAULT_SETTINGS, **settings}
+        if settings["peak_method"] in events.PEAK_METHODS:
+            self.peak_params[settings["peak_method"]] = dict(settings.get("peak_params") or {})
+        self.analysis_settings = settings
+        self._set_controls_from_settings()
+        if self.signals_df is None and not (self.selected_clusters and self._compute_results(
+                interactive=True, corr=False)):
+            return
+        self._process_settings()
+
+    def _process_settings(self):
+        """Recompute stage 5 with self.analysis_settings and record it (see
+        apply_normalization)."""
         self._run_analysis(interactive=True)
         self._record_results(signals=True, corr=False)
         if self.current_corr_matrix is not None and not self.corr_is_stale:

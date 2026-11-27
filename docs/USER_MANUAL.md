@@ -14,7 +14,7 @@ For installation instructions, see the [README](../README.md). This manual assum
 2. [Menu bar](#2-menu-bar)
 3. [Tab: Image Processing](#3-tab-image-processing)
 4. [Variability analysis and cell detection](#4-variability-analysis-and-cell-detection)
-5. [Tab: Data Visualization](#5-tab-data-visualization)
+5. [Tab: Cell Signals (stage 5, one cell at a time)](#5-tab-cell-signals-stage-5-one-cell-at-a-time)
 6. [Tab: Multiple Files](#6-tab-multiple-files)
 7. [Tab: Dendrogram](#7-tab-dendrogram)
 8. [Tab: Time Series](#8-tab-time-series)
@@ -33,7 +33,7 @@ NecLab has two main workflows, organized as tabs inside a single window:
 - **Image processing**: load an OME-TIFF stack, adjust its display, and analyze the temporal variability of each pixel to detect and segment cells as spatial clusters.
 - **Data visualization and analysis**: load numeric series (a single `.npy`/`.csv` file, or several Excel files at once) to detect peaks, smooth signals, normalize, compute correlations, and build dendrograms.
 
-Both workflows share the same main window, which has a menu bar at the top and a tabbed `Notebook` below it. The Image Processing tab is there from startup; every other view opens as another tab of the same window, never as a separate window: Cell Detection, Signals & Correlation, 3D View, Correlation Matrix, Histogram, Binarization, Multiple Files, Dendrogram and Time Series. A tab opened this way has a thin bar at the top with its own menus (if any) on the left and a **✕ Close Tab** button on the right. The application's UI is entirely in English.
+Both workflows share the same main window, which has a menu bar at the top and a tabbed `Notebook` below it. The Image Processing tab is there from startup; every other view opens as another tab of the same window, never as a separate window: Cell Detection, Signals & Correlation, Cell Signals, 3D View, Correlation Matrix, Histogram, Binarization, Multiple Files, Dendrogram and Time Series. A tab opened this way has a thin bar at the top with its own menus (if any) on the left and a **✕ Close Tab** button on the right. The application's UI is entirely in English.
 
 ---
 
@@ -47,9 +47,8 @@ Both workflows share the same main window, which has a menu bar at the top and a
 | **Show Pipeline Sidebar** | Shows or hides the pipeline sidebar on the left: each stage's status (not run, done, loaded, out of date, missing), its details, a button to open or run it, and saving or loading a single stage. See [section 4.10](#410-the-pipeline-sidebar). |
 | **Open Recording (OME-TIFF / TIFF / NPY)...** (`Ctrl+O`) | Loads a recording (an image stack of frames × height × width) from an OME-TIFF, a plain TIFF or a NumPy `.npy` file, switches to the "Image Processing" tab, and enables the Image and Variability Analysis menus. Files that aren't a recording (e.g. a single 2D image) are rejected with an explanation. |
 | **Open Pipeline Stage** | Starts the analysis at a later stage from a file saved earlier (or made by another program). See [section 4.8](#48-starting-from-a-saved-stage). |
-| **Open Data (.npy / .csv / .xlsx)** | Loads a numeric data file into the "Data Visualization" tab. For CSV files, a dialog lets you pick the initial column (ROI); for `.npy` files, columns are auto-named "Column 1", "Column 2", etc. |
 | **Load Correlation Matrix** | Loads an already-computed correlation matrix (CSV/XLSX, must be square) and displays it as a dendrogram + heatmap. See [section 9](#9-loading-a-precomputed-correlation-matrix). |
-| **Open Multiple Files (.xls / .csv)** | Starts the "Multiple Files" workflow: pick several Excel files and the sheets to load from each. See [section 6](#6-tab-multiple-files). |
+| **Open Data Files (.npy / .xls / .csv)** | Starts the "Multiple Files" workflow, outside the project's pipeline: pick several files and the sheets to load from each. See [section 6](#6-tab-multiple-files). To load signals as stage 5 of the project instead, use **Open Pipeline Stage → 5 · Signals**. |
 | **Exit** | Closes the application (asks for confirmation, or to save unsaved project changes). |
 
 ### Image
@@ -73,10 +72,11 @@ Disabled until an image is loaded. Populated dynamically with the 7 variability 
 
 | Item | Action |
 |---|---|
+| **Cell Signals (stage 5)** | Opens the "Cell Signals" tab (section 5): every cell of stage 5, each on its own with its peaks. |
 | **Dendrogram** | Opens/activates the "Dendrogram" tab (section 7) for the data in the Multiple Files tab. |
 | **Time Series** | Opens the "Time Series" tab (section 8) for the data in the Multiple Files tab. |
 
-> **Note:** these two items are disabled until there is data in the Multiple Files tab: open it with `File → Open Data Files`, `File → Open Pipeline Stage → 5 · Signals`, or the pipeline sidebar's **View in Multiple Files**. "Load Correlation Matrix" alone doesn't enable them.
+> **Note:** Dendrogram and Time Series are disabled until there is data in the Multiple Files tab: open it with `File → Open Data Files`. "Load Correlation Matrix" alone doesn't enable them.
 
 ### Help
 
@@ -195,7 +195,7 @@ Each item runs a complete detection with the current Threshold / Min Size / Max 
     - **Subtract lowest-points baseline** (checkbox, combines with any Normalization): after the chosen normalization, the lowest-points baseline of the *normalized* signal is subtracted, so its lowest points lie on a horizontal line at 0 and every value reads as "above the baseline", in that normalization's units (e.g. *ΔF/F0* + subtract = ΔF/F0 above a baseline that follows slow drifts; *None* + subtract = raw intensity above the baseline). With no division, it works for any signal, including ones near or below zero.
     - **Smoothing**: subtracts that baseline and adds the signal's lowest level back (the lowest points end up on a horizontal line at that level instead of 0, otherwise the same result as the checkbox above). Skipped when *Subtract lowest-points baseline* is ticked, and with *Divide by lowest-points baseline* alone, since either already removes the same baseline.
     - **Show lowest points**: marks the points used on the signals plot.
-  - **Peaks** + **Parameters...** + **Show peaks**: event (peak) detection, the last part of stage 5. Choose one of the same 7 Peak Finder methods as the Multiple Files tab (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); its parameter dialog opens (pre-filled with the last values used; **Parameters...** opens it again), and **Run** detects the peaks of every selected cell. The peaks are found on the signals as shown, i.e. after the normalization (on the raw signals when Normalization is *None*), and are re-detected whenever **Apply** is clicked. They are marked with triangles on the signals plot, counted next to the menu ("N peaks in M of K cells") and in **Generate Report** (per cell), and recorded as the stage 5 events: a table with one row per peak (`cell_id, frame, value`), saved with the project and with **Export Events** (`.csv`/`.xlsx`). The method and its parameters are restored when the project is reopened. Choose *None* to stop detecting peaks.
+  - **Peaks** + **Parameters...** + **Show peaks**: event (peak) detection, the last part of stage 5. Choose one of the same 7 Peak Finder methods as the Multiple Files tab (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); its parameter dialog opens (pre-filled with the last values used; **Parameters...** opens it again), and **Run** detects the peaks of every selected cell. The peaks are found on the signals as shown, i.e. after the normalization (on the raw signals when Normalization is *None*), and are re-detected whenever **Apply** is clicked. They are marked with triangles on the signals plot, counted next to the menu ("N peaks in M of K cells") and in **Generate Report** (per cell), and recorded as the stage 5 events: a table with one row per peak (`cell_id, frame, value`), saved with the project and with **Export Events** (`.csv`/`.xlsx`). The method and its parameters are restored when the project is reopened. Choose *None* to stop detecting peaks. **Per-Cell View** opens the Cell Signals tab (section 5): each cell on its own with its peaks.
     - *Peak Caller*'s Rise % and Fall % are percentages of the signal's own value at the peak, so on signals near zero (*ΔF/F0*, *Detrend + scale to 0–1*, *Subtract lowest-points baseline*) tiny fluctuations pass the threshold; use it on raw or divided signals, or raise the percentages.
   - The dendrogram uses Ward linkage on the distance 1 − |r|, like every other dendrogram in NecLab.
 
@@ -211,7 +211,7 @@ The analysis is a chain of stages, and each one can be started from a file inste
 | 2 · Variability Map | Per-pixel variability | `.npz` (one or more named maps), `.npy`, `.tif` | Cell detection tab |
 | 3 · Candidate Mask | Pixels that may belong to cells | `.tif`/`.npy` with only two values (0/1 or 0/255) | Cell detection tab |
 | 4 · Cells | Label image (permanent IDs) | `.tif`/`.npy` label image, ImageJ `.roi`/`.zip`, older `.txt` | Cell detection tab |
-| 5 · Signals (raw or normalized) | One column per cell, one row per frame | `.csv`, `.xlsx`, `.npy` | Multiple Files tab |
+| 5 · Signals (raw or normalized) | One column per cell, one row per frame | `.csv`, `.xlsx`, `.npy` | Cell Signals tab (section 5) |
 | 6 · Correlation Matrix | Square matrix | `.csv`, `.xlsx` | Correlation view (section 9) |
 
 - If a recording is open and the file's images are the same size, the recording is attached automatically. If the sizes differ, you are asked whether to continue without it.
@@ -269,10 +269,10 @@ Click a stage to see its details: what it holds, where it came from, when it was
 | 2 · Variability map | **Compute Variability Map...** (asks which measure) when there's a recording; otherwise **Open Variability Map...** |
 | 2–4 (with data) | **Open / Show Cell Detection Tab** |
 | 3 · Candidate mask, 4 · Cells | **Open Candidate Mask... / Open Cells...** when there's nothing yet |
-| 5–6 with cells and the recording | **Open Signals & Correlation**: the correlation analysis of the selected cells (asks to use all cells if none are selected) |
-| 5 with data only | **View in Multiple Files** (the normalized signals, with Normalization = None, when they differ from the raw ones; otherwise the raw signals) |
+| 5 with data | **Open Cell Signals**: every cell on its own, with its peaks (section 5) |
+| 5 with no data yet, with cells and the recording; 6 with cells and the recording | **Open Signals & Correlation**: the correlation analysis of the selected cells (asks to use all cells if none are selected) |
 | 6 with data only | **View Correlation Matrix** (matrix + dendrogram) |
-| 5–6 with nothing yet | **Open Signals Files... / Open Correlation Matrix...** |
+| 5–6 with nothing yet | **Open Signals File... / Open Correlation Matrix...** |
 
 The buttons underneath:
 - **Save Stage...** saves just that stage to a new folder (its files plus a `stage.json` with its settings).
@@ -282,42 +282,37 @@ The buttons underneath:
 
 ---
 
-## 5. Tab: Data Visualization
+## 5. Tab: Cell Signals (stage 5, one cell at a time)
 
-Visible from startup, but only fully active once data is loaded via `File → Open Data (.npy / .csv)`.
+The list of every cell in stage 5 and, for the cell chosen in it, its signal on its own with the peaks found. It is the pipeline's view of stage 5 (it replaces both the old Data Visualization tab and viewing stage 5 in the Multiple Files tab). Open it with:
 
-### 5.1 Tab's local menu
+- the pipeline sidebar's **Open Cell Signals** (stage 5 selected),
+- **Visualization → Cell Signals (stage 5)**,
+- the **Per-Cell View** button in the Signals & Correlation tab,
+- **File → Open Pipeline Stage → 5 · Signals**, which loads a signals table as stage 5 of the project and opens this tab.
 
-A dedicated menu bar sits at the top of the tab:
+It always shows the project's current stage 5: when you select other cells in the cell detection tab, apply another normalization or peak method, or open a project, it updates by itself and keeps the same cell selected if it is still there.
 
-- **View**
-  - `Smoothing`: toggles convex-envelope smoothing on the signal.
-  - `Show points`: shows/hides the signal's data points.
-  - `Show Labels (Correlation)`: shows/hides axis labels on the correlation heatmap.
-- **Save**
-  - `Save Data Image...`: saves the data plot as an image.
-  - `Save Correlation...`: saves the correlation heatmap as an image.
-  - `Save Correlation Data...`: exports the correlation matrix (CSV/XLSX).
-  - `Save Peaks CSV...`: exports the detected peaks (see 5.4).
+### 5.1 Side panel
 
-### 5.2 Side panel
+- **CELLS (STAGE 5)**: how many cells and frames, the normalization and how many peaks were found (and in how many cells), then the list of cells, each with its number of peaks. Click a cell, or move with the ↑/↓ keys, to show it.
+- **SIGNAL PROCESSING (STAGE 5)**: the same normalization settings as the Signals & Correlation tab (Normalization, Lowest points, Smoothing, Subtract lowest-points baseline).
+- **PEAK FINDER**: the 7 peak-detection methods (see the [glossary](#12-method-glossary)). Choosing one asks for its parameters and detects the peaks of every cell right away; **Parameters...** changes them.
+- **Apply**: recomputes stage 5 for every cell with these settings.
 
-- **DATA COLUMNS**: multi-select list of every column in the loaded file.
-- **PEAK FINDER**: combo box with the 7 peak-detection methods (see the [glossary](#12-method-glossary)) and a "Points:" spinbox (2–50) for the number of points used by the convex-envelope smoothing.
-- **CORRELATION**: combo box to choose the method (`pearson`, `kendall`, `spearman`).
-- **SELECTION**: single-select list, with "Add to Selection" / "Remove from Selection" buttons. At least 2 columns must be in the selection to draw the correlation heatmap.
+The settings are those of stage 5, shared with the Signals & Correlation tab: when the cells come from a cell detection tab, applying them here is the same as applying them there (its controls follow), and they are used for the cells selected from then on. For signals loaded from a file, NecLab recomputes stage 5 from them itself. Either way the correlation (stage 6) is then out of date until it is recomputed.
 
-### 5.3 Plot area
+### 5.2 Plot area
 
-Clicking a column builds three stacked panels:
+Two plots that share the frame axis (zooming one zooms both; the toolbar underneath zooms, pans and saves):
 
-1. **Top**: the raw signal for the chosen column, with peak markers (if a detection method is active) and the smoothing baseline (if "Smoothing" is on).
-2. **Middle**: the "processed" view — either the smoothed signal alone, or the diagnostic plot of the selected peak-detection method.
-3. **Bottom**: the correlation heatmap (Pearson/Kendall/Spearman) for the columns in the Selection list.
+1. **Raw signal**: the cell's mean intensity, with its peaks (red) and, when the lowest-points baseline is taken on the raw signal (no other normalization, or "Divide by lowest-points baseline"), that baseline (dashed orange) and the lowest points it goes through.
+2. **Processed signal**: the signal as normalized, the one the peaks are detected on, with the same peaks and the lowest points used (purple). With no normalization it is the raw signal again.
 
-### 5.4 Exporting detected peaks
+### 5.3 Tab's local menu
 
-`Save → Save Peaks CSV...` runs the active peak-detection method over every column in the Selection list and writes a CSV with a `TIME` column plus one 0/1 flag column per selected data column (1 = a peak was detected at that time index). Requires having already run a detection method once, and at least one column in the Selection list.
+- **View**: `Show peaks`, `Show lowest points & baseline`, `Previous Cell` / `Next Cell`.
+- **Save**: `Save Plot of This Cell...` (PNG, PDF, SVG, TIFF), `Save This Cell's Peaks...` (frame, raw value and processed value of each peak, CSV/XLSX), `Export All Events...` (the stage 5 events table: one row per peak of every cell) and `Export Normalized Signals...`.
 
 ---
 
@@ -377,7 +372,7 @@ Both panels redraw to fill their space on window resize or when a split is relea
 
 Created the first time data is loaded (via `File → Open Data`) and `Visualization → Dendrogram` is used.
 
-- Side panel: "DATA COLUMNS" list (same as Data Visualization), "SELECTION" list, "Add to Selection"/"Remove from Selection" buttons, and "Save Dendrogram Image" / "Save Dendrogram CSV" buttons.
+- Side panel: "DATA COLUMNS" list (same as Multiple Files), "SELECTION" list, "Add to Selection"/"Remove from Selection" buttons, and "Save Dendrogram Image" / "Save Dendrogram CSV" buttons.
 - Plot area: top panel shows the signal of the chosen column; bottom panel shows the dendrogram of the columns in the Selection list (minimum 2). The dendrogram clusters the **correlation** between the selected signals (correlation type from the Multiple Files tab), with the clustering shared by every view: Ward linkage on the distance 1 − |r| (see [section 12](#correlation-methods)).
 - "Save Dendrogram CSV" exports the signals (`Sample_Index, Signal, Dendrogram_Position`) and the linkage matrix (`Merge_Step, Child_1, Child_2, Distance, Size`; children below the number of signals are signals, the rest are earlier merges).
 
@@ -439,7 +434,7 @@ Requires an internet connection. This feature does **not** update Python depende
 | Linear Model | `SGDOneClassSVM` | Nu (0.131) |
 | Peak Function 7 | Lasso + Local Outlier Factor | N Neighbors (20) |
 
-Smoothing (independent of the peak method) uses a convex envelope: it builds a piecewise-linear baseline from the signal's genuine local-convexity "lowest points" (the "Points" parameter, 2–50) and subtracts it from the raw signal. Used in both Data Visualization and Multiple Files.
+Smoothing (independent of the peak method) uses a convex envelope: it builds a piecewise-linear baseline from the signal's genuine local-convexity "lowest points" (the "Points" parameter, 2–50) and subtracts it from the raw signal. Used in Multiple Files, and as the Smoothing option of stage 5 (Signals & Correlation and Cell Signals tabs).
 
 ### Variability methods
 
@@ -477,6 +472,6 @@ See the "Troubleshooting" section of the [README](../README.md#troubleshooting) 
 - **The correlation heatmap doesn't appear**: you need at least 2 columns in the Selection list.
 - **"Load Correlation Matrix" rejects my file**: the matrix must be square (same number of rows and columns, with matching headers).
 - **Some columns from my sheets don't show up in Multiple Files**: only columns present in **every** loaded sheet are shown (matched by position, since sheets are read without headers). If one sheet has fewer columns than the others, the "extra" columns from the other sheets won't be displayed.
-- **Visualization → Dendrogram / Time Series are disabled**: they activate once there is data in the Multiple Files tab (`File → Open Data Files`, `Open Pipeline Stage → 5 · Signals`, or the sidebar's **View in Multiple Files**); "Load Correlation Matrix" alone doesn't enable them.
+- **Visualization → Dendrogram / Time Series are disabled**: they activate once there is data in the Multiple Files tab (`File → Open Data Files`); "Load Correlation Matrix" alone doesn't enable them. To look at the project's signals (stage 5) use the Cell Signals tab (section 5).
 
 If the problem persists, contact sergio.cruz@ciencias.unam.mx or open an issue on the GitHub repository.

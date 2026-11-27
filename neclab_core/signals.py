@@ -30,6 +30,12 @@ def parse_cell_column(name):
     return None
 
 
+def signal_label(name):
+    """How a signal column is shown: "Cell 12" for "cell_12", else its name."""
+    cid = parse_cell_column(name)
+    return f"Cell {cid}" if cid is not None else str(name)
+
+
 def extract_signals(stack, labels, cell_ids=None):
     """Mean intensity of each cell in every frame.
 

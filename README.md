@@ -126,8 +126,9 @@ This section is only a summary. For detailed step-by-step instructions for each 
 The application is organized into tabs:
 
 - **Image Processing**: open an OME-TIFF image (`File → Open OME-TIFF`, or `Ctrl+O`), adjust brightness/contrast/threshold, and from the **Variability Analysis** menu choose one of the 7 methods to open the cell detection and clustering tab. Every view opens as a tab of the main window.
+- **Cell Signals** (stage 5): every cell of the project's signals in a list and, for the chosen cell, its raw and processed (normalized) signal with the peaks found, plus the stage 5 normalization and Peak Finder settings. Opened from the pipeline sidebar (stage 5 → **Open Cell Signals**), `Visualization → Cell Signals`, the **Per-Cell View** button in Signals & Correlation, or `File → Open Pipeline Stage → 5 · Signals` (which loads a signals file as stage 5). It follows the project: selecting other cells or applying other settings redraws it.
 - **Dendrogram** and **Time Series** (`Visualization` menu): views of the data in the Multiple Files tab, enabled once data is loaded there.
-- **Multiple Files** (appears when using `File → Open Multiple Files (.xls)`): load and compare several Excel sheets at once, with smoothing, normalization, a heatmap, and sheet classification.
+- **Multiple Files** (appears when using `File → Open Data Files`): load and compare several Excel sheets at once, with smoothing, normalization, a heatmap, and sheet classification. It is a separate tool, outside the project's pipeline.
 - **Dendrogram** and **Time Series**: created automatically when using the corresponding options in the **Visualization** menu, once data has been loaded.
 
 You can also load an already-computed correlation matrix with `File → Load Correlation Matrix`.
@@ -163,6 +164,7 @@ NecLabUNAM/
 ├── tests/                      # Tests for neclab_core (pytest)
 ├── variability_functions.py    # Cell detection tab + its Signals & Correlation and 3D View tabs (UI)
 ├── ui_tabs.py                  # Closable tabs (with their own menu bar) for every view
+├── cell_signals_view.py        # Cell Signals tab: stage 5 one cell at a time, with its peaks (UI)
 ├── peak_functions.py           # Peak detection (7 methods) and smoothing
 ├── corr_dendo_functions.py     # Correlations, dendrograms, and time series
 ├── multi_xls_helpers.py        # Loading and processing for the Multiple Files tab

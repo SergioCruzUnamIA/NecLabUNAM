@@ -130,7 +130,7 @@ _CORE_FILES = [
 ]
 # Other modules added after the updater's file list was first released; an
 # install updated by an older version gets this file but not these.
-_ADDED_FILES = ["ui_tabs.py"]
+_ADDED_FILES = ["ui_tabs.py", "cell_signals_view.py"]
 
 
 def _download_repo_files(filenames, app_dir):
@@ -186,6 +186,7 @@ def _ensure_core_package():
 
 _ensure_core_package()
 
+from neclab_core import analysis as core_analysis
 from neclab_core import correlation as core_correlation
 from neclab_core import display as core_display
 from neclab_core import events as core_events
@@ -201,6 +202,7 @@ from variability_functions import (show_variability_analysis, get_variability_me
                                    open_detection_window, ask_choice, show_warnings)
 from corr_dendo_functions import load_correlation_matrix, plot_time_series
 from ui_tabs import add_tab
+from cell_signals_view import CellSignalsView
 from multi_xls_helpers import pick_files_and_sheets, load_selected_sheets, common_column_names
 from image_loader import ask_recording_path, load_recording
 from image_processing import mask_to_pil
@@ -246,6 +248,8 @@ class NecLabApp:
         self.detection_windows = []     # open cell detection tabs (they report to the project)
         # Views opened as tabs (ui_tabs.Tab), one of each kind at a time
         self.corr_matrix_tab = None     # a loaded / the project's correlation matrix
+        self.cell_signals_view = None   # Cell Signals: stage 5, one cell at a time
+        self._signals_analyzer = core_analysis.Analyzer()   # stage 5 of signals loaded from a file
         self.time_series_tab = None     # Visualization → Time Series
         self.histogram_tab = None       # Image → Histogram
         self.binarize_tab = None        # Image → Binarize
@@ -410,7 +414,7 @@ class NecLabApp:
         self.menu_etapas.add_command(label="4 · Cells (label image / ImageJ ROIs)...",
                                      command=lambda: self.open_pipeline_stage("cells"))
         self.menu_etapas.add_command(label="5 · Signals (.csv / .xlsx / .npy)...",
-                                     command=self.open_multiple_xls_files)
+                                     command=self.open_signals_stage)
         self.menu_etapas.add_command(label="6 · Correlation Matrix (.csv / .xlsx)...",
                                      command=self.load_correlation_matrix_wrapper)
         self.menu_archivo.add_separator()
@@ -472,6 +476,8 @@ class NecLabApp:
         self.menu_visual = Menu(self.menu_bar, tearoff=False)
         self.menu_bar.add_cascade(menu=self.menu_visual, label="Visualization")
 
+        self.menu_visual.add_command(label='Cell Signals (stage 5)', command=self.open_cell_signals_view)
+        self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Dendrogram', command=None, state=DISABLED)
         self.menu_visual.add_separator()
         self.menu_visual.add_command(label='Time Series', command=None, state=DISABLED)
@@ -3334,6 +3340,7 @@ class NecLabApp:
         win = open_detection_window(self.root, project=self.project,
                                     on_recording_attached=self._on_recording_attached,
                                     notebook=self.notebook, **kwargs)
+        win.on_open_cell_view = self.open_cell_signals_view
         self.detection_windows.append(win)
         self._refresh_status_window()
         return win
@@ -3456,6 +3463,8 @@ class NecLabApp:
         self.project.remove_listener(self._on_project_changed)
         self.project = project
         self.project.add_listener(self._on_project_changed)
+        if self.cell_signals_view is not None and self.cell_signals_view.exists():
+            self.cell_signals_view.set_project(project)
         self._on_project_changed()
 
     def new_project(self):
@@ -3611,7 +3620,8 @@ class NecLabApp:
         "cells": "Detected in the cell detection tab from a map or a mask, or open saved cells / ImageJ ROIs.",
         "signals": "Needs cells (stage 4) and the recording (stage 0): extracted, normalized and searched "
                    "for events automatically for the cells you select (Select All, click or drag), with the "
-                   "settings last applied in the Signals & Correlation tab; or open a signals file.",
+                   "settings last applied in the Signals & Correlation or Cell Signals tab; or open a "
+                   "signals file. Cell Signals shows each cell on its own with its peaks.",
         "correlation":"Computed automatically when 2 or more cells are selected, from the (normalized) "
                        "signals, with the last correlation method chosen; or open a correlation matrix.",
     }
@@ -3763,15 +3773,18 @@ class NecLabApp:
                                "mask": ("mask", "Open Candidate Mask..."),
                                "cells": ("cells", "Open Cells...")}[key]
             return label, lambda: self.open_pipeline_stage(item_key)
-        # stages 5-6
+        # stage 5: each cell on its own, in the Cell Signals tab
+        if key == "signals":
+            if p.data("signals") is not None:
+                return "Open Cell Signals", self.open_cell_signals_view
+            if win is not None and win.labels is not None and win.img_array is not None:
+                return "Open Signals & Correlation", lambda: self._open_signal_analysis(win)
+            return "Open Signals File...", self.open_signals_stage
+        # stage 6
         if win is not None and win.labels is not None and win.img_array is not None:
             return "Open Signals & Correlation", lambda: self._open_signal_analysis(win)
         if p.data(key) is not None:
-            if key == "correlation":
-                return "View Correlation Matrix", self._view_project_correlation
-            return "View in Multiple Files", lambda: self._view_signals_in_multiple_files(key)
-        if key == "signals":
-            return "Open Signals Files...", self.open_multiple_xls_files
+            return "View Correlation Matrix", self._view_project_correlation
         return "Open Correlation Matrix...", self.load_correlation_matrix_wrapper
 
     def _run_stage_action(self):
@@ -3806,25 +3819,101 @@ class NecLabApp:
             win.select_all_clusters()
         win.use_selected_clusters()
 
-    def _view_signals_in_multiple_files(self, key):
-        """Show the project's signals (stage 5) in the Multiple Files tab:
-        the normalized ones when they differ from the raw ones."""
-        df = self.project.data(key)
-        if df is None:
+    # ---- stage 5, one cell at a time (the Cell Signals tab)
+
+    def open_cell_signals_view(self):
+        """Show the Cell Signals tab: every cell of stage 5, each on its own
+        with its raw and processed signal and its peaks."""
+        view = self.cell_signals_view
+        if view is not None and view.exists():
+            view.refresh(force=True)
+            view.show()
+            return view
+        self.cell_signals_view = CellSignalsView(self.notebook, self.root, self.project,
+                                                 apply_settings=self._apply_signal_settings,
+                                                 on_closed=self._on_cell_signals_closed)
+        self._refresh_status_window()
+        return self.cell_signals_view
+
+    def _on_cell_signals_closed(self):
+        self.cell_signals_view = None
+
+    def _signals_owner(self):
+        """The open cell detection tab whose selected cells are stage 5, if any."""
+        self.detection_windows = [w for w in self.detection_windows if w.exists()]
+        for win in reversed(self.detection_windows):
+            if win.project is self.project and win.owns_signals_stage():
+                return win
+        return None
+
+    def _apply_signal_settings(self, settings):
+        """Recompute stage 5 with new normalization/peak settings (from the
+        Cell Signals tab). When a cell detection tab owns stage 5 it does
+        it, so its Signals & Correlation tab stays in step; otherwise (e.g.
+        signals loaded from a file) the signals are analysed here."""
+        win = self._signals_owner()
+        if win is not None:
+            win.apply_settings(settings)
             return
-        title = "Signals"
-        norm = self.project.data(key, "normalized_signals")
-        normalized = norm is not None and not norm.equals(df)
-        if normalized:
-            df, title = norm, "Normalized signals"
-        table = df.copy()
-        table.columns = [str(i) for i in range(table.shape[1])]   # Multiple Files matches columns by position
-        datasets = [{'file': self.project.path or self.project.name, 'sheet': title,
-                     'label': f"{self.project.name} - {title}", 'df': table,
-                     'column_names': list(table.columns)}]
-        if normalized:
-            self.multi_xls_norm_mode_var.set('none')     # already normalized
-        self._on_multi_xls_load_complete(datasets)
+        rec = self.project.get("signals")
+        raw = self.project.data("signals")
+        if rec is None or raw is None:
+            return
+        view = self.cell_signals_view
+        parent = view.tab.frame if view is not None and view.exists() else self.root
+        result = self._analyze_signals(raw, settings, parent)
+        self.project.set_stage("signals", {"signals": raw, **result.items},
+                               params=core_analysis.stage_params(rec.params, result),
+                               origin=rec.origin, source=rec.source)
+
+    def _analyze_signals(self, raw, settings, parent):
+        """Normalization and events of `raw` (see neclab_core.analysis): a
+        signal that can't be normalized falls back to the raw signals, and
+        a failing peak method is reported."""
+        try:
+            result = self._signals_analyzer.run(raw, settings)
+        except ValueError as e:
+            messagebox.showwarning("Can't Normalize", f"{e}\n\nUsing the raw signals instead.", parent=parent)
+            result = self._signals_analyzer.run(
+                raw, {**settings, "method": "none", "smooth": False, "subtract": False})
+        if result.events_error:
+            messagebox.showwarning("Can't Detect Peaks", result.events_error, parent=parent)
+        return result
+
+    def open_signals_stage(self):
+        """File → Open Pipeline Stage → 5 · Signals: a signals table becomes
+        stage 5 of the project (normalized and searched for peaks with the
+        project's last stage 5 settings, by default none) and is shown one
+        cell at a time in the Cell Signals tab."""
+        filename = filedialog.askopenfilename(title="Open Stage 5 - Signals",
+                                              filetypes=core_stages.open_filetypes("signals"))
+        if not filename:
+            return None
+        context = core_stages.Context(stack=self.project.stack(), labels=self.project.data("cells"))
+        try:
+            try:
+                loaded = core_stages.load_item("signals", filename, context)
+            except ValidationError as e:
+                if context.stack is None and context.labels is None:
+                    raise
+                if not messagebox.askyesno(
+                        "Signals Don't Match",
+                        f"{e}\n\nOpen them anyway, without checking them against the "
+                        "recording and cells already loaded?"):
+                    return None
+                loaded = core_stages.load_item("signals", filename, core_stages.Context())
+        except (ValidationError, ValueError, OSError) as e:
+            messagebox.showerror("Can't Load File", f"{os.path.basename(filename)}:\n\n{e}")
+            return None
+        show_warnings(self.root, loaded.warnings)
+        self._signals_analyzer.clear()
+        rec = self.project.get("signals")
+        settings = core_analysis.settings_from_params(rec.params if rec is not None else None)
+        result = self._analyze_signals(loaded.data, settings, self.root)
+        self.project.set_stage("signals", {"signals": loaded.data, **result.items},
+                               params={"measure": "loaded from file", **result.params},
+                               origin="imported", source={"path": os.path.abspath(filename)})
+        return self.open_cell_signals_view()
 
     def _view_project_correlation(self):
         """Show the project's correlation matrix (stage 6) with its dendrogram."""
@@ -4008,6 +4097,7 @@ class NecLabApp:
                                         on_recording_attached=self._on_recording_attached,
                                         notebook=self.notebook)
         if win is not None:
+            win.on_open_cell_view = self.open_cell_signals_view
             self.detection_windows.append(win)
             self._refresh_status_window()
 
