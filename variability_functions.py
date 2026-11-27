@@ -1086,62 +1086,48 @@ class VariabilityAnalysisWindow:
         self.corr_info_label = tk.Label(control_frame, text="", font=("Arial", 12, "bold"))
         self.corr_info_label.pack(pady=5)
 
-        corr_button_frame = tk.Frame(control_frame)
-        corr_button_frame.pack(fill=tk.X, pady=5)
+        # The controls are grouped by stage, in short rows, so that they all
+        # fit in the tab (it is narrower than a separate window was).
+        def row(parent):
+            f = tk.Frame(parent)
+            f.pack(fill=tk.X, pady=2)
+            return f
 
-        tk.Label(corr_button_frame, text="Correlation Type:").pack(side=tk.LEFT, padx=(0, 10))
-        for method in correlation.CORRELATION_METHODS:
-            tk.Button(corr_button_frame, text=method.capitalize(),
-                      command=lambda m=method: self.calculate_correlation(m)).pack(side=tk.LEFT, padx=5)
-
-        tk.Frame(corr_button_frame, height=2, bg="gray").pack(side=tk.LEFT, fill=tk.X, padx=20)
-
-        tk.Button(corr_button_frame, text="Export Time Series",
-                  command=self.export_time_series).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Export Normalized",
-                  command=self.export_normalized).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Export Events",
-                  command=self.export_events).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Export Correlation",
-                  command=self.export_correlation).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Export Cells",
-                  command=lambda: self.save_cells(only_selected=True)).pack(side=tk.LEFT, padx=5)
-        tk.Button(corr_button_frame, text="Generate Report",
-                  command=self.generate_report).pack(side=tk.LEFT, padx=5)
-
-        # Normalization (stage 5) applied before computing correlations. The
-        # controls start from the last settings applied (or the project's).
-        norm_frame = tk.Frame(control_frame)
-        norm_frame.pack(fill=tk.X, pady=5)
+        # ---- Stage 5: signal processing (normalization + peak detection).
+        # The controls start from the last settings applied (or the project's).
+        proc = tk.LabelFrame(control_frame, text=" Signal processing: normalization & peak detection (stage 5) ",
+                             padx=8, pady=4)
+        proc.pack(fill=tk.X, pady=(0, 4))
         settings = self.analysis_settings
         method, points = settings["method"], int(settings["lowest_points"])
         smooth, subtract = bool(settings["smooth"]), bool(settings["subtract"])
         self._norm_keys = list(normalization.NORMALIZATION_METHODS)
         self._norm_labels = list(normalization.NORMALIZATION_METHODS.values())
+
+        norm_frame = row(proc)
         tk.Label(norm_frame, text="Normalization:").pack(side=tk.LEFT, padx=(0, 5))
         self.norm_method_var = tk.StringVar(value=normalization.NORMALIZATION_METHODS[method])
         ttk.Combobox(norm_frame, textvariable=self.norm_method_var, values=self._norm_labels,
-                     state='readonly', width=44).pack(side=tk.LEFT, padx=(0, 15))
+                     state='readonly', width=36).pack(side=tk.LEFT, padx=(0, 15))
         tk.Label(norm_frame, text="Lowest points:").pack(side=tk.LEFT, padx=(0, 5))
         self.norm_points_var = tk.IntVar(value=points)
         ttk.Spinbox(norm_frame, from_=2, to=50, textvariable=self.norm_points_var,
-                    width=5).pack(side=tk.LEFT, padx=(0, 10))
+                    width=5).pack(side=tk.LEFT, padx=(0, 15))
+        tk.Button(norm_frame, text="Apply", command=self.apply_normalization).pack(side=tk.LEFT, padx=5)
+
+        options_frame = row(proc)
         self.norm_smooth_var = tk.BooleanVar(value=smooth)
-        tk.Checkbutton(norm_frame, text="Smoothing (subtract lowest-points baseline)",
+        tk.Checkbutton(options_frame, text="Smoothing",
                        variable=self.norm_smooth_var).pack(side=tk.LEFT, padx=(0, 10))
         self.norm_subtract_var = tk.BooleanVar(value=subtract)
-        tk.Checkbutton(norm_frame, text="Subtract lowest-points baseline (lowest points → 0)",
+        tk.Checkbutton(options_frame, text="Subtract lowest-points baseline (lowest points → 0)",
                        variable=self.norm_subtract_var).pack(side=tk.LEFT, padx=(0, 10))
         self.norm_show_points_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(norm_frame, text="Show lowest points", variable=self.norm_show_points_var,
+        tk.Checkbutton(options_frame, text="Show lowest points", variable=self.norm_show_points_var,
                        command=self._redraw_correlation).pack(side=tk.LEFT, padx=(0, 10))
-        tk.Button(norm_frame, text="Apply", command=self.apply_normalization).pack(side=tk.LEFT, padx=5)
-        tk.Label(norm_frame, text=f"Dendrogram: {correlation.LINKAGE_DESCRIPTION}",
-                 fg='gray').pack(side=tk.RIGHT, padx=5)
 
-        # Event (peak) detection (stage 5) on the normalized signals
-        peak_frame = tk.Frame(control_frame)
-        peak_frame.pack(fill=tk.X, pady=5)
+        # Event (peak) detection on the normalized signals
+        peak_frame = row(proc)
         tk.Label(peak_frame, text="Peaks:").pack(side=tk.LEFT, padx=(0, 5))
         self.peak_method_var = tk.StringVar(value=settings["peak_method"])
         peak_box = ttk.Combobox(peak_frame, textvariable=self.peak_method_var,
@@ -1156,6 +1142,27 @@ class VariabilityAnalysisWindow:
                        command=self._redraw_correlation).pack(side=tk.LEFT, padx=(10, 10))
         self.peak_info_label = tk.Label(peak_frame, text="", fg='gray')
         self.peak_info_label.pack(side=tk.LEFT, padx=5)
+
+        # ---- Stage 6: correlation, and the exports
+        corr_box = tk.LabelFrame(control_frame, text=" Correlation (stage 6) & export ", padx=8, pady=4)
+        corr_box.pack(fill=tk.X, pady=(0, 4))
+        corr_button_frame = row(corr_box)
+        tk.Label(corr_button_frame, text="Correlation Type:").pack(side=tk.LEFT, padx=(0, 10))
+        for method in correlation.CORRELATION_METHODS:
+            tk.Button(corr_button_frame, text=method.capitalize(),
+                      command=lambda m=method: self.calculate_correlation(m)).pack(side=tk.LEFT, padx=5)
+        tk.Label(corr_button_frame, text=f"Dendrogram: {correlation.LINKAGE_DESCRIPTION}",
+                 fg='gray').pack(side=tk.LEFT, padx=15)
+
+        export_frame = row(corr_box)
+        tk.Label(export_frame, text="Export:").pack(side=tk.LEFT, padx=(0, 10))
+        for text, command in (("Time Series", self.export_time_series),
+                              ("Normalized", self.export_normalized),
+                              ("Events", self.export_events),
+                              ("Correlation", self.export_correlation),
+                              ("Cells", lambda: self.save_cells(only_selected=True)),
+                              ("Generate Report", self.generate_report)):
+            tk.Button(export_frame, text=text, command=command).pack(side=tk.LEFT, padx=4)
 
         self.corr_viz_frame = tk.Frame(main_frame)
         self.corr_viz_frame.pack(fill=tk.BOTH, expand=True)
