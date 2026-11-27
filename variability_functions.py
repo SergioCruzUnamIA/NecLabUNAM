@@ -156,6 +156,7 @@ class VariabilityAnalysisWindow:
         self.events_df = None       # peaks of the normalized signals (stage 5 events), or None
         self.analysis_result = None      # neclab_core.analysis.AnalysisResult behind norm_df/events_df
         self.current_corr_matrix = None  # correlation of the normalized signals (stage 6), or None
+        self._corr_basis = None          # the normalized signals current_corr_matrix was computed from
         self.current_method = None       # its method, for display ("Pearson")
         self.corr_window = None
         self._analyzer = core_analysis.Analyzer()   # normalization + events, each cell's peaks cached
@@ -185,7 +186,7 @@ class VariabilityAnalysisWindow:
                 self.info_label.config(text=f"Loaded {source}")
             self.update_display()
         self._auto_signals = True
-        self._update_pipeline()   # restored selection: only the stages that don't already match
+        self._update_pipeline(selection_changed=False)   # restored selection: only stages that don't match
 
     # ------------------------------------------------------------ helpers
 
@@ -250,6 +251,7 @@ class VariabilityAnalysisWindow:
         self.events_df = None
         self.analysis_result = None
         self.current_corr_matrix = None
+        self._corr_basis = None
         self.current_method = None
 
     def _close_correlation_window(self):
@@ -905,33 +907,36 @@ class VariabilityAnalysisWindow:
                    "peak_params": dict(self.peak_params.get(self.analysis_settings["peak_method"], {}))}
         return core_analysis.settings_key(saved) == core_analysis.settings_key(current)
 
-    def _update_pipeline(self):
+    def _update_pipeline(self, selection_changed=True):
         """Stages 5 and 6 follow the selection. Whenever the selected cells
         change (and the recording is loaded), their signals are extracted,
         normalized and searched for events with the last settings applied
-        in the correlation window (or the project's), and recorded as
-        stage 5; their correlation, with the last method chosen, is
-        recorded as stage 6, and an open correlation window is redrawn.
-        Stages that are still up to date (e.g. a project just reopened)
-        are left as they are. With no cells selected both are cleared; with
-        a single cell there is no correlation, so stage 6 is cleared."""
+        in the correlation tab (or the project's), and recorded as stage 5;
+        their correlation, with the last method chosen, is recomputed and
+        recorded as stage 6, and an open correlation tab is redrawn. The
+        correlation is only recomputed here, when the selection changes (or
+        with a correlation button): applying another normalization doesn't.
+        Stages that are still up to date (e.g. a project just reopened,
+        selection_changed=False) are left as they are. With no cells
+        selected both are cleared; with a single cell there is no
+        correlation, so stage 6 is cleared."""
         if not self._auto_signals or self.labels is None or self.img_array is None:
             return
         window_open = self._corr_window_open()
         if not self.selected_clusters:
             self.signals_df = self.norm_df = self.events_df = None
             self.lowest_points_used = {}
-            self.current_corr_matrix = None
+            self.current_corr_matrix = self._corr_basis = None
             self._clear_computed("signals")
             self._clear_computed("correlation")
             if window_open:
                 self._redraw_correlation()
             return
         need_signals = self.project is not None and not self._signals_stage_matches()
-        need_corr = need_signals or self._needs_update("correlation")
+        need_corr = need_signals or (selection_changed and self._needs_update("correlation"))
         if not (need_signals or need_corr or window_open):
             return
-        if not self._compute_results():
+        if not self._compute_results(corr=need_corr or not self._corr_matches_selection()):
             return
         self._record_results(signals=need_signals, corr=need_corr)
         if window_open:
@@ -941,11 +946,12 @@ class VariabilityAnalysisWindow:
         """A message about the automatic stages, in the window's info line."""
         self.info_label.config(text=text)
 
-    def _compute_results(self, interactive=False):
+    def _compute_results(self, interactive=False, corr=True):
         """Signals of the selected cells, their normalization and events
-        (stage 5) and correlation (stage 6), in memory. `interactive`:
-        problems are shown in dialogs (the correlation window's buttons)
-        instead of the info line. False if the signals can't be extracted."""
+        (stage 5) and, if `corr`, their correlation (stage 6), in memory.
+        `interactive`: problems are shown in dialogs (the correlation tab's
+        buttons) instead of the info line. False if the signals can't be
+        extracted."""
         try:
             self.signals_df = self._extract_selected()
         except Exception as e:      # e.g. recording and cells don't match
@@ -953,7 +959,8 @@ class VariabilityAnalysisWindow:
             self._note(f"Could not extract signals: {e}")
             return False
         self._run_analysis(interactive)
-        self._compute_correlation()
+        if corr:
+            self._compute_correlation()
         return True
 
     def _run_analysis(self, interactive=False):
@@ -990,8 +997,44 @@ class VariabilityAnalysisWindow:
         if self.norm_df is not None and self.norm_df.shape[1] >= 2:
             self.current_corr_matrix = correlation.correlation_matrix(self.norm_df, self.corr_method)
             self.current_method = self.corr_method.capitalize()
+            self._corr_basis = self.norm_df
         else:
-            self.current_corr_matrix = None
+            self.current_corr_matrix = self._corr_basis = None
+
+    def _corr_matches_selection(self):
+        """True if the correlation in memory is for the selected cells."""
+        m = self.current_corr_matrix
+        return m is not None and [str(c) for c in m.columns] == [
+            signals.cell_column(c) for c in self._selected_sorted()]
+
+    @property
+    def corr_is_stale(self):
+        """True if the correlation shown was computed from other normalized
+        signals than the current ones (another normalization was applied
+        since): it is updated when the selection changes, or with a
+        correlation button."""
+        if self.current_corr_matrix is None or self.norm_df is None:
+            return False
+        return self._corr_basis is None or not self._corr_basis.equals(self.norm_df)
+
+    def _correlation_for_view(self):
+        """The correlation to show when the correlation tab opens, without
+        recomputing it: the one in memory, or else the project's (stage 6)
+        if it is for the selected cells. Only if there is none for these
+        cells is it computed (and recorded)."""
+        if self._corr_matches_selection():
+            return
+        rec = self.project.get("correlation") if self.project is not None else None
+        stored = self.project.data("correlation") if rec is not None else None
+        ids = [signals.cell_column(c) for c in self._selected_sorted()]
+        if stored is not None and [str(c) for c in stored.columns] == ids and len(ids) >= 2:
+            self.current_corr_matrix = stored
+            method = str(rec.params.get("method") or self.corr_method)
+            self.current_method = method.capitalize()
+            self._corr_basis = self.norm_df if not self._needs_update("correlation") else None
+            return
+        self._compute_correlation()
+        self._record_results(signals=False, corr=self._needs_update("correlation"))
 
     def _record_results(self, signals=True, corr=True):
         """Record stage 5 and/or 6 from the results in memory."""
@@ -1083,7 +1126,7 @@ class VariabilityAnalysisWindow:
         control_frame = tk.Frame(main_frame)
         control_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self.corr_info_label = tk.Label(control_frame, text="", font=("Arial", 12, "bold"))
+        self.corr_info_label = tk.Label(control_frame, text="", font=("Arial", 12, "bold"), wraplength=1000)
         self.corr_info_label.pack(pady=5)
 
         # The controls are grouped by stage, in short rows, so that they all
@@ -1167,12 +1210,13 @@ class VariabilityAnalysisWindow:
         self.corr_viz_frame = tk.Frame(main_frame)
         self.corr_viz_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Stages 5-7 normally already follow the selection; compute them in
-        # memory for the plots, and record those that aren't up to date.
-        if self._compute_results(interactive=True):
-            need_signals = not self._signals_stage_matches()
-            self._record_results(signals=need_signals,
-                                 corr=need_signals or self._needs_update("correlation"))
+        # Stages 5-6 normally already follow the selection: compute stage 5
+        # in memory for the plots (recording it only if it doesn't match),
+        # and show the existing correlation rather than recomputing it.
+        if self._compute_results(interactive=True, corr=False):
+            if self.project is not None and not self._signals_stage_matches():
+                self._record_results(signals=True, corr=False)
+            self._correlation_for_view()
         self._redraw_correlation()
 
     @property
@@ -1221,7 +1265,7 @@ class VariabilityAnalysisWindow:
 
     def _on_peak_method_change(self, ask=False):
         """A peak method was chosen (or Parameters... clicked): ask for its
-        parameters, then detect the events and recompute the correlation."""
+        parameters, then detect the events (stage 5)."""
         method = self.peak_method_var.get()
         if method in events.PEAK_METHODS and (ask or method not in self.peak_params):
             from peak_functions import show_parameter_dialog
@@ -1261,7 +1305,11 @@ class VariabilityAnalysisWindow:
         if not self._corr_window_open():
             return
         n = len(self.selected_clusters)
-        self.corr_info_label.config(text=f"Analyzing correlations between {n} selected cells")
+        text = f"Analyzing correlations between {n} selected cells"
+        if self.corr_is_stale:
+            text += ("  —  correlation not updated for this normalization: it updates when the "
+                     "selection changes, or click a correlation type")
+        self.corr_info_label.config(text=text, fg='#b45309' if self.corr_is_stale else 'black')
         self._update_peak_label()
         if self.signals_df is None or self.norm_df is None or self.norm_df.shape[1] == 0:
             for widget in self.corr_viz_frame.winfo_children():
@@ -1279,14 +1327,20 @@ class VariabilityAnalysisWindow:
             self.show_initial_time_series()
 
     def apply_normalization(self):
-        """Apply the window's normalization and peak settings: recompute
-        stages 5 and 6 and record them."""
+        """Apply the tab's normalization and peak settings: recompute and
+        record stage 5. The correlation (stage 6) isn't recomputed: that
+        happens when the selection changes, or with a correlation button.
+        If the normalized signals didn't change (e.g. only the peaks did),
+        the correlation still holds and is recorded again so it stays up
+        to date; otherwise it is shown as not updated, and stage 6 is out
+        of date."""
         if self.signals_df is None:
             return
         self._read_controls()
         self._run_analysis(interactive=True)
-        self._compute_correlation()
-        self._record_results(signals=True, corr=True)
+        self._record_results(signals=True, corr=False)
+        if self.current_corr_matrix is not None and not self.corr_is_stale:
+            self._record_results(signals=False, corr=True)
         self._redraw_correlation()
 
     def _plot_signals(self, ax):
@@ -1394,8 +1448,6 @@ class VariabilityAnalysisWindow:
             ax4.set_title('Dendrogram')
 
         self._show_corr_figure(fig)
-        self.current_corr_matrix = corr_matrix
-        self.current_method = method_name
 
     def export_time_series(self):
         """Save the selected cells' signals (shared NecLab signals format)."""
