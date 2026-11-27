@@ -1,7 +1,7 @@
 """
-Stage 6 for a set of signals: normalization + event (peak) detection.
+Normalization + event (peak) detection of a set of signals (part of stage 5).
 
-`Analyzer.run` takes the raw signals (stage 5) and the stage 6 settings
+`Analyzer.run` takes the raw signals and the normalization and peak settings
 and returns the normalized signals, the events table and what the stage
 records. Every signal is normalized and searched for peaks on its own, so
 the peaks of each signal are cached: when one cell is added to the
@@ -27,7 +27,7 @@ DEFAULT_SETTINGS = {
 
 
 def settings_from_params(params):
-    """Stage 6 settings from the params a stage 6 record was saved with
+    """Normalization and peak settings from the params stage 5 was saved with
     (also those of earlier versions); defaults for anything missing."""
     settings = {**DEFAULT_SETTINGS, "peak_params": {}}
     params = params or {}
@@ -99,7 +99,7 @@ class AnalysisResult:
 
     @property
     def params(self):
-        """Settings recorded with stage 6."""
+        """Settings recorded with stage 5."""
         s = self.settings
         params = {"method": s["method"], "smoothing_points": smoothing_points(s) or 0,
                   "lowest_points": int(s["lowest_points"]), "subtract_baseline": bool(s["subtract"])}
@@ -111,7 +111,7 @@ class AnalysisResult:
 
     @property
     def items(self):
-        """Stage 6 items: the normalized signals (always, so the stage is
+        """Stage 5 items besides the raw signals: the normalized signals (always, so they are
         usable even with no normalization) and the events, if any."""
         items = {"normalized_signals": self.norm_df}
         if self.events_df is not None:
@@ -119,14 +119,15 @@ class AnalysisResult:
         return items
 
 
-def _settings_key(settings):
+def settings_key(settings):
+    """Hashable summary of settings (equal when they give the same result)."""
     return (settings["method"], int(settings["lowest_points"]), smoothing_points(settings),
             bool(settings["subtract"]), settings["peak_method"],
             tuple(sorted(peak_params(settings).items())))
 
 
 class Analyzer:
-    """Runs stage 6, caching each signal's peaks for the current settings."""
+    """Normalizes and detects events, caching each signal's peaks for the current settings."""
 
     def __init__(self):
         self._key = None
@@ -170,7 +171,7 @@ class Analyzer:
         return result
 
     def _detect(self, signals_df, norm_df, settings):
-        key = _settings_key(settings)
+        key = settings_key(settings)
         if key != self._key:
             self._key, self._events = key, {}
         method, params = settings["peak_method"], peak_params(settings)

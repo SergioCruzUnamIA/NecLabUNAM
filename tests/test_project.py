@@ -114,10 +114,10 @@ def test_save_and_load_round_trip(rec_path, tmp_path):
     assert not p.modified and p.name == "exp"
 
     manifest = json.loads((folder / "manifest.json").read_text())
-    assert manifest["format"] == "neclab-project" and manifest["format_version"] == 1
+    assert manifest["format"] == "neclab-project" and manifest["format_version"] == 2
     assert set(manifest["stages"]) == {"raw", "features", "mask", "cells", "signals", "correlation"}
     assert sorted(os.listdir(folder)) == sorted(["manifest.json", "s0_raw", "s2_features", "s3_mask",
-                                                 "s4_cells", "s5_signals", "s7_correlation"])
+                                                 "s4_cells", "s5_signals", "s6_correlation"])
     assert not (folder / "s0_raw" / "recording.npy").exists()      # the recording isn't copied
     assert manifest["stages"]["raw"]["source"]["relative_path"] == os.path.join("..", "data", "recording.npy")
 
@@ -192,7 +192,7 @@ def test_saving_replaces_previous_save(rec_path, tmp_path):
     p.save(folder)
     p.clear_stage("correlation")
     p.save(folder)
-    assert not (folder / "s7_correlation").exists()
+    assert not (folder / "s6_correlation").exists()
     assert not (tmp_path / "exp.neclab.saving").exists() and not (tmp_path / "exp.neclab.old").exists()
 
 
@@ -286,3 +286,107 @@ def test_listeners_are_notified(rec_path):
     p.set_recording(np.load(rec_path), rec_path)
     p.clear_stage("raw")
     assert len(calls) == 2
+
+
+# ------------------------------------------------- projects saved with stages 5 and 6 apart
+
+def _make_legacy(folder, p):
+    """Rewrite a saved project the way NecLab saved it before stages 5 and 6
+    were merged: s5_signals (raw signals only), s6_analysis (normalized
+    signals + events), s7_correlation, format version 1."""
+    manifest = json.loads((folder / "manifest.json").read_text())
+    sig = manifest["stages"]["signals"]
+    norm = p.data("signals", "normalized_signals")
+    ev = p.data("signals", "events")
+    analysis_dir = folder / "s6_analysis"
+    analysis_dir.mkdir()
+    shutil.move(str(folder / "s5_signals" / "signals_norm.csv"), analysis_dir / "signals_norm.csv")
+    shutil.move(str(folder / "s5_signals" / "events.csv"), analysis_dir / "events.csv")
+    sig["files"] = {"signals": sig["files"]["signals"]}
+    analysis_params = {"method": "delta_f_over_f0", "smoothing_points": 0, "lowest_points": 6,
+                       "subtract_baseline": False, "peak_method": "Peak Caller",
+                       "peak_params": {"rise_percent": 5, "fall_percent": 5, "max_lookback": 10,
+                                       "max_lookahead": 10}}
+    sig["params"] = {"cells": sig["params"]["cells"]}
+    manifest["stages"]["analysis"] = {
+        "stage": "analysis", "number": 6, "origin": "computed", "params": analysis_params, "source": {},
+        "inputs": {"signals": sig["fingerprint"]}, "fingerprint": "f6", "updated_at": "",
+        "files": {"normalized_signals": ["signals_norm.csv"], "events": ["events.csv"]},
+        "folder": "s6_analysis"}
+    corr = manifest["stages"]["correlation"]
+    shutil.move(str(folder / "s6_correlation"), folder / "s7_correlation")
+    corr["folder"], corr["number"] = "s7_correlation", 7
+    corr["inputs"] = {"signals": sig["fingerprint"], "analysis": "f6"}
+    manifest["format_version"] = 1
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+    return norm, ev
+
+
+def _pipeline_with_analysis(p, rec_path):
+    from neclab_core import analysis
+
+    _labels, df = run_pipeline(p, np.load(rec_path), rec_path)
+    result = analysis.Analyzer().run(df, {**analysis.DEFAULT_SETTINGS, "method": "delta_f_over_f0",
+                                          "peak_method": "Peak Caller"})
+    p.set_stage("signals", {"signals": df, **result.items},
+                params={"cells": p.get("signals").params["cells"], **result.params})
+    p.set_stage("correlation", {"correlation": correlation.correlation_matrix(result.norm_df)},
+                params={"method": "pearson"})
+
+
+def test_project_saved_before_the_merge_opens_with_normalization_in_stage_5(rec_path, tmp_path):
+    p = Project()
+    _pipeline_with_analysis(p, rec_path)
+    folder = tmp_path / "old.neclab"
+    p.save(folder)
+    norm, ev = _make_legacy(folder, p)
+
+    q, warnings = Project.load(folder)
+    assert warnings == []
+    pd.testing.assert_frame_equal(q.data("signals", "normalized_signals"), norm, check_exact=False)
+    assert q.data("signals", "events")[["cell_id", "frame"]].equals(ev[["cell_id", "frame"]])
+    assert q.get("signals").params["method"] == "delta_f_over_f0"
+    assert q.get("signals").params["peak_method"] == "Peak Caller"
+    assert "analysis" not in q.records
+    assert q.status("signals") == DONE and q.status("correlation") == DONE
+
+    # Saved again, it is in the new layout.
+    q.save(tmp_path / "new.neclab")
+    assert sorted(os.listdir(tmp_path / "new.neclab")) == sorted(
+        ["manifest.json", "s0_raw", "s2_features", "s3_mask", "s4_cells", "s5_signals", "s6_correlation"])
+
+
+def test_out_of_date_legacy_normalization_is_skipped(rec_path, tmp_path):
+    p = Project()
+    _pipeline_with_analysis(p, rec_path)
+    folder = tmp_path / "old.neclab"
+    p.save(folder)
+    _make_legacy(folder, p)
+    manifest = json.loads((folder / "manifest.json").read_text())
+    manifest["stages"]["analysis"]["inputs"]["signals"] = "something else"
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+
+    q, warnings = Project.load(folder)
+    assert len(warnings) == 1 and "out of date" in warnings[0]
+    assert q.data("signals", "normalized_signals") is None
+    assert q.data("signals") is not None
+
+
+def test_legacy_stage_6_folder_loads_into_stage_5(rec_path, tmp_path):
+    p = Project()
+    _pipeline_with_analysis(p, rec_path)
+    folder = tmp_path / "old.neclab"
+    p.save(folder)
+    norm, _ev = _make_legacy(folder, p)
+    manifest = json.loads((folder / "manifest.json").read_text())
+    (folder / "s6_analysis" / "stage.json").write_text(json.dumps(manifest["stages"]["analysis"]))
+
+    q = Project()
+    with pytest.raises(ValidationError, match="load the signals"):
+        q.load_stage(folder / "s6_analysis")
+    q.set_stage("signals", {"signals": p.data("signals")}, params={"cells": [1, 2]})
+    key, _w = q.load_stage(folder / "s6_analysis")
+    assert key == "signals"
+    pd.testing.assert_frame_equal(q.data("signals", "normalized_signals"), norm, check_exact=False)
+    assert q.get("signals").params["peak_method"] == "Peak Caller"
+    assert Project.stages_in_project_folder(folder) == ["features", "mask", "cells", "signals", "correlation"]

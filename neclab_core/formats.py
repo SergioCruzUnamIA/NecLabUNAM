@@ -35,12 +35,12 @@ Stage 5/6 - signals table (one file per recording)
     is optional, and the first column is treated as time when it is named
     "frame"/"time"/"time_s" or holds 0, 1, 2, ... (or as told).
 
-Stage 6 - events (detected peaks)
+Stage 5 - events (detected peaks)
     .csv / .xlsx  one row per event: frame, cell_id (or signal), plus any
                   extra columns. The Multiple Files "Save Peaks CSV" export
                   (Column, Sheet, Sample_Index, Peak_Flag) is accepted too.
 
-Stage 7 - correlation matrix
+Stage 6 - correlation matrix
     .csv / .xlsx  square table with the signal names as both the first
                   column and the header row.
 """
@@ -428,7 +428,7 @@ def signal_cell_ids(df):
     return [parse_cell_column(c) for c in df.columns]
 
 
-# ======================================================= stage 6: events
+# ======================================================= stage 5: events
 
 EVENT_COLUMNS = ("cell_id", "frame")
 
@@ -467,7 +467,7 @@ def read_events(path, n_frames=None, cell_ids=None):
     return df.reset_index(drop=True), warnings
 
 
-# ======================================================= stage 7: correlation
+# ======================================================= stage 6: correlation
 
 def write_correlation(df, path):
     """Write a correlation matrix (labels as first column and header)."""

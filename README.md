@@ -125,8 +125,8 @@ This section is only a summary. For detailed step-by-step instructions for each 
 
 The application is organized into tabs:
 
-- **Image Processing**: open an OME-TIFF image (`File → Open OME-TIFF`, or `Ctrl+O`), adjust brightness/contrast/threshold, and from the **Variability Analysis** menu choose one of the 7 methods to open the cell detection and clustering window.
-- **Data Visualization**: open a `.npy`/`.csv` file (`File → Open Data`) to find peaks, apply smoothing, compute correlations, and generate dendrograms or time series.
+- **Image Processing**: open an OME-TIFF image (`File → Open OME-TIFF`, or `Ctrl+O`), adjust brightness/contrast/threshold, and from the **Variability Analysis** menu choose one of the 7 methods to open the cell detection and clustering tab. Every view opens as a tab of the main window.
+- **Dendrogram** and **Time Series** (`Visualization` menu): views of the data in the Multiple Files tab, enabled once data is loaded there.
 - **Multiple Files** (appears when using `File → Open Multiple Files (.xls)`): load and compare several Excel sheets at once, with smoothing, normalization, a heatmap, and sheet classification.
 - **Dendrogram** and **Time Series**: created automatically when using the corresponding options in the **Visualization** menu, once data has been loaded.
 
@@ -158,10 +158,11 @@ NecLabUNAM/
 │   ├── signals.py              #   Per-cell signal extraction
 │   ├── normalization.py        #   Normalization + smoothing, shared by every view
 │   ├── events.py               #   Peak (event) detection: the 7 Peak Finder methods, shared by every view
-│   ├── analysis.py             #   Stage 6 for a set of signals: normalization + events (peaks cached per cell)
+│   ├── analysis.py             #   Normalization + events of a set of signals (stage 5; peaks cached per cell)
 │   └── correlation.py          #   Correlation + clustering (Ward on 1 − |r|), shared by every view
 ├── tests/                      # Tests for neclab_core (pytest)
-├── variability_functions.py    # Cell detection window (UI)
+├── variability_functions.py    # Cell detection tab + its Signals & Correlation and 3D View tabs (UI)
+├── ui_tabs.py                  # Closable tabs (with their own menu bar) for every view
 ├── peak_functions.py           # Peak detection (7 methods) and smoothing
 ├── corr_dendo_functions.py     # Correlations, dendrograms, and time series
 ├── multi_xls_helpers.py        # Loading and processing for the Multiple Files tab
@@ -196,8 +197,8 @@ labels, mask = segmentation.detect_cells(var_im, variability.sharpen(var_im),
 traces = signals.extract_signals(stack, labels)                       # frames x cell_<id>
 formats.write_signals(traces, "signals.csv")
 formats.save_cells(labels, "cells.tif")                               # + cells.csv
-dff = normalization.normalize_signals(traces, "delta_f_over_f0")      # stage 6 (ΔF/F0)
-peaks = events.detect_events(traces, "Peak Caller")                   # stage 6 events: cell_id, frame, value
+dff = normalization.normalize_signals(traces, "delta_f_over_f0")      # stage 5 (ΔF/F0)
+peaks = events.detect_events(traces, "Peak Caller")                   # stage 5 events: cell_id, frame, value
 corr = correlation.correlation_matrix(dff, "pearson")
 tree = correlation.cluster_linkage(corr)                              # Ward on 1 − |r|, as in the app
 ```
@@ -233,7 +234,7 @@ p, warnings = Project.load("experiment.neclab")
 p.status("signals")           # "done", or "out of date" if the cells changed since
 ```
 
-In the app: **File → New / Open / Save Project**, and the **pipeline sidebar** on the left of the main window, which lists the 8 stages with their live status and, for the selected stage, its details, a button that opens or runs it, and Save / Load / Clear Stage.
+In the app: **File → New / Open / Save Project**, and the **pipeline sidebar** on the left of the main window, which lists the 7 stages with their live status and, for the selected stage, its details, a button that opens or runs it, and Save / Load / Clear Stage.
 
 ![Pipeline sidebar](docs/images/pipeline_sidebar.png)
 

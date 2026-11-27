@@ -1,5 +1,5 @@
 """
-Signal normalization and smoothing (pipeline stage 6), used by every view:
+Signal normalization and smoothing (part of pipeline stage 5), used by every view:
 the cell detection window's correlation analysis, the Multiple Files tab
 (line plot, heatmap and "Save Smoothed Data") and peak detection.
 

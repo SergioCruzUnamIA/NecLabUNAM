@@ -33,12 +33,13 @@ def labels():
 # ---------------------------------------------------------- registry
 
 def test_every_stage_and_item_is_registered():
-    assert [s.number for s in stages.STAGES] == list(range(8))
+    assert [s.number for s in stages.STAGES] == list(range(7))
     assert stages.stage("cells").number == 4 and stages.stage(4).key == "cells"
     for item in stages.ITEMS.values():
         assert item.stage in {s.key for s in stages.STAGES}
         assert stages.open_filetypes(item.key)[-1] == ("All files", "*.*")
-    assert {i.key for i in stages.items_for_stage("analysis")} == {"normalized_signals", "events"}
+    assert {i.key for i in stages.items_for_stage("signals")} == {"signals", "normalized_signals", "events"}
+    assert stages.stage("correlation").number == 6
 
 
 # ---------------------------------------------------------- stage 0/1

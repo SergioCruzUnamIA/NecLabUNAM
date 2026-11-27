@@ -1,5 +1,5 @@
 """
-Correlation and hierarchical clustering (pipeline stage 7), the single
+Correlation and hierarchical clustering (pipeline stage 6), the single
 implementation used by every view: the cell detection window's
 correlation analysis, the Multiple Files correlation pane, the Dendrogram
 tab and "Load Correlation Matrix".

@@ -1,4 +1,4 @@
-"""Tests for stage 6 of a set of signals (normalization + events). Run with:  python -m pytest tests"""
+"""Tests for the normalization + events of a set of signals (stage 5). Run with:  python -m pytest tests"""
 
 import os
 import sys
@@ -39,9 +39,8 @@ def test_defaults_pass_the_raw_signals_through_and_are_recorded():
     assert set(result.items) == {"normalized_signals"}
     assert result.params["method"] == "none" and "peak_method" not in result.params
     p = Project()
-    p.set_stage("signals", {"signals": df})
-    p.set_stage("analysis", result.items, params=result.params)
-    assert p.status("analysis") == "done"
+    p.set_stage("signals", {"signals": df, **result.items}, params=result.params)
+    assert p.status("signals") == "done"
 
 
 def test_normalization_matches_normalize_signals():

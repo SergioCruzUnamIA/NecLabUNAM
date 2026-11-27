@@ -33,7 +33,7 @@ NecLab has two main workflows, organized as tabs inside a single window:
 - **Image processing**: load an OME-TIFF stack, adjust its display, and analyze the temporal variability of each pixel to detect and segment cells as spatial clusters.
 - **Data visualization and analysis**: load numeric series (a single `.npy`/`.csv` file, or several Excel files at once) to detect peaks, smooth signals, normalize, compute correlations, and build dendrograms.
 
-Both workflows share the same main window, which has a menu bar at the top and a tabbed `Notebook` below it. Some tabs are present from startup (Image Processing, Data Visualization); others are created automatically the first time the corresponding feature is used (Multiple Files, Dendrogram, Time Series). The application's UI is entirely in English.
+Both workflows share the same main window, which has a menu bar at the top and a tabbed `Notebook` below it. The Image Processing tab is there from startup; every other view opens as another tab of the same window, never as a separate window: Cell Detection, Signals & Correlation, 3D View, Correlation Matrix, Histogram, Binarization, Multiple Files, Dendrogram and Time Series. A tab opened this way has a thin bar at the top with its own menus (if any) on the left and a **✕ Close Tab** button on the right. The application's UI is entirely in English.
 
 ---
 
@@ -50,7 +50,7 @@ Both workflows share the same main window, which has a menu bar at the top and a
 | **Open Data (.npy / .csv / .xlsx)** | Loads a numeric data file into the "Data Visualization" tab. For CSV files, a dialog lets you pick the initial column (ROI); for `.npy` files, columns are auto-named "Column 1", "Column 2", etc. |
 | **Load Correlation Matrix** | Loads an already-computed correlation matrix (CSV/XLSX, must be square) and displays it as a dendrogram + heatmap. See [section 9](#9-loading-a-precomputed-correlation-matrix). |
 | **Open Multiple Files (.xls / .csv)** | Starts the "Multiple Files" workflow: pick several Excel files and the sheets to load from each. See [section 6](#6-tab-multiple-files). |
-| **Exit** | Closes the application (asks for confirmation and closes every open plot window). |
+| **Exit** | Closes the application (asks for confirmation, or to save unsaved project changes). |
 
 ### Image
 
@@ -59,24 +59,24 @@ Disabled until an OME-TIFF image is loaded.
 | Item | Action |
 |---|---|
 | **Auto Contrast** | Turns display-only auto contrast on/off (a check mark shows when it's on). Each frame is rescaled only as it is shown; the analysis always uses the raw data. |
-| **Histogram** | Shows a histogram of per-pixel variance across the whole stack, in a separate window. |
-| **Binarize** | Opens a threshold dialog and binarizes the variance image. |
+| **Histogram** | Shows a histogram of per-pixel variance across the whole stack, in the "Histogram" tab. |
+| **Binarize** | Opens the "Binarization" tab: the variance image binarized at a threshold you can change. |
 | **Restore Original** | Turns off every display adjustment (brightness, contrast, auto contrast, threshold) and shows the image exactly as loaded. |
 
 > **Display vs. analysis:** brightness, contrast, auto contrast and the threshold preview only change what is shown on screen. They never modify the loaded data, so the variability analysis and the exported signals are always computed from the raw image.
 
 ### Variability Analysis
 
-Disabled until an image is loaded. Populated dynamically with the 7 variability methods (see [section 4](#4-variability-analysis-and-cell-detection)). Each entry opens a full "Full Analysis — &lt;method&gt;" window for that method.
+Disabled until an image is loaded. Populated dynamically with the 7 variability methods (see [section 4](#4-variability-analysis-and-cell-detection)). Each entry opens a "Cell Detection — &lt;method&gt;" tab for that method.
 
 ### Visualization
 
 | Item | Action |
 |---|---|
-| **Dendrogram** | Disabled until data is loaded via `File → Open Data`. Once loaded, opens/activates the permanent "Dendrogram" tab (section 7). |
-| **Time Series** | Disabled until data is loaded via `File → Open Data`. Once loaded, opens the "Time Series" tab (section 8). |
+| **Dendrogram** | Opens/activates the "Dendrogram" tab (section 7) for the data in the Multiple Files tab. |
+| **Time Series** | Opens the "Time Series" tab (section 8) for the data in the Multiple Files tab. |
 
-> **Note:** these two items only become active once data has been loaded with `File → Open Data (.npy / .csv)`. If you only used "Open Multiple Files (.xls)" or "Load Correlation Matrix", they stay disabled — use those tabs' own workflows for dendrograms and correlations instead.
+> **Note:** these two items are disabled until there is data in the Multiple Files tab: open it with `File → Open Data Files`, `File → Open Pipeline Stage → 5 · Signals`, or the pipeline sidebar's **View in Multiple Files**. "Load Correlation Matrix" alone doesn't enable them.
 
 ### Help
 
@@ -117,7 +117,7 @@ Visible from startup. Made up of an image panel (left) and a controls panel (rig
 
 ## 4. Variability analysis and cell detection
 
-Choosing a method from the **Variability Analysis** menu opens a new 1400×800 window, "Full Analysis — &lt;method&gt;", with its own menu bar.
+Choosing a method from the **Variability Analysis** menu opens a new tab, "Cell Detection — &lt;method&gt;", with its own menus (Data, Clustering, Selection, Visualization, Export) in the bar at the top of the tab. Its **✕ Close Tab** button also closes the Signals & Correlation and 3D View tabs opened from it.
 
 ### 4.1 Available variability methods
 
@@ -131,7 +131,7 @@ Choosing a method from the **Variability Analysis** menu opens a new 1400×800 w
 | 6 | Coefficient of Variation | `std(ddof=1) / mean × 100` | 5 |
 | 7 | Interquartile Range (IQR) | Q3 − Q1 | 20 |
 
-### 4.2 Analysis window controls
+### 4.2 Cell detection tab controls
 
 - **Threshold**: binarization threshold for the variability image; starts at the chosen method's default (for a loaded map that isn't one of the 7 methods, at the map's 95th percentile). Not used while a loaded mask is in use.
 - **Min Size** / **Max Size** (1–500 / 1–1000): minimum and maximum cluster size (in pixels) to keep.
@@ -166,16 +166,15 @@ Each item runs a complete detection with the current Threshold / Min Size / Max 
 - **Region Selection**: hold the right mouse button and drag over the plot to add/remove several clusters at once inside a rectangle; use the Add/Remove toggle to pick the mode.
 - **Selection** menu: `Select All`, `Clear Selection`.
 - The list of selected clusters appears in the side panel, each with a "Remove" button.
-- **Stages 5–7 follow the selection.** When the recording is loaded, every change to the selection (Select All, a click, a rectangle, Remove or Clear) right away:
-  - extracts the signals of the selected cells and records them as stage 5 (*Signals*);
-  - normalizes them, detects their peaks and records the result as stage 6 (*Normalization & events*), with the last settings applied in the correlation analysis window (or the project's). By default there is no normalization and no peak detection; stage 6 then holds the raw signals as they are, so it is still *done* and can be used. Peaks are only detected again for cells that are new to the selection, as long as the settings don't change;
-  - computes their correlation and records it as stage 7 (*Correlation*), with the last correlation method chosen (Pearson by default). With a single cell there is no correlation, so stage 7 is cleared.
+- **Stages 5–6 follow the selection.** When the recording is loaded, every change to the selection (Select All, a click, a rectangle, Remove or Clear) right away:
+  - extracts the signals of the selected cells, normalizes them and detects their peaks, and records all three as stage 5 (*Signals & events*): the raw signals, the normalized signals and the events. The normalization and peak method are the last ones applied in the correlation analysis (or the project's). By default there is no normalization and no peak detection; the normalized signals are then the raw ones as they are. Peaks are only detected again for cells that are new to the selection, as long as the settings don't change;
+  - computes their correlation and records it as stage 6 (*Correlation*), with the last correlation method chosen (Pearson by default). With a single cell there is no correlation, so stage 6 is cleared.
 
-  The pipeline sidebar shows the three as *done*, and an open correlation analysis window is redrawn for the new selection. Clearing the selection clears stages 5–7. Stages that are already up to date are left as they are (e.g. when a project is reopened). Without the recording, attach it with **Data → Attach Recording...** and stages 5–7 of the cells already selected are computed then.
+  The pipeline sidebar shows both as *done*, and an open correlation analysis is redrawn for the new selection. Clearing the selection clears stages 5–6. Stages that are already up to date are left as they are (e.g. when a project is reopened). Without the recording, attach it with **Data → Attach Recording...** and stages 5–6 of the cells already selected are computed then.
 
 ### 4.6 3D visualization
 
-**Visualization → 3D View** menu: opens a 3D surface (matplotlib) of the variability image, which can be rotated with the mouse.
+**Visualization → 3D View** menu (in the cell detection tab): opens a "3D View" tab with a 3D surface (matplotlib) of the variability image, which can be rotated with the mouse.
 
 ### 4.7 Export
 
@@ -189,14 +188,14 @@ Each item runs a complete detection with the current Threshold / Min Size / Max 
 
   These files can be opened directly with `File → Open Data Files`: the frame column is recognised and not shown as a data column.
 - **Save Cells (Label Image)...**: saves the cells as a label image (`.tif` or `.npy`: an image the size of one frame where each pixel holds the ID of its cell, 0 = background) plus a table with the same name and a `.csv` extension (`cell_id, n_pixels, centroid_row, centroid_col`). If cells are selected, it asks whether to save only those. Load it back later with **Data → Load Cells...**.
-- **Use Selected (Correlations)**: opens the "Correlation Analysis — Selected Cells" window, with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (the raw signals, same format as Save Signals), **Export Normalized** (the signals as shown, stage 6), **Export Events** (the detected peaks, stage 6), **Export Correlation** (the current matrix, which can be reopened as stage 7), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
-  - **Normalization**, **Lowest points**, **Smoothing**, **Subtract lowest-points baseline**, **Show lowest points** + **Apply**: how the signals are normalized before the correlation is computed (see [section 12](#normalization-methods-correlation-analysis-window)). The default is *None*, the raw mean intensities. The plot, the correlation and the dendrogram all use the normalized signals, which are recorded as stage 6 of the project (and the settings are restored when the project is reopened). The settings applied here, and the last correlation button clicked, are also the ones used when the selection changes.
+- **Use Selected (Correlations)**: opens the "Signals & Correlation — &lt;method&gt;" tab, right next to the cell detection tab (opening it again replaces it), with buttons to compute Pearson, Kendall, or Spearman correlation across the chosen cells' signals, and **Export Time Series** (the raw signals, same format as Save Signals), **Export Normalized** (the signals as shown, stage 5), **Export Events** (the detected peaks, stage 5), **Export Correlation** (the current matrix, which can be reopened as stage 6), **Export Cells** (saves the selected cells as a label image) and **Generate Report**.
+  - **Normalization**, **Lowest points**, **Smoothing**, **Subtract lowest-points baseline**, **Show lowest points** + **Apply**: how the signals are normalized before the correlation is computed (see [section 12](#normalization-methods-correlation-analysis-window)). The default is *None*, the raw mean intensities. The plot, the correlation and the dendrogram all use the normalized signals, which are recorded in stage 5 of the project next to the raw ones (and the settings are restored when the project is reopened). The settings applied here, and the last correlation button clicked, are also the ones used when the selection changes.
     - **Lowest points** (2–50, default 6): how many of each signal's genuine lowest points build its baseline, a line through them. Used by *Divide by lowest-points baseline*, *Subtract lowest-points baseline* and *Smoothing*.
     - **Divide by lowest-points baseline**: each signal divided by that baseline, so its lowest points lie on a horizontal line at 1 and every value reads as "times the baseline" (the Convex Envelope normalization of earlier NecLab versions). If a signal's baseline reaches zero or below (e.g. data already normalized to 0–1), dividing would blow up: NecLab says which cell and shows the raw signals instead.
     - **Subtract lowest-points baseline** (checkbox, combines with any Normalization): after the chosen normalization, the lowest-points baseline of the *normalized* signal is subtracted, so its lowest points lie on a horizontal line at 0 and every value reads as "above the baseline", in that normalization's units (e.g. *ΔF/F0* + subtract = ΔF/F0 above a baseline that follows slow drifts; *None* + subtract = raw intensity above the baseline). With no division, it works for any signal, including ones near or below zero.
     - **Smoothing**: subtracts that baseline and adds the signal's lowest level back (the lowest points end up on a horizontal line at that level instead of 0, otherwise the same result as the checkbox above). Skipped when *Subtract lowest-points baseline* is ticked, and with *Divide by lowest-points baseline* alone, since either already removes the same baseline.
     - **Show lowest points**: marks the points used on the signals plot.
-  - **Peaks** + **Parameters...** + **Show peaks**: event (peak) detection, the other half of stage 6. Choose one of the same 7 Peak Finder methods as the Multiple Files tab (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); its parameter dialog opens (pre-filled with the last values used; **Parameters...** opens it again), and **Run** detects the peaks of every selected cell. The peaks are found on the signals as shown, i.e. after the normalization (on the raw signals when Normalization is *None*), and are re-detected whenever **Apply** is clicked. They are marked with triangles on the signals plot, counted next to the menu ("N peaks in M of K cells") and in **Generate Report** (per cell), and recorded as the stage 6 events: a table with one row per peak (`cell_id, frame, value`), saved with the project and with **Export Events** (`.csv`/`.xlsx`). The method and its parameters are restored when the project is reopened. Choose *None* to stop detecting peaks.
+  - **Peaks** + **Parameters...** + **Show peaks**: event (peak) detection, the last part of stage 5. Choose one of the same 7 Peak Finder methods as the Multiple Files tab (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); its parameter dialog opens (pre-filled with the last values used; **Parameters...** opens it again), and **Run** detects the peaks of every selected cell. The peaks are found on the signals as shown, i.e. after the normalization (on the raw signals when Normalization is *None*), and are re-detected whenever **Apply** is clicked. They are marked with triangles on the signals plot, counted next to the menu ("N peaks in M of K cells") and in **Generate Report** (per cell), and recorded as the stage 5 events: a table with one row per peak (`cell_id, frame, value`), saved with the project and with **Export Events** (`.csv`/`.xlsx`). The method and its parameters are restored when the project is reopened. Choose *None* to stop detecting peaks.
     - *Peak Caller*'s Rise % and Fall % are percentages of the signal's own value at the peak, so on signals near zero (*ΔF/F0*, *Detrend + scale to 0–1*, *Subtract lowest-points baseline*) tiny fluctuations pass the threshold; use it on raw or divided signals, or raise the percentages.
   - The dendrogram uses Ward linkage on the distance 1 − |r|, like every other dendrogram in NecLab.
 
@@ -209,11 +208,11 @@ The analysis is a chain of stages, and each one can be started from a file inste
 | Stage | What it holds | Files | Opens in |
 |---|---|---|---|
 | 0 · Recording | The image stack | `.ome.tif`, `.tif`, `.npy` (`File → Open Recording`) | Image Processing tab |
-| 2 · Variability Map | Per-pixel variability | `.npz` (one or more named maps), `.npy`, `.tif` | Analysis window |
-| 3 · Candidate Mask | Pixels that may belong to cells | `.tif`/`.npy` with only two values (0/1 or 0/255) | Analysis window |
-| 4 · Cells | Label image (permanent IDs) | `.tif`/`.npy` label image, ImageJ `.roi`/`.zip`, older `.txt` | Analysis window |
-| 5–6 · Signals | One column per cell, one row per frame | `.csv`, `.xlsx`, `.npy` | Multiple Files tab |
-| 7 · Correlation Matrix | Square matrix | `.csv`, `.xlsx` | Correlation view (section 9) |
+| 2 · Variability Map | Per-pixel variability | `.npz` (one or more named maps), `.npy`, `.tif` | Cell detection tab |
+| 3 · Candidate Mask | Pixels that may belong to cells | `.tif`/`.npy` with only two values (0/1 or 0/255) | Cell detection tab |
+| 4 · Cells | Label image (permanent IDs) | `.tif`/`.npy` label image, ImageJ `.roi`/`.zip`, older `.txt` | Cell detection tab |
+| 5 · Signals (raw or normalized) | One column per cell, one row per frame | `.csv`, `.xlsx`, `.npy` | Multiple Files tab |
+| 6 · Correlation Matrix | Square matrix | `.csv`, `.xlsx` | Correlation view (section 9) |
 
 - If a recording is open and the file's images are the same size, the recording is attached automatically. If the sizes differ, you are asked whether to continue without it.
 - Whatever is missing switches off only the features that need it: e.g. starting from a mask without a recording, Basic detection works, Advanced/KMeans ask for a variability map, and signals ask for the recording.
@@ -224,7 +223,7 @@ The analysis is a chain of stages, and each one can be started from a file inste
 A **project** keeps the whole analysis of one recording: the recording itself (referenced, not copied), and every stage you computed or loaded, with the settings used. Everything you do is recorded in the current project automatically: opening a recording, computing or loading a map or a mask, detecting or loading cells, selecting cells, extracting their signals and computing a correlation. The window title shows the project's name, with a `*` when there are unsaved changes.
 
 - **File → Save Project** (`Ctrl+S`) saves it as a folder named `<name>.neclab`; **Save Project As...** saves a copy under another name. NecLab asks to save unsaved changes before closing, starting a new project or opening another one.
-- **File → Open Project...** (choose the `.neclab` folder) restores the recording in the Image Processing tab and the cell detection window with the cells, the selection, the threshold and the sizes used.
+- **File → Open Project...** (choose the `.neclab` folder) restores the recording in the Image Processing tab and the cell detection tab with the cells, the selection, the threshold and the sizes used.
 - **The recording isn't copied** into the project. The project remembers where it is (also relative to the project folder, so moving both together keeps working) and a quick checksum of it. If it can't be found, NecLab offers to locate it; the other stages open anyway. If the file has changed, the stages computed from it are marked out of date.
 
 Contents of a project folder (only the stages that have data):
@@ -236,17 +235,18 @@ Contents of a project folder (only the stages that have data):
 | `s2_features/` | `maps.npz` |
 | `s3_mask/` | `mask.tif` |
 | `s4_cells/` | `cells.tif` (label image) + `cells.csv` (cell table) |
-| `s5_signals/` | `signals_raw.csv` |
-| `s6_analysis/` | `signals_norm.csv`, `events.csv` |
-| `s7_correlation/` | `correlation.csv` |
+| `s5_signals/` | `signals_raw.csv`, `signals_norm.csv`, `events.csv` (when peaks were detected) |
+| `s6_correlation/` | `correlation.csv` |
 
 The files are the same formats as the Export menu, so they can be opened in Excel, ImageJ or Python, or with **File → Open Pipeline Stage**.
+
+Projects saved by earlier versions, which kept the normalized signals and events apart as stage 6 (`s6_analysis/`) and the correlation as stage 7 (`s7_correlation/`), open normally: their normalized signals and events join stage 5 (or are left out, with a message, if they were out of date). A stage 6 folder saved on its own by an earlier version can be loaded with **Load Stage...** once the signals are loaded.
 
 > The Multiple Files tab (comparing several recordings' signals) isn't part of a project; its files are opened and saved from that tab as before.
 
 ### 4.10 The pipeline sidebar
 
-The panel on the left of the main window shows the current project and its 8 stages, and is the quickest way to move through the analysis. Hide it with its **Hide** button and show it again with **File → Show Pipeline Sidebar**; drag its right edge to resize it.
+The panel on the left of the main window shows the current project and its 7 stages, and is the quickest way to move through the analysis. Hide it with its **Hide** button and show it again with **File → Show Pipeline Sidebar**; drag its right edge to resize it.
 
 ![Pipeline sidebar](images/pipeline_sidebar.png)
 
@@ -267,12 +267,12 @@ Click a stage to see its details: what it holds, where it came from, when it was
 | 0 · Recording | **Open Recording...**, **Show Recording** (Image Processing tab), or **Locate Recording...** when it is missing |
 | 1 · Preprocessing | Not available yet |
 | 2 · Variability map | **Compute Variability Map...** (asks which measure) when there's a recording; otherwise **Open Variability Map...** |
-| 2–4 (with data) | **Open / Show Cell Detection Window** |
+| 2–4 (with data) | **Open / Show Cell Detection Tab** |
 | 3 · Candidate mask, 4 · Cells | **Open Candidate Mask... / Open Cells...** when there's nothing yet |
-| 5–7 with cells and the recording | **Open Signals & Correlation**: the correlation analysis of the selected cells (asks to use all cells if none are selected) |
-| 5–6 with data only | **View in Multiple Files** (stage 6 opens with Normalization = None) |
-| 7 with data only | **View Correlation Matrix** (matrix + dendrogram) |
-| 5–7 with nothing yet | **Open Signals Files... / Open Correlation Matrix...** |
+| 5–6 with cells and the recording | **Open Signals & Correlation**: the correlation analysis of the selected cells (asks to use all cells if none are selected) |
+| 5 with data only | **View in Multiple Files** (the normalized signals, with Normalization = None, when they differ from the raw ones; otherwise the raw signals) |
+| 6 with data only | **View Correlation Matrix** (matrix + dendrogram) |
+| 5–6 with nothing yet | **Open Signals Files... / Open Correlation Matrix...** |
 
 The buttons underneath:
 - **Save Stage...** saves just that stage to a new folder (its files plus a `stage.json` with its settings).
@@ -347,7 +347,7 @@ Created the first time you use `File → Open Multiple Files (.xls)`. Lets you l
     | By Sheet (minimum of the entire sheet) | divides by the minimum across the whole sheet |
     | By Column Across All Sheets (shared minimum) | divides by that column's minimum pooled across every loaded sheet |
     | Global (minimum of all columns and sheets) | divides by the minimum of the entire loaded dataset |
-    | None (data already normalized) | values used as loaded, e.g. for signals saved with **Export Normalized** (stage 6) |
+    | None (data already normalized) | values used as loaded, e.g. for signals saved with **Export Normalized** (stage 5) |
 
     A column (or sheet) whose minimum is 0 isn't divided, instead of producing infinite values. The line plot, the heatmap and `Save Smoothed Data` all use the same normalization code as the rest of NecLab.
 - **Visualization**
@@ -385,12 +385,13 @@ Created the first time data is loaded (via `File → Open Data`) and `Visualizat
 
 ## 8. Tab: Time Series
 
-Created via `Visualization → Time Series` (requires data loaded through `File → Open Data`).
+Opened with `Visualization → Time Series` once there is data in the Multiple Files tab (see the note in [section 2](#visualization)). It shows every column of that data: each column's series across all the loaded sheets, one after the other, exactly as plotted in Multiple Files (with its normalization and smoothing).
 
 - Its own data-column list and selection list.
 - "Show Labels" checkbox.
 - A single-signal preview (top) and a multi-signal overlay with a per-signal vertical offset (bottom), for visually comparing several columns at once.
-- Buttons: "Save Image", "Save CSV", "Close Tab".
+- Buttons: "Save Image", "Save CSV", and **✕ Close Tab** in the tab's bar.
+- Loading new data into Multiple Files while the Time Series tab is open updates it in place; choosing `Visualization → Time Series` again rebuilds it with the current Multiple Files settings.
 
 ---
 
@@ -398,7 +399,7 @@ Created via `Visualization → Time Series` (requires data loaded through `File 
 
 `File → Load Correlation Matrix` loads a correlation matrix computed externally (CSV or XLSX). It must be a square matrix; a warning is shown if any value falls outside the [-1, 1] range.
 
-It is rendered directly inside the "Data Visualization" tab's main plot area as a dendrogram (top) plus a correlation heatmap (bottom), with its own buttons: "Save Dendrogram", "Save Correlation Matrix" (CSV), "Save Correlation Matrix Image", "Save All". The dendrogram uses the same clustering as every other view (Ward linkage on 1 − |r|).
+It opens in a "Correlation Matrix — &lt;file&gt;" tab (replacing a correlation matrix tab opened earlier; the pipeline sidebar's **View Correlation Matrix** uses the same tab) as a dendrogram (top) plus a correlation heatmap (bottom), with its own buttons: "Save Dendrogram", "Save Correlation Matrix" (CSV), "Save Correlation Matrix Image", "Save All". The dendrogram uses the same clustering as every other view (Ward linkage on 1 − |r|).
 
 ---
 
@@ -417,7 +418,7 @@ There is no drag-and-drop support; all file loading goes through the operating s
 `Help → Check for Updates`:
 
 1. Queries, in a background thread, the latest commit on the `main` branch of the `sergiocruzunamia/neclabunam` GitHub repository, and compares it against the locally recorded version.
-2. If a newer version is found, offers to download the current versions of the 8 core `.py` files (`interface3.py`, `peak_functions.py`, `visualization_helpers.py`, `corr_dendo_functions.py`, `variability_functions.py`, `image_loader.py`, `image_processing.py`, `multi_xls_helpers.py`) and overwrite them locally.
+2. If a newer version is found, offers to download the current versions of the application's `.py` files (`interface3.py` and the other top-level modules, plus the `neclab_core` folder) and overwrite them locally. On startup, any of these files that is missing (e.g. one added in a newer version) is downloaded too.
 3. Offers to restart the application automatically afterward.
 
 Requires an internet connection. This feature does **not** update Python dependencies or the packaged executable itself — only the `.py` source files — so it only applies to installations run from source (installation option B/C), not to precompiled executables.
@@ -446,11 +447,13 @@ See the table in [section 4.1](#41-available-variability-methods).
 
 ### Correlation methods
 
-`pearson` (linear), `kendall` (rank-based, tau), `spearman` (rank-based, rho) — available in Multiple Files (and its Dendrogram tab) and in the cell detection window's correlation analysis.
+`pearson` (linear), `kendall` (rank-based, tau), `spearman` (rank-based, rho) — available in Multiple Files (and its Dendrogram tab) and in the Signals & Correlation tab.
 
-**Clustering (dendrograms).** Every dendrogram in NecLab (correlation analysis window, Dendrogram tab, loaded correlation matrix) clusters the signals the same way: the distance between two signals is 1 − |r| (0 when they are perfectly correlated *or* anti-correlated, 1 when unrelated), and clusters are merged with Ward linkage. Note that anti-correlated signals are therefore grouped together.
+**Clustering (dendrograms).** Every dendrogram in NecLab (Signals & Correlation tab, Dendrogram tab, correlation matrix tab) clusters the signals the same way: the distance between two signals is 1 − |r| (0 when they are perfectly correlated *or* anti-correlated, 1 when unrelated), and clusters are merged with Ward linkage. Note that anti-correlated signals are therefore grouped together.
 
 ### Normalization methods (correlation analysis window)
+
+(Used in the Signals & Correlation tab.)
 
 | Method | What it does |
 |---|---|
@@ -474,6 +477,6 @@ See the "Troubleshooting" section of the [README](../README.md#troubleshooting) 
 - **The correlation heatmap doesn't appear**: you need at least 2 columns in the Selection list.
 - **"Load Correlation Matrix" rejects my file**: the matrix must be square (same number of rows and columns, with matching headers).
 - **Some columns from my sheets don't show up in Multiple Files**: only columns present in **every** loaded sheet are shown (matched by position, since sheets are read without headers). If one sheet has fewer columns than the others, the "extra" columns from the other sheets won't be displayed.
-- **Visualization → Dendrogram / Time Series are disabled**: they only activate after loading data via `File → Open Data (.npy / .csv)`; they are not enabled by "Open Multiple Files (.xls)" or "Load Correlation Matrix".
+- **Visualization → Dendrogram / Time Series are disabled**: they activate once there is data in the Multiple Files tab (`File → Open Data Files`, `Open Pipeline Stage → 5 · Signals`, or the sidebar's **View in Multiple Files**); "Load Correlation Matrix" alone doesn't enable them.
 
 If the problem persists, contact sergio.cruz@ciencias.unam.mx or open an issue on the GitHub repository.
