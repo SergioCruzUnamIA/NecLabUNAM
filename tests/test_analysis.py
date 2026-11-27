@@ -127,3 +127,39 @@ def test_settings_from_saved_params():
     # The saved params round-trip.
     result = analysis.Analyzer().run(_signals(), s)
     assert analysis.settings_from_params(result.params) == {**s, "peak_params": analysis.peak_params(s)}
+
+
+# ------------------------------------- helpers used by the Cell Signals tab
+
+def test_lowest_points_used_matches_the_analyzer():
+    df = _signals()
+    for kw in ({"method": "lowest_points"}, {"subtract": True}, {"smooth": True},
+               {"method": "delta_f_over_f0", "subtract": True, "lowest_points": 8}):
+        settings = _settings(**kw)
+        result = analysis.Analyzer().run(df, settings)
+        used = analysis.lowest_points_used(df, settings)
+        assert set(used) == set(df.columns), kw
+        for col in df.columns:
+            np.testing.assert_array_equal(used[col], result.lowest_points_used[col])
+        # One cell on its own gives the same points (the tab computes one cell at a time).
+        one = analysis.lowest_points_used(df[["cell_5"]], settings)
+        np.testing.assert_array_equal(one["cell_5"], used["cell_5"])
+    assert analysis.lowest_points_used(df, _settings(method="delta_f_over_f0")) == {}
+
+
+def test_baseline_on_raw():
+    assert analysis.baseline_on_raw(_settings())
+    assert analysis.baseline_on_raw(_settings(method="lowest_points"))
+    assert not analysis.baseline_on_raw(_settings(method="lowest_points", subtract=True))
+    assert not analysis.baseline_on_raw(_settings(method="delta_f_over_f0", subtract=True))
+
+
+def test_stage_params_keep_where_the_signals_came_from():
+    df = _signals()
+    previous = {"cells": [2, 5, 9], "measure": "mean of cell pixels", "method": "delta_f_over_f0",
+                "peak_method": "Peak Caller", "peak_params": {"rise_percent": 5}, "peaks_on": "x"}
+    result = analysis.Analyzer().run(df, _settings())
+    params = analysis.stage_params(previous, result)
+    assert params["cells"] == [2, 5, 9] and params["measure"] == "mean of cell pixels"
+    assert params["method"] == "none"
+    assert "peak_method" not in params and "peaks_on" not in params

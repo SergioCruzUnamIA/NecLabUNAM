@@ -87,6 +87,41 @@ def is_identity(settings):
     return normalization.is_identity(settings["method"], smoothing_points(settings), settings["subtract"])
 
 
+def uses_lowest_points(settings):
+    """True if the settings use the lowest-points baseline (to divide,
+    subtract or smooth)."""
+    return (settings["method"] in normalization.LOWEST_POINTS_METHODS
+            or bool(smoothing_points(settings)) or bool(settings["subtract"]))
+
+
+def baseline_on_raw(settings):
+    """True if the lowest-points baseline is taken on the raw signal (so it
+    can be drawn over it): with no other normalization, or when the
+    signal is only divided by it."""
+    return settings["method"] == "none" or (
+        settings["method"] in normalization.LOWEST_POINTS_METHODS and not settings["subtract"])
+
+
+def lowest_points_used(signals_df, settings):
+    """{column: frames of the lowest points used} for every signal, to mark
+    them on a plot ({} when the settings don't use the lowest-points
+    baseline). They are found on the raw signal when it is only divided by
+    the baseline, else on the normalized signal before the baseline is
+    subtracted or smoothed away."""
+    settings = {**DEFAULT_SETTINGS, **settings}
+    if not uses_lowest_points(settings):
+        return {}
+    method, points = settings["method"], int(settings["lowest_points"])
+    lowest_method = method in normalization.LOWEST_POINTS_METHODS
+    base = (signals_df if lowest_method and not settings["subtract"]
+            else normalization.normalize_signals(signals_df, method, None, points))
+    out = {}
+    for col in base.columns:
+        if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:
+            out[col] = normalization.lowest_points_baseline(base[col], points)[1]
+    return out
+
+
 @dataclass
 class AnalysisResult:
     norm_df: pd.DataFrame            # the signals as normalized (= the raw ones when there is no normalization)
@@ -117,6 +152,20 @@ class AnalysisResult:
         if self.events_df is not None:
             items["events"] = self.events_df
         return items
+
+
+# Stage 5 params that describe the normalization and peaks (the others,
+# e.g. "cells" and "measure", say where the signals came from).
+ANALYSIS_PARAM_KEYS = ("method", "smoothing_points", "lowest_points", "subtract_baseline",
+                       "peak_method", "peak_params", "peaks_on")
+
+
+def stage_params(previous, result):
+    """Stage 5 params after re-running the analysis on the same signals:
+    the earlier ones that say where the signals came from, plus the new
+    settings (`result`: an AnalysisResult)."""
+    kept = {k: v for k, v in (previous or {}).items() if k not in ANALYSIS_PARAM_KEYS}
+    return {**kept, **result.params}
 
 
 def settings_key(settings):
@@ -151,17 +200,7 @@ class Analyzer:
                                                    subtract_baseline=subtract))
         result = AnalysisResult(norm_df, None, describe(settings), identity, settings)
 
-        # Positions of the lowest points used, to mark them on a plot: on
-        # the normalized (before subtraction/smoothing) signal when the
-        # baseline is subtracted or smoothed, on the raw signal when it only
-        # divides.
-        lowest_method = method in normalization.LOWEST_POINTS_METHODS
-        if lowest_method or smoothing or subtract:
-            base = (signals_df if lowest_method and not subtract
-                    else normalization.normalize_signals(signals_df, method, None, points))
-            for col in base.columns:
-                if np.isfinite(base[col].to_numpy(dtype=float)).sum() >= 2:
-                    result.lowest_points_used[col] = normalization.lowest_points_baseline(base[col], points)[1]
+        result.lowest_points_used = lowest_points_used(signals_df, settings)
 
         if settings["peak_method"] in events.PEAK_METHODS:
             try:

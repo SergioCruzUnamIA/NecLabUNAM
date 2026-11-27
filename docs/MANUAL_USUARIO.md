@@ -14,7 +14,7 @@ Para instrucciones de instalación vea el [README](../README.md). Este manual as
 2. [Barra de menús](#2-barra-de-menús)
 3. [Pestaña: Image Processing (Procesamiento de Imágenes)](#3-pestaña-image-processing-procesamiento-de-imágenes)
 4. [Análisis de Variabilidad y detección de células](#4-análisis-de-variabilidad-y-detección-de-células)
-5. [Pestaña: Data Visualization (Visualización de Datos)](#5-pestaña-data-visualization-visualización-de-datos)
+5. [Pestaña: Cell Signals (Señales por Célula, etapa 5)](#5-pestaña-cell-signals-señales-por-célula-etapa-5)
 6. [Pestaña: Multiple Files (Datos Múltiples)](#6-pestaña-multiple-files-datos-múltiples)
 7. [Pestaña: Dendrogram (Dendograma)](#7-pestaña-dendrogram-dendograma)
 8. [Pestaña: Time Series (Series de Tiempo)](#8-pestaña-time-series-series-de-tiempo)
@@ -33,7 +33,7 @@ NecLab tiene dos flujos de trabajo principales, organizados en pestañas dentro 
 - **Procesamiento de imágenes**: cargar una pila OME-TIFF, ajustar su visualización y analizar la variabilidad temporal de cada píxel para detectar y segmentar células como clusters espaciales.
 - **Visualización y análisis de datos**: cargar series numéricas (un archivo `.npy`/`.csv`, o varios archivos Excel a la vez) para detectar picos, suavizar señales, normalizar, calcular correlaciones y construir dendrogramas.
 
-Ambos flujos comparten la misma ventana principal, que tiene una barra de menús arriba y un cuaderno de pestañas (`Notebook`) debajo. La pestaña Image Processing está desde el inicio; todas las demás vistas se abren como otra pestaña de la misma ventana, nunca como una ventana aparte: Cell Detection (Detección de Células), Signals & Correlation (Señales y Correlación), 3D View (Vista 3D), Correlation Matrix (Matriz de Correlación), Histogram, Binarization, Multiple Files, Dendrogram y Time Series. Una pestaña abierta así tiene una barra delgada arriba con sus propios menús (si los tiene) a la izquierda y un botón **✕ Close Tab** (Cerrar Pestaña) a la derecha. **Nota:** la interfaz de la aplicación está completamente en inglés; este manual describe cada etiqueta en inglés y su traducción al español entre paréntesis para que pueda seguirlo sin problema.
+Ambos flujos comparten la misma ventana principal, que tiene una barra de menús arriba y un cuaderno de pestañas (`Notebook`) debajo. La pestaña Image Processing está desde el inicio; todas las demás vistas se abren como otra pestaña de la misma ventana, nunca como una ventana aparte: Cell Detection (Detección de Células), Signals & Correlation (Señales y Correlación), Cell Signals (Señales por Célula), 3D View (Vista 3D), Correlation Matrix (Matriz de Correlación), Histogram, Binarization, Multiple Files, Dendrogram y Time Series. Una pestaña abierta así tiene una barra delgada arriba con sus propios menús (si los tiene) a la izquierda y un botón **✕ Close Tab** (Cerrar Pestaña) a la derecha. **Nota:** la interfaz de la aplicación está completamente en inglés; este manual describe cada etiqueta en inglés y su traducción al español entre paréntesis para que pueda seguirlo sin problema.
 
 ---
 
@@ -47,9 +47,8 @@ Ambos flujos comparten la misma ventana principal, que tiene una barra de menús
 | **Show Pipeline Sidebar** (Mostrar Barra Lateral del Pipeline) | Muestra u oculta la barra lateral del pipeline a la izquierda: el estado de cada etapa (not run, done, loaded, out of date, missing), sus detalles, un botón para abrirla o ejecutarla, y guardar o cargar una sola etapa. Ver [sección 4.10](#410-la-barra-lateral-del-pipeline). |
 | **Open Recording (OME-TIFF / TIFF / NPY)...** (Abrir Grabación, `Ctrl+O`) | Carga una grabación (una pila de imágenes de frames × alto × ancho) desde un OME-TIFF, un TIFF normal o un archivo NumPy `.npy`, cambia a la pestaña "Image Processing" y habilita los menús Image y Variability Analysis. Los archivos que no son una grabación (p. ej. una sola imagen 2D) se rechazan con una explicación. |
 | **Open Pipeline Stage** (Abrir Etapa del Pipeline) | Empieza el análisis en una etapa posterior a partir de un archivo guardado antes (o hecho con otro programa). Ver [sección 4.8](#48-comenzar-desde-una-etapa-guardada). |
-| **Open Data (.npy / .csv / .xlsx)** (Abrir Datos) | Carga un archivo de datos numéricos en la pestaña "Data Visualization". Si es CSV, se muestra un diálogo para elegir la columna inicial (ROI); si es `.npy`, las columnas se nombran automáticamente "Column 1", "Column 2", etc. |
 | **Load Correlation Matrix** (Cargar Matriz de Correlación) | Carga una matriz de correlación ya calculada (CSV/XLSX, debe ser cuadrada) y la muestra como dendrograma + mapa de calor. Ver [sección 9](#9-cargar-una-matriz-de-correlación-precalculada). |
-| **Open Multiple Files (.xls / .csv)** (Abrir Múltiples Archivos) | Abre el flujo de "Multiple Files": selección de varios archivos Excel y de las hojas a cargar de cada uno. Ver [sección 6](#6-pestaña-multiple-files-datos-múltiples). |
+| **Open Data Files (.npy / .xls / .csv)** (Abrir Archivos de Datos) | Abre el flujo de "Multiple Files", fuera del pipeline del proyecto: selección de varios archivos y de las hojas a cargar de cada uno. Ver [sección 6](#6-pestaña-multiple-files-datos-múltiples). Para cargar señales como etapa 5 del proyecto use **Open Pipeline Stage → 5 · Signals**. |
 | **Exit** (Salir) | Cierra la aplicación (pide confirmación, o guardar los cambios del proyecto sin guardar). |
 
 ### Image (Imagen)
@@ -73,10 +72,11 @@ Deshabilitado hasta cargar una imagen. Se llena dinámicamente con los 7 método
 
 | Opción | Acción |
 |---|---|
+| **Cell Signals (stage 5)** (Señales por Célula) | Abre la pestaña "Cell Signals" (sección 5): cada célula de la etapa 5 por separado, con sus picos. |
 | **Dendrogram** (Dendograma) | Abre/activa la pestaña "Dendrogram" (sección 7) con los datos de la pestaña Multiple Files. |
 | **Time Series** (Series de Tiempo) | Abre la pestaña "Time Series" (sección 8) con los datos de la pestaña Multiple Files. |
 
-> **Nota:** estas dos opciones están deshabilitadas hasta que haya datos en la pestaña Multiple Files: ábralos con `File → Open Data Files`, `File → Open Pipeline Stage → 5 · Signals`, o **View in Multiple Files** de la barra lateral del pipeline. "Load Correlation Matrix" por sí solo no las activa.
+> **Nota:** Dendrogram y Time Series están deshabilitados hasta que haya datos en la pestaña Multiple Files: ábralos con `File → Open Data Files`. "Load Correlation Matrix" por sí solo no los activa.
 
 ### Help (Ayuda)
 
@@ -195,7 +195,7 @@ Menú **Export** (Exportar):
     - **Subtract lowest-points baseline** (Restar la línea base de los puntos más bajos; casilla, se combina con cualquier normalización): después de la normalización elegida, se resta la línea base de los puntos más bajos de la señal *normalizada*, así sus puntos más bajos quedan en una línea horizontal en 0 y cada valor se lee como "por encima de la línea base", en las unidades de esa normalización (p. ej. *ΔF/F0* + restar = ΔF/F0 por encima de una línea base que sigue las derivas lentas; *None* + restar = intensidad cruda por encima de la línea base). Al no dividir, funciona con cualquier señal, incluso cercana a cero o negativa.
     - **Smoothing** (Suavizado): resta esa línea base y vuelve a sumar el nivel más bajo de la señal (los puntos más bajos quedan en una línea horizontal a ese nivel en lugar de 0; por lo demás, el mismo resultado que la casilla anterior). Se omite cuando *Subtract lowest-points baseline* está marcada, y con *Divide by lowest-points baseline* sola, porque cualquiera de las dos ya quita la misma línea base.
     - **Show lowest points** (Mostrar puntos más bajos): marca los puntos usados en la gráfica de señales.
-  - **Peaks** (Picos) + **Parameters...** (Parámetros) + **Show peaks** (Mostrar picos): detección de eventos (picos), la última parte de la etapa 5. Elija uno de los mismos 7 métodos del Peak Finder de la pestaña Multiple Files (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); se abre su diálogo de parámetros (con los últimos valores usados; **Parameters...** lo vuelve a abrir) y **Run** detecta los picos de cada célula seleccionada. Los picos se buscan en las señales tal como se muestran, es decir, después de la normalización (en las señales crudas cuando Normalization es *None*), y se vuelven a detectar cada vez que se pulsa **Apply**. Se marcan con triángulos en la gráfica de señales, se cuentan junto al menú ("N peaks in M of K cells") y en **Generate Report** (por célula), y se registran como los eventos de la etapa 5: una tabla con una fila por pico (`cell_id, frame, value`), que se guarda con el proyecto y con **Export Events** (`.csv`/`.xlsx`). El método y sus parámetros se restauran al reabrir el proyecto. Elija *None* para dejar de detectar picos.
+  - **Peaks** (Picos) + **Parameters...** (Parámetros) + **Show peaks** (Mostrar picos): detección de eventos (picos), la última parte de la etapa 5. Elija uno de los mismos 7 métodos del Peak Finder de la pestaña Multiple Files (*Elliptic Envelope*, *Peak Caller*, *Local Outlier Factor*, *Peak Function 4*, *Isolation Forest*, *Linear Model*, *Peak Function 7*); se abre su diálogo de parámetros (con los últimos valores usados; **Parameters...** lo vuelve a abrir) y **Run** detecta los picos de cada célula seleccionada. Los picos se buscan en las señales tal como se muestran, es decir, después de la normalización (en las señales crudas cuando Normalization es *None*), y se vuelven a detectar cada vez que se pulsa **Apply**. Se marcan con triángulos en la gráfica de señales, se cuentan junto al menú ("N peaks in M of K cells") y en **Generate Report** (por célula), y se registran como los eventos de la etapa 5: una tabla con una fila por pico (`cell_id, frame, value`), que se guarda con el proyecto y con **Export Events** (`.csv`/`.xlsx`). El método y sus parámetros se restauran al reabrir el proyecto. Elija *None* para dejar de detectar picos. **Per-Cell View** (Vista por Célula) abre la pestaña Cell Signals (sección 5): cada célula por separado con sus picos.
     - En *Peak Caller*, Rise % y Fall % son porcentajes del propio valor de la señal en el pico, así que en señales cercanas a cero (*ΔF/F0*, *Detrend + scale to 0–1*, *Subtract lowest-points baseline*) pequeñas fluctuaciones superan el umbral; úselo con señales crudas o divididas, o suba los porcentajes.
   - El dendrograma usa el enlace de Ward sobre la distancia 1 − |r|, como todos los demás dendrogramas de NecLab.
 
@@ -211,7 +211,7 @@ El análisis es una cadena de etapas, y cada una puede empezar desde un archivo 
 | 2 · Mapa de variabilidad | Variabilidad por píxel | `.npz` (uno o más mapas con nombre), `.npy`, `.tif` | Pestaña de detección |
 | 3 · Máscara de candidatos | Píxeles que pueden pertenecer a células | `.tif`/`.npy` con solo dos valores (0/1 o 0/255) | Pestaña de detección |
 | 4 · Células | Imagen de etiquetas (IDs permanentes) | Imagen de etiquetas `.tif`/`.npy`, ImageJ `.roi`/`.zip`, `.txt` anterior | Pestaña de detección |
-| 5 · Señales (crudas o normalizadas) | Una columna por célula, una fila por frame | `.csv`, `.xlsx`, `.npy` | Pestaña Multiple Files |
+| 5 · Señales (crudas o normalizadas) | Una columna por célula, una fila por frame | `.csv`, `.xlsx`, `.npy` | Pestaña Cell Signals (sección 5) |
 | 6 · Matriz de correlación | Matriz cuadrada | `.csv`, `.xlsx` | Vista de correlación (sección 9) |
 
 - Si hay una grabación abierta y las imágenes del archivo son del mismo tamaño, la grabación se adjunta automáticamente. Si los tamaños no coinciden, se pregunta si continuar sin ella.
@@ -269,10 +269,10 @@ Haga clic en una etapa para ver sus detalles: qué contiene, de dónde vino, cu�
 | 2 · Variability map | **Compute Variability Map...** (pregunta qué medida) si hay grabación; si no, **Open Variability Map...** |
 | 2–4 (con datos) | **Open / Show Cell Detection Tab** |
 | 3 · Candidate mask, 4 · Cells | **Open Candidate Mask... / Open Cells...** cuando aún no hay nada |
-| 5–6 con células y grabación | **Open Signals & Correlation**: el análisis de correlación de las células seleccionadas (pregunta si usar todas si no hay ninguna seleccionada) |
-| 5 solo con datos | **View in Multiple Files** (las señales normalizadas, con Normalization = None, si difieren de las crudas; si no, las crudas) |
+| 5 con datos | **Open Cell Signals**: cada célula por separado, con sus picos (sección 5) |
+| 5 aún sin datos, con células y grabación; 6 con células y grabación | **Open Signals & Correlation**: el análisis de correlación de las células seleccionadas (pregunta si usar todas si no hay ninguna seleccionada) |
 | 6 solo con datos | **View Correlation Matrix** (matriz + dendrograma) |
-| 5–6 sin nada aún | **Open Signals Files... / Open Correlation Matrix...** |
+| 5–6 sin nada aún | **Open Signals File... / Open Correlation Matrix...** |
 
 Los botones de abajo:
 - **Save Stage...** guarda solo esa etapa en una carpeta nueva (sus archivos más un `stage.json` con sus parámetros).
@@ -282,42 +282,37 @@ Los botones de abajo:
 
 ---
 
-## 5. Pestaña: Data Visualization (Visualización de Datos)
+## 5. Pestaña: Cell Signals (Señales por Célula, etapa 5)
 
-Pestaña visible desde el inicio, pero solo se activa completamente al cargar datos con `File → Open Data (.npy / .csv)`.
+La lista de todas las células de la etapa 5 y, para la célula elegida en ella, su señal por separado con los picos encontrados. Es la vista del pipeline para la etapa 5 (reemplaza tanto a la antigua pestaña Data Visualization como a ver la etapa 5 en la pestaña Multiple Files). Se abre con:
 
-### 5.1 Menú local de la pestaña
+- **Open Cell Signals** de la barra lateral del pipeline (con la etapa 5 seleccionada),
+- **Visualization → Cell Signals (stage 5)**,
+- el botón **Per-Cell View** (Vista por Célula) de la pestaña Signals & Correlation,
+- **File → Open Pipeline Stage → 5 · Signals**, que carga una tabla de señales como etapa 5 del proyecto y abre esta pestaña.
 
-En la parte superior de la pestaña hay una barra de menú propia:
+Siempre muestra la etapa 5 actual del proyecto: al seleccionar otras células en la pestaña de detección, aplicar otra normalización o método de picos, o abrir un proyecto, se actualiza sola y mantiene seleccionada la misma célula si sigue ahí.
 
-- **View** (Vista)
-  - `Smoothing`: activa/desactiva el suavizado por envolvente convexa sobre la señal.
-  - `Show points`: muestra/oculta los puntos de la señal.
-  - `Show Labels (Correlation)`: muestra/oculta las etiquetas de los ejes en el mapa de calor de correlación.
-- **Save** (Guardar)
-  - `Save Data Image...`: guarda la imagen de la gráfica de datos.
-  - `Save Correlation...`: guarda la imagen del mapa de calor de correlación.
-  - `Save Correlation Data...`: exporta la matriz de correlación (CSV/XLSX).
-  - `Save Peaks CSV...`: exporta los picos detectados (ver 5.4).
+### 5.1 Panel lateral
 
-### 5.2 Panel lateral
+- **CELLS (STAGE 5)** (Células): cuántas células y frames hay, la normalización y cuántos picos se encontraron (y en cuántas células); después, la lista de células, cada una con su número de picos. Haga clic en una célula, o muévase con las teclas ↑/↓, para mostrarla.
+- **SIGNAL PROCESSING (STAGE 5)** (Procesamiento de Señal): los mismos parámetros de normalización que la pestaña Signals & Correlation (Normalization, Lowest points, Smoothing, Subtract lowest-points baseline).
+- **PEAK FINDER** (Buscador de Picos): los 7 métodos de detección de picos (ver el [glosario](#12-glosario-de-métodos)). Al elegir uno se piden sus parámetros y se detectan enseguida los picos de todas las células; **Parameters...** los cambia.
+- **Apply** (Aplicar): recalcula la etapa 5 de todas las células con estos parámetros.
 
-- **DATA COLUMNS** (Columnas de Datos): lista (selección múltiple) con todas las columnas del archivo cargado.
-- **PEAK FINDER**: combobox con los 7 métodos de detección de picos (ver [glosario](#12-glosario-de-métodos)) y un spinbox "Points:" (2–50) para el número de puntos usados por el suavizado de envolvente convexa.
-- **CORRELATION** (Correlación): combobox para elegir el método (`pearson`, `kendall`, `spearman`).
-- **SELECTION** (Selección): lista de selección única, con botones "Add to Selection" / "Remove from Selection". Se necesitan al menos 2 columnas en la selección para dibujar el mapa de calor de correlación.
+Los parámetros son los de la etapa 5, compartidos con la pestaña Signals & Correlation: cuando las células vienen de una pestaña de detección, aplicarlos aquí es lo mismo que aplicarlos allí (sus controles se actualizan) y se usan para las células que se seleccionen después. Con señales cargadas desde un archivo, NecLab recalcula la etapa 5 a partir de ellas. En ambos casos la correlación (etapa 6) queda desactualizada hasta que se recalcule.
 
-### 5.3 Área de gráficas
+### 5.2 Área de gráficas
 
-Al hacer clic en una columna, se construyen tres paneles apilados:
+Dos gráficas que comparten el eje de frames (al hacer zoom en una se hace en las dos; la barra de herramientas de abajo hace zoom, desplaza y guarda):
 
-1. **Superior**: la señal original de la columna elegida, con marcadores de picos (si hay un método de detección activo) y la línea base de suavizado (si "Smoothing" está activado).
-2. **Medio**: vista "procesada" — la señal suavizada sola, o el diagnóstico propio del método de detección de picos elegido.
-3. **Inferior**: mapa de calor de correlación (Pearson/Kendall/Spearman) de las columnas en la lista de Selection.
+1. **Raw signal** (Señal cruda): la intensidad media de la célula, con sus picos (rojo) y, cuando la línea base de puntos más bajos se toma sobre la señal cruda (sin otra normalización, o con "Divide by lowest-points baseline"), esa línea base (naranja punteada) y los puntos más bajos por los que pasa.
+2. **Processed signal** (Señal procesada): la señal normalizada, sobre la que se detectan los picos, con los mismos picos y los puntos más bajos usados (morado). Sin normalización es de nuevo la señal cruda.
 
-### 5.4 Exportar picos detectados
+### 5.3 Menú local de la pestaña
 
-`Save → Save Peaks CSV...` ejecuta el método de detección de picos activo sobre cada columna en la lista de Selection y guarda un CSV con una columna `TIME` y una columna 0/1 por cada columna seleccionada (1 = pico detectado en ese instante). Requiere haber ejecutado antes un método de detección y tener al menos una columna en la lista de Selection.
+- **View** (Ver): `Show peaks` (Mostrar picos), `Show lowest points & baseline` (Mostrar puntos más bajos y línea base), `Previous Cell` / `Next Cell` (Célula anterior / siguiente).
+- **Save** (Guardar): `Save Plot of This Cell...` (PNG, PDF, SVG, TIFF), `Save This Cell's Peaks...` (frame, valor crudo y valor procesado de cada pico, CSV/XLSX), `Export All Events...` (la tabla de eventos de la etapa 5: una fila por pico de cada célula) y `Export Normalized Signals...`.
 
 ---
 
@@ -377,7 +372,7 @@ Ambos paneles se redibujan para llenar su espacio al cambiar el tamaño de la ve
 
 Se crea la primera vez que hay datos cargados (vía `File → Open Data`) y se usa `Visualization → Dendrogram`.
 
-- Panel lateral: lista "DATA COLUMNS" (igual que en Data Visualization), lista "SELECTION", botones "Add to Selection"/"Remove from Selection", y botones "Save Dendrogram Image" / "Save Dendrogram CSV".
+- Panel lateral: lista "DATA COLUMNS" (igual que en Multiple Files), lista "SELECTION", botones "Add to Selection"/"Remove from Selection", y botones "Save Dendrogram Image" / "Save Dendrogram CSV".
 - Área de gráfica: panel superior con la señal de la columna elegida; panel inferior con el dendrograma de las columnas en la lista de Selection (mínimo 2). El dendrograma agrupa la **correlación** entre las señales seleccionadas (tipo de correlación de la pestaña Multiple Files), con el agrupamiento común a todas las vistas: enlace de Ward sobre la distancia 1 − |r| (ver [sección 12](#métodos-de-correlación)).
 - "Save Dendrogram CSV" exporta las señales (`Sample_Index, Signal, Dendrogram_Position`) y la matriz de enlace (`Merge_Step, Child_1, Child_2, Distance, Size`; los hijos menores que el número de señales son señales, el resto son fusiones anteriores).
 
@@ -439,7 +434,7 @@ Requiere conexión a internet. Esta función **no** actualiza dependencias (bibl
 | Linear Model | `SGDOneClassSVM` | Nu (0.131) |
 | Peak Function 7 | Lasso + Local Outlier Factor | N Neighbors (20) |
 
-El suavizado (independiente del método de picos) usa una envolvente convexa: construye una línea base por tramos a partir de los puntos de menor "convexidad local" genuina de la señal (parámetro "Points", 2–50) y la resta de la señal original. Se usa tanto en Data Visualization como en Multiple Files.
+El suavizado (independiente del método de picos) usa una envolvente convexa: construye una línea base por tramos a partir de los puntos de menor "convexidad local" genuina de la señal (parámetro "Points", 2–50) y la resta de la señal original. Se usa en Multiple Files, y como la opción Smoothing de la etapa 5 (pestañas Signals & Correlation y Cell Signals).
 
 ### Métodos de variabilidad
 
@@ -477,6 +472,6 @@ Ver la sección "Troubleshooting" del [README](../README.md#troubleshooting) par
 - **El mapa de calor de correlación no aparece**: necesita al menos 2 columnas en la lista de Selection.
 - **"Load Correlation Matrix" rechaza mi archivo**: la matriz debe ser cuadrada (mismo número de filas y columnas, con los mismos encabezados).
 - **En Multiple Files no aparecen algunas columnas de mis hojas**: solo se muestran las columnas presentes en **todas** las hojas cargadas (comparadas por posición, ya que se leen sin encabezado). Si una hoja tiene menos columnas que las demás, las columnas "extra" de las otras hojas no se mostrarán.
-- **Visualization → Dendrogram / Time Series aparecen deshabilitados**: se activan cuando hay datos en la pestaña Multiple Files (`File → Open Data Files`, `Open Pipeline Stage → 5 · Signals`, o **View in Multiple Files** de la barra lateral); "Load Correlation Matrix" por sí solo no los activa.
+- **Visualization → Dendrogram / Time Series aparecen deshabilitados**: se activan cuando hay datos en la pestaña Multiple Files (`File → Open Data Files`); "Load Correlation Matrix" por sí solo no los activa. Para ver las señales del proyecto (etapa 5) use la pestaña Cell Signals (sección 5).
 
 Si el problema persiste, contacte a sergio.cruz@ciencias.unam.mx o revise/abra un issue en el repositorio de GitHub.
